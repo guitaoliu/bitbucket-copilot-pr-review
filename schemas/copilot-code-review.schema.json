@@ -1,0 +1,107 @@
+{
+	"$id": "https://pmsplbbitbucket01.corporate.datacard.com:8443/projects/AAAS/repos/bitbucket-copilot-pr-review/raw/schemas/copilot-code-review.schema.json",
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"type": "object",
+	"properties": {
+		"$schema": {
+			"type": "string",
+			"maxLength": 2048,
+			"description": "Optional JSON Schema reference for editor support."
+		},
+		"copilot": {
+			"type": "object",
+			"properties": {
+				"model": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 120,
+					"description": "Optional Copilot model override for this repository."
+				},
+				"reasoningEffort": {
+					"type": "string",
+					"enum": ["low", "medium", "high", "xhigh"],
+					"description": "Optional reasoning effort override for this repository."
+				},
+				"timeoutMs": {
+					"type": "integer",
+					"minimum": 60000,
+					"maximum": 3600000,
+					"description": "Optional Copilot timeout in milliseconds."
+				}
+			},
+			"additionalProperties": false
+		},
+		"report": {
+			"type": "object",
+			"properties": {
+				"title": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 120,
+					"description": "Optional Code Insights report title override."
+				},
+				"commentStrategy": {
+					"type": "string",
+					"enum": ["update", "recreate"],
+					"description": "How the tagged pull request summary comment should be updated."
+				}
+			},
+			"additionalProperties": false
+		},
+		"review": {
+			"type": "object",
+			"properties": {
+				"maxFiles": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 500,
+					"description": "Maximum number of changed files to review after filtering."
+				},
+				"maxFindings": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 100,
+					"description": "Maximum number of findings to publish."
+				},
+				"minConfidence": {
+					"type": "string",
+					"enum": ["low", "medium", "high"],
+					"description": "Minimum confidence threshold for reportable findings."
+				},
+				"maxPatchChars": {
+					"type": "integer",
+					"minimum": 500,
+					"maximum": 50000,
+					"description": "Maximum diff characters to send for a reviewed file."
+				},
+				"defaultFileSliceLines": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 500,
+					"description": "Default line window when reading file content slices."
+				},
+				"maxFileSliceLines": {
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 1000,
+					"description": "Maximum line window allowed for file content slices."
+				},
+				"ignorePaths": {
+					"minItems": 1,
+					"maxItems": 200,
+					"type": "array",
+					"items": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 512
+					},
+					"description": "Repo-relative glob patterns for changed files that should be skipped during review."
+				}
+			},
+			"additionalProperties": false
+		}
+	},
+	"additionalProperties": false,
+	"title": "Copilot Code Review Config",
+	"description": "Trusted repository-level review configuration loaded from copilot-code-review.json at the pull request base commit."
+}

@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@github/copilot-sdk@0.1.32': patches/@github__copilot-sdk@0.1.32.patch

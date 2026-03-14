@@ -1,0 +1,77 @@
+import { defineTool } from "@github/copilot-sdk";
+
+import { findingDraftSchema } from "../../policy/findings.ts";
+import type { FindingDraft } from "../../review/types.ts";
+import { toRejectedResult, validateFindingDraftLocation } from "./common.ts";
+import type { ReviewToolContext } from "./context.ts";
+
+export function createEmitFindingTool(toolContext: ReviewToolContext) {
+	const { drafts, reviewedFileMap } = toolContext;
+
+	return defineTool("emit_finding", {
+		description:
+			"Record a validated review finding for later publication to Bitbucket Code Insights.",
+		parameters: {
+			type: "object",
+			properties: {
+				path: {
+					type: "string",
+					description: "Reviewed file path in the current commit.",
+				},
+				line: {
+					type: "integer",
+					minimum: 0,
+					description:
+						"Head-side line number. Use 0 only for a file-level issue.",
+				},
+				severity: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] },
+				type: { type: "string", enum: ["BUG", "CODE_SMELL", "VULNERABILITY"] },
+				confidence: { type: "string", enum: ["low", "medium", "high"] },
+				title: { type: "string", description: "A short issue title." },
+				details: {
+					type: "string",
+					description: "A concise explanation of why this is an issue.",
+				},
+				category: {
+					type: "string",
+					description:
+						"Optional category such as security, correctness, or performance.",
+				},
+			},
+			required: [
+				"path",
+				"line",
+				"severity",
+				"type",
+				"confidence",
+				"title",
+				"details",
+			],
+		},
+		handler: async (args: FindingDraft) => {
+			const parsed = findingDraftSchema.safeParse(args);
+			if (!parsed.success) {
+				return toRejectedResult(
+					`Invalid finding payload: ${parsed.error.message}`,
+				);
+			}
+
+			const draft = parsed.data;
+			const location = validateFindingDraftLocation(draft, reviewedFileMap);
+			if (location.error) {
+				return toRejectedResult(location.error);
+			}
+
+			const normalizedDraft = location.normalizedDraft ?? draft;
+			drafts.push(normalizedDraft);
+
+			const locationLabel =
+				normalizedDraft.line > 0
+					? `${normalizedDraft.path}:${normalizedDraft.line}`
+					: `${normalizedDraft.path}:file`;
+			return location.note
+				? `Recorded finding ${drafts.length} for ${locationLabel}; ${location.note}`
+				: `Recorded finding ${drafts.length} for ${locationLabel}.`;
+		},
+	});
+}

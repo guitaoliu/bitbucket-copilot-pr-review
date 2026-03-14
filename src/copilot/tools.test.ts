@@ -1,0 +1,863 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import type { Tool } from "@github/copilot-sdk";
+import type { ReviewerConfig } from "../config/types.ts";
+import type { GitRepository } from "../git/repo.ts";
+import type {
+	FindingDraft,
+	ReviewContext,
+	ReviewSummaryDrafts,
+} from "../review/types.ts";
+import { createReviewToolContext } from "./tools/context.ts";
+import { createEmitFindingTool } from "./tools/emit-finding.ts";
+import { createGetFileContentTool } from "./tools/get-file-content.ts";
+import { createGetFileDiffHunkTool } from "./tools/get-file-diff-hunk.ts";
+import { createListRecordedFindingsTool } from "./tools/list-recorded-findings.ts";
+import { createRecordFileSummaryTool } from "./tools/record-file-summary.ts";
+import { createRecordPrSummaryTool } from "./tools/record-pr-summary.ts";
+import { createRemoveRecordedFindingTool } from "./tools/remove-recorded-finding.ts";
+import { createReplaceRecordedFindingTool } from "./tools/replace-recorded-finding.ts";
+import { createSearchTextInRepoTool } from "./tools/search-text-in-repo.ts";
+
+const config: ReviewerConfig = {
+	repoRoot: "/tmp/repo",
+	gitRemoteName: "origin",
+	logLevel: "info",
+	bitbucket: {
+		baseUrl: "https://bitbucket.example.com",
+		projectKey: "PROJ",
+		repoSlug: "repo",
+		prId: 123,
+		auth: { type: "bearer", token: "token" },
+		tls: { insecureSkipVerify: false },
+	},
+	copilot: {
+		model: "gpt-5.4",
+		reasoningEffort: "xhigh",
+		timeoutMs: 1800000,
+	},
+	report: {
+		key: "copilot-review",
+		title: "Copilot PR Review",
+		reporter: "GitHub Copilot via Jenkins",
+		commentTag: "copilot-pr-review",
+		commentStrategy: "recreate",
+	},
+	review: {
+		dryRun: false,
+		forceReview: false,
+		confirmRerun: false,
+		maxFiles: 100,
+		maxFindings: 10,
+		minConfidence: "high",
+		maxPatchChars: 12000,
+		defaultFileSliceLines: 3,
+		maxFileSliceLines: 4,
+		ignorePaths: [],
+	},
+};
+
+const reviewContext: ReviewContext = {
+	repoRoot: "/tmp/repo",
+	pr: {
+		id: 123,
+		version: 1,
+		title: "Test PR",
+		description: "",
+		source: {
+			repositoryId: 1,
+			projectKey: "PROJ",
+			repoSlug: "repo",
+			refId: "refs/heads/feature",
+			displayId: "feature",
+			latestCommit: "head-123",
+		},
+		target: {
+			repositoryId: 1,
+			projectKey: "PROJ",
+			repoSlug: "repo",
+			refId: "refs/heads/main",
+			displayId: "main",
+			latestCommit: "base-123",
+		},
+	},
+	headCommit: "head-123",
+	baseCommit: "base-123",
+	mergeBaseCommit: "base-123",
+	reviewRevision: "review-rev-123",
+	rawDiff: "",
+	diffStats: { fileCount: 1, additions: 2, deletions: 1 },
+	reviewedFiles: [
+		{
+			path: "src/new-name.ts",
+			oldPath: "src/old-name.ts",
+			status: "renamed",
+			patch: "diff --git a/src/old-name.ts b/src/new-name.ts",
+			changedLines: [10, 11],
+			hunks: [
+				{
+					oldStart: 10,
+					oldLines: 1,
+					newStart: 10,
+					newLines: 2,
+					header: "",
+					changedLines: [10, 11],
+				},
+			],
+			additions: 2,
+			deletions: 1,
+			isBinary: false,
+		},
+		{
+			path: "src/multi-hunk.ts",
+			status: "modified",
+			patch: [
+				"diff --git a/src/multi-hunk.ts b/src/multi-hunk.ts",
+				"index 1111111..2222222 100644",
+				"--- a/src/multi-hunk.ts",
+				"+++ b/src/multi-hunk.ts",
+				"@@ -1,3 +1,3 @@",
+				"-const first = oldValue;",
+				"+const first = newValue;",
+				" export { first };",
+				"@@ -10,3 +10,4 @@",
+				" const stable = true;",
+				"+const second = addedValue;",
+				" export { stable };",
+			].join("\n"),
+			changedLines: [1, 10],
+			hunks: [
+				{
+					oldStart: 1,
+					oldLines: 3,
+					newStart: 1,
+					newLines: 3,
+					header: "",
+					changedLines: [1],
+				},
+				{
+					oldStart: 10,
+					oldLines: 3,
+					newStart: 10,
+					newLines: 4,
+					header: "",
+					changedLines: [10],
+				},
+			],
+			additions: 2,
+			deletions: 1,
+			isBinary: false,
+		},
+	],
+	skippedFiles: [],
+};
+
+function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
+	return {
+		readFileAtCommit: async () => undefined,
+		searchTextAtCommit: async () => ({
+			matches: [],
+			truncated: false,
+			totalMatches: 0,
+		}),
+		...overrides,
+	} as GitRepository;
+}
+
+function createSummaryDrafts(): ReviewSummaryDrafts {
+	return { fileSummaries: [] };
+}
+
+function getHandler<TArgs, TResult>(tool: Tool<TArgs>) {
+	return tool.handler as (
+		args: TArgs,
+		invocation: {
+			sessionId: string;
+			toolCallId: string;
+			toolName: string;
+			arguments: unknown;
+		},
+	) => Promise<TResult>;
+}
+
+describe("Copilot tools", () => {
+	it("reads base content from oldPath for renamed files", async () => {
+		const git = createGitStub({
+			readFileAtCommit: async (commit, filePath) => {
+				assert.equal(commit, "base-123");
+				assert.equal(filePath, "src/old-name.ts");
+				return ["one", "two", "three", "four", "five"].join("\n");
+			},
+		});
+		const tool = createGetFileContentTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{
+				path: string;
+				version: "head" | "base";
+				startLine?: number;
+				endLine?: number;
+			},
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{ path: "src/new-name.ts", version: "base", startLine: 2, endLine: 5 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_file_content",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			path: "src/old-name.ts",
+			version: "base",
+			totalLines: 5,
+			returnedStartLine: 2,
+			returnedEndLine: 5,
+			content: "2: two\n3: three\n4: four\n5: five",
+		});
+	});
+
+	it("rejects emit_finding when the line is not changed", async () => {
+		const drafts: FindingDraft[] = [];
+		const tool = createEmitFindingTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<FindingDraft, string>(tool);
+
+		const result = await handler(
+			{
+				path: "src/new-name.ts",
+				line: 9,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Wrong line",
+				details: "This line is unchanged.",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "emit_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(
+			result,
+			"Recorded finding 1 for src/new-name.ts:file; requested line 9 is not a changed line in src/new-name.ts; stored as a file-level annotation.",
+		);
+		assert.deepEqual(drafts, [
+			{
+				path: "src/new-name.ts",
+				line: 0,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Wrong line",
+				details: "This line is unchanged.",
+			},
+		]);
+	});
+
+	it("normalizes oldPath findings onto the reviewed head path", async () => {
+		const drafts: FindingDraft[] = [];
+		const tool = createEmitFindingTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<FindingDraft, string>(tool);
+
+		const result = await handler(
+			{
+				path: "src/old-name.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Old path issue",
+				details: "The finding started from the base path.",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "emit_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(
+			result,
+			"Recorded finding 1 for src/new-name.ts:10; normalized path from src/old-name.ts to src/new-name.ts.",
+		);
+		assert.deepEqual(drafts, [
+			{
+				path: "src/new-name.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Old path issue",
+				details: "The finding started from the base path.",
+			},
+		]);
+	});
+
+	it("normalizes search options and directory restriction", async () => {
+		const git = createGitStub({
+			searchTextAtCommit: async (commit, query, options) => {
+				assert.equal(commit, "head-123");
+				assert.equal(query, "needle");
+				assert.deepEqual(options, {
+					directoryPath: "src",
+					limit: 200,
+					mode: "literal",
+					wholeWord: true,
+				});
+				return {
+					matches: [{ path: "src/new-name.ts", line: 10, text: "needle" }],
+					truncated: false,
+					totalMatches: 1,
+				};
+			},
+		});
+		const tool = createSearchTextInRepoTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{
+				query: string;
+				version: "head" | "base";
+				directory?: string;
+				mode?: "literal" | "regex";
+				wholeWord?: boolean;
+				limit?: number;
+			},
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{
+				query: "needle",
+				version: "head",
+				directory: "src",
+				wholeWord: true,
+				limit: 999,
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "search_text_in_repo",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			query: "needle",
+			version: "head",
+			mode: "literal",
+			wholeWord: true,
+			directory: "src",
+			matches: [{ path: "src/new-name.ts", line: 10, text: "needle" }],
+			truncated: false,
+			totalMatches: 1,
+		});
+	});
+
+	it("returns a specific diff hunk with file header context", async () => {
+		const tool = createGetFileDiffHunkTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<{ path: string; hunkIndex: number }, unknown>(
+			tool,
+		);
+
+		const result = await handler(
+			{ path: "src/multi-hunk.ts", hunkIndex: 2 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_file_diff_hunk",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			path: "src/multi-hunk.ts",
+			oldPath: undefined,
+			status: "modified",
+			additions: 2,
+			deletions: 1,
+			changedLineCount: 2,
+			changedLineRanges: "1, 10",
+			hunks: [
+				{ newStart: 1, newEnd: 3, header: "" },
+				{ newStart: 10, newEnd: 13, header: "" },
+			],
+			hunkIndex: 2,
+			totalHunks: 2,
+			fileHeader: [
+				"diff --git a/src/multi-hunk.ts b/src/multi-hunk.ts",
+				"index 1111111..2222222 100644",
+				"--- a/src/multi-hunk.ts",
+				"+++ b/src/multi-hunk.ts",
+			].join("\n"),
+			patch: [
+				"@@ -10,3 +10,4 @@",
+				" const stable = true;",
+				"+const second = addedValue;",
+				" export { stable };",
+			].join("\n"),
+		});
+	});
+
+	it("lists recorded findings with stable numbering", async () => {
+		const drafts: FindingDraft[] = [
+			{
+				path: "src/new-name.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Existing issue",
+				details: "Existing details",
+			},
+		];
+		const tool = createListRecordedFindingsTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<unknown, unknown>(tool);
+
+		const result = await handler(
+			{},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "list_recorded_findings",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			count: 1,
+			findings: [
+				{
+					findingNumber: 1,
+					path: "src/new-name.ts",
+					line: 10,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Existing issue",
+					details: "Existing details",
+				},
+			],
+		});
+	});
+
+	it("replaces an existing finding draft", async () => {
+		const drafts: FindingDraft[] = [
+			{
+				path: "src/new-name.ts",
+				line: 10,
+				severity: "MEDIUM",
+				type: "CODE_SMELL",
+				confidence: "medium",
+				title: "Old issue",
+				details: "Old details",
+			},
+		];
+		const tool = createReplaceRecordedFindingTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			FindingDraft & { findingNumber: number },
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{
+				findingNumber: 1,
+				path: "src/new-name.ts",
+				line: 11,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "New issue",
+				details: "New details",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "replace_recorded_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result, "Replaced finding 1 with src/new-name.ts:11.");
+		assert.deepEqual(drafts, [
+			{
+				path: "src/new-name.ts",
+				line: 11,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "New issue",
+				details: "New details",
+			},
+		]);
+	});
+
+	it("replaces an existing finding with a file-level annotation when the line is unchanged", async () => {
+		const drafts: FindingDraft[] = [
+			{
+				path: "src/new-name.ts",
+				line: 10,
+				severity: "MEDIUM",
+				type: "CODE_SMELL",
+				confidence: "medium",
+				title: "Old issue",
+				details: "Old details",
+			},
+		];
+		const tool = createReplaceRecordedFindingTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			FindingDraft & { findingNumber: number },
+			string
+		>(tool);
+
+		const result = await handler(
+			{
+				findingNumber: 1,
+				path: "src/new-name.ts",
+				line: 9,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "New issue",
+				details: "New details",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "replace_recorded_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(
+			result,
+			"Replaced finding 1 with src/new-name.ts:file; requested line 9 is not a changed line in src/new-name.ts; stored as a file-level annotation.",
+		);
+		assert.deepEqual(drafts, [
+			{
+				path: "src/new-name.ts",
+				line: 0,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "New issue",
+				details: "New details",
+			},
+		]);
+	});
+
+	it("removes an existing finding draft and compacts numbering", async () => {
+		const drafts: FindingDraft[] = [
+			{
+				path: "src/new-name.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "First issue",
+				details: "First details",
+			},
+			{
+				path: "src/new-name.ts",
+				line: 11,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Second issue",
+				details: "Second details",
+			},
+		];
+		const tool = createRemoveRecordedFindingTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<{ findingNumber: number }, unknown>(tool);
+
+		const result = await handler(
+			{ findingNumber: 1 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "remove_recorded_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(
+			result,
+			"Removed finding 1 for src/new-name.ts:10. Remaining findings: 1.",
+		);
+		assert.deepEqual(drafts, [
+			{
+				path: "src/new-name.ts",
+				line: 11,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Second issue",
+				details: "Second details",
+			},
+		]);
+	});
+
+	it("rejects removing a missing finding draft", async () => {
+		const drafts: FindingDraft[] = [];
+		const tool = createRemoveRecordedFindingTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{ findingNumber: number },
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
+
+		const result = await handler(
+			{ findingNumber: 1 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "remove_recorded_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.equal(
+			result.textResultForLlm,
+			"Finding 1 does not exist. Recorded findings: 0.",
+		);
+	});
+
+	it("rejects replacing a missing finding draft", async () => {
+		const drafts: FindingDraft[] = [];
+		const tool = createReplaceRecordedFindingTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			FindingDraft & { findingNumber: number },
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
+
+		const result = await handler(
+			{
+				findingNumber: 1,
+				path: "src/new-name.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Issue",
+				details: "Details",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "replace_recorded_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.equal(
+			result.textResultForLlm,
+			"Finding 1 does not exist. Recorded findings: 0.",
+		);
+	});
+
+	it("records and replaces a pull request summary", async () => {
+		const summaryDrafts = createSummaryDrafts();
+		const tool = createRecordPrSummaryTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				[],
+				summaryDrafts,
+			),
+		);
+		const handler = getHandler<{ summary: string }, string>(tool);
+
+		const result = await handler(
+			{ summary: "Adds stricter validation to the renamed service flow." },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "record_pr_summary",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result, "Recorded the pull request summary.");
+		assert.equal(
+			summaryDrafts.prSummary,
+			"Adds stricter validation to the renamed service flow.",
+		);
+	});
+
+	it("records and updates a file summary for a reviewed file", async () => {
+		const summaryDrafts = createSummaryDrafts();
+		const tool = createRecordFileSummaryTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				[],
+				summaryDrafts,
+			),
+		);
+		const handler = getHandler<{ path: string; summary: string }, string>(tool);
+
+		const firstResult = await handler(
+			{
+				path: "src/new-name.ts",
+				summary: "Moves the renamed file to the new path and updates exports.",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "record_file_summary",
+				arguments: {},
+			},
+		);
+		const secondResult = await handler(
+			{
+				path: "src/new-name.ts",
+				summary: "Renames the file and adjusts the exported API.",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "record_file_summary",
+				arguments: {},
+			},
+		);
+
+		assert.equal(firstResult, "Recorded the summary for src/new-name.ts.");
+		assert.equal(secondResult, "Updated the summary for src/new-name.ts.");
+		assert.deepEqual(summaryDrafts.fileSummaries, [
+			{
+				path: "src/new-name.ts",
+				summary: "Renames the file and adjusts the exported API.",
+			},
+		]);
+	});
+
+	it("rejects a file summary for a non-reviewed file", async () => {
+		const summaryDrafts = createSummaryDrafts();
+		const tool = createRecordFileSummaryTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				[],
+				summaryDrafts,
+			),
+		);
+		const handler = getHandler<
+			{ path: string; summary: string },
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
+
+		const result = await handler(
+			{ path: "src/not-reviewed.ts", summary: "Nope." },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "record_file_summary",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.equal(
+			result.textResultForLlm,
+			"The file src/not-reviewed.ts is not one of the reviewed files.",
+		);
+	});
+});

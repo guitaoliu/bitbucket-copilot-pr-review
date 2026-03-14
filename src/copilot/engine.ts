@@ -1,0 +1,445 @@
+import type {
+	CopilotClientOptions,
+	ToolResultObject,
+} from "@github/copilot-sdk";
+import { approveAll, CopilotClient } from "@github/copilot-sdk";
+import type { ReviewerConfig } from "../config/types.ts";
+import type { GitRepository } from "../git/repo.ts";
+import { finalizeFindings } from "../policy/findings.ts";
+import { finalizeReviewSummary } from "../review/summary.ts";
+import type {
+	FindingDraft,
+	ReviewContext,
+	ReviewOutcome,
+	ReviewSummaryDrafts,
+} from "../review/types.ts";
+import type { Logger } from "../shared/logger.ts";
+import { omitUndefined } from "../shared/object.ts";
+import { truncateText } from "../shared/text.ts";
+import { buildPrompt } from "./prompt.ts";
+import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
+import { wireReasoningTrace } from "./trace.ts";
+
+type ReviewToolName = (typeof REVIEW_TOOL_NAMES)[number];
+
+type PreToolUseInput = {
+	toolName: string;
+	toolArgs: unknown;
+	cwd: string;
+};
+
+type PostToolUseInput = PreToolUseInput & {
+	toolResult: ToolResultObject;
+};
+
+type ReviewProgressState = {
+	reviewedFileCount: number;
+	summaryDrafts: ReviewSummaryDrafts;
+};
+
+function isReviewToolName(toolName: string): toolName is ReviewToolName {
+	return REVIEW_TOOL_NAMES.includes(toolName as ReviewToolName);
+}
+
+function buildSessionHint(config: ReviewerConfig): string {
+	return [
+		"Review for all material issues introduced by this pull request.",
+		"Inspect the diff and relevant head/base code before emitting any finding.",
+		"Flag any meaningful behavior change that lacks appropriate automated test coverage unless it is genuinely not testable.",
+		"Be exhaustive within the reviewed files and continue after the first finding when more distinct issues may exist.",
+		`Keep findings distinct, evidence-backed, and limited to ${config.review.minConfidence} confidence or better, up to ${config.review.maxFindings} total.`,
+	].join(" ");
+}
+
+function buildPreToolHint(toolName: ReviewToolName): string {
+	switch (toolName) {
+		case "get_pr_overview":
+			return "Use the overview to scope the review, identify the highest-risk files, and make sure each meaningful risk area gets covered.";
+		case "list_changed_files":
+			return "Focus on the riskiest reviewed files first, but continue until the meaningful reviewed changes have been covered; skipped files are not valid finding targets.";
+		case "get_file_diff":
+			return "Study the exact changed lines and look for removed guards, altered control flow, or contract shifts.";
+		case "get_file_diff_hunk":
+			return "Use hunk paging to inspect a large diff incrementally without broadening scope beyond the file under review.";
+		case "get_file_content":
+			return "Read head and base content as needed to verify a concrete regression, broken invariant, or API change.";
+		case "get_file_list_by_directory":
+			return "Use directory listing to orient around nearby code and impacted areas, but keep the review anchored to PR-introduced behavior.";
+		case "get_related_file_content":
+			return "Read nearby files to confirm concrete hypotheses about impact, invariants, or call paths, including additional affected paths.";
+		case "search_text_in_repo":
+		case "search_symbol_name":
+			return "Search narrowly to validate suspected code paths and uncover additional impacted call sites. Avoid broad repo fishing expeditions.";
+		case "get_ci_summary":
+			return "Treat CI output as a prioritization hint, not proof of a reportable issue.";
+		case "record_pr_summary":
+			return "Capture the PR's intended behavior change in one concise, evidence-backed summary after you understand the diff.";
+		case "record_file_summary":
+			return "Record a short, concrete summary of what changed in a reviewed file once you have inspected enough context to describe it accurately.";
+		case "list_recorded_findings":
+			return "Check recorded findings before adding more so you avoid duplicates and can confirm whether important reviewed areas still lack coverage.";
+		case "remove_recorded_finding":
+			return "Remove a recorded finding only when it is duplicate, superseded, or too weak to keep in the final set.";
+		case "replace_recorded_finding":
+			return "Replace a recorded finding only when the new draft is clearly stronger, more accurate, or better located.";
+		case "emit_finding":
+			return "Only emit a finding after verifying the issue from inspected code. Use one finding per root cause, prefer a changed head-side line, and keep looking for additional distinct issues after recording one.";
+		default:
+			return "Stay focused on distinct, evidence-backed issues introduced by the pull request.";
+	}
+}
+
+function buildPostToolHint(
+	toolName: ReviewToolName,
+	findingCount: number,
+	config: ReviewerConfig["review"],
+): string {
+	switch (toolName) {
+		case "get_pr_overview":
+			return "Now choose the most suspicious files and inspect their diffs before exploring more context, then continue until the major reviewed risk areas are covered.";
+		case "list_changed_files":
+			return "Prioritize files touching validation, auth, persistence, async flow, serialization, and public interfaces, and do not stop after inspecting only one risky file.";
+		case "get_file_diff":
+			return "If the diff looks risky, confirm the exact behavior in head/base code before deciding whether an issue exists.";
+		case "get_file_diff_hunk":
+			return "Continue with the next relevant hunk or matching code context until the file's meaningful changed behavior is covered; do not scan the entire repo unnecessarily.";
+		case "get_file_content":
+			return "Do not emit a finding unless the code you inspected shows a concrete, material bug introduced by the PR, and keep checking for other distinct bugs after confirming one.";
+		case "get_file_list_by_directory":
+		case "get_related_file_content":
+		case "search_text_in_repo":
+		case "search_symbol_name":
+			return "Use this context to confirm or reject a specific hypothesis, then move to the next uncovered risky path and stay focused on PR-introduced risk.";
+		case "get_ci_summary":
+			return "CI may explain where to look next, but you still need code-level evidence before reporting anything.";
+		case "record_pr_summary":
+			return "Keep the PR summary concise and factual, then continue ensuring each reviewed file also gets a clear file-change summary.";
+		case "record_file_summary":
+			return "Keep file summaries concrete and per-file; continue until all reviewed files have coverage.";
+		case "list_recorded_findings":
+			return `Recorded findings: ${findingCount}/${config.maxFindings}. Avoid duplicates, but continue looking if reviewed risky areas remain unchecked.`;
+		case "remove_recorded_finding":
+			return `Recorded findings: ${findingCount}/${config.maxFindings}. Keep only distinct issues, then continue covering remaining risky reviewed changes.`;
+		case "replace_recorded_finding":
+			return `Recorded findings: ${findingCount}/${config.maxFindings}. Keep the strongest distinct set without stopping the review early.`;
+		case "emit_finding":
+			return findingCount >= config.maxFindings
+				? `You have reached the configured maximum of ${config.maxFindings} findings. Do not add more unless a clearly stronger issue replaces a weaker one.`
+				: `Findings recorded: ${findingCount}/${config.maxFindings}. Keep findings distinct and evidence-backed, then continue searching for additional validated issues.`;
+		default:
+			return "Keep findings distinct, evidence-backed, and continue until the reviewed risky changes have been covered.";
+	}
+}
+
+const MAX_TOOL_LOG_VALUE_LENGTH = 80;
+
+function normalizeToolLogString(value: string): string {
+	return truncateText(
+		value.replace(/\s+/g, " ").trim(),
+		MAX_TOOL_LOG_VALUE_LENGTH,
+		{
+			suffix: "...",
+			preserveMaxLength: true,
+		},
+	);
+}
+
+function formatToolLogValue(value: unknown): string | undefined {
+	if (value instanceof Error) {
+		return formatToolLogValue(value.message);
+	}
+
+	if (typeof value === "string") {
+		const normalized = normalizeToolLogString(value);
+		if (normalized.length === 0) {
+			return undefined;
+		}
+
+		return /[\s="]/.test(normalized) ? JSON.stringify(normalized) : normalized;
+	}
+
+	if (typeof value === "number" || typeof value === "boolean") {
+		return String(value);
+	}
+
+	return undefined;
+}
+
+function getToolArgsRecord(toolArgs: unknown): Record<string, unknown> {
+	if (!toolArgs || typeof toolArgs !== "object" || Array.isArray(toolArgs)) {
+		return {};
+	}
+
+	return toolArgs as Record<string, unknown>;
+}
+
+function buildToolLogFields(toolName: string, toolArgs: unknown): string[] {
+	const record = getToolArgsRecord(toolArgs);
+	const field = (key: string, value: unknown): string | undefined => {
+		const formatted = formatToolLogValue(value);
+		return formatted ? `${key}=${formatted}` : undefined;
+	};
+
+	switch (toolName) {
+		case "get_file_content":
+		case "get_related_file_content":
+			return [
+				field("path", record.path),
+				field("version", record.version),
+				field("start", record.startLine),
+				field("end", record.endLine),
+			].filter((entry): entry is string => entry !== undefined);
+		case "get_file_diff":
+			return [field("path", record.path)].filter(
+				(entry): entry is string => entry !== undefined,
+			);
+		case "get_file_diff_hunk":
+			return [
+				field("path", record.path),
+				field("hunk", record.hunkIndex),
+			].filter((entry): entry is string => entry !== undefined);
+		case "get_file_list_by_directory":
+			return [
+				field("directory", record.directory),
+				field("version", record.version),
+			].filter((entry): entry is string => entry !== undefined);
+		case "search_text_in_repo":
+			return [
+				field("query", record.query),
+				field("version", record.version),
+				field("directory", record.directory),
+				field("mode", record.mode),
+			].filter((entry): entry is string => entry !== undefined);
+		case "search_symbol_name":
+			return [
+				field("symbol", record.symbol),
+				field("version", record.version),
+				field("directory", record.directory),
+			].filter((entry): entry is string => entry !== undefined);
+		case "record_pr_summary":
+			return [
+				field(
+					"summary_chars",
+					typeof record.summary === "string"
+						? record.summary.length
+						: undefined,
+				),
+			].filter((entry): entry is string => entry !== undefined);
+		case "record_file_summary":
+			return [field("path", record.path)].filter(
+				(entry): entry is string => entry !== undefined,
+			);
+		case "remove_recorded_finding":
+			return [field("finding", record.findingNumber)].filter(
+				(entry): entry is string => entry !== undefined,
+			);
+		case "replace_recorded_finding":
+			return [
+				field("finding", record.findingNumber),
+				field("path", record.path),
+				field("line", record.line),
+			].filter((entry): entry is string => entry !== undefined);
+		case "emit_finding":
+			return [field("path", record.path), field("line", record.line)].filter(
+				(entry): entry is string => entry !== undefined,
+			);
+		default:
+			return [];
+	}
+}
+
+function buildProgressFields(
+	config: ReviewerConfig,
+	drafts: FindingDraft[],
+	progressState: ReviewProgressState,
+): string[] {
+	return [
+		`findings=${drafts.length}/${config.review.maxFindings}`,
+		`file_summaries=${progressState.summaryDrafts.fileSummaries.length}/${progressState.reviewedFileCount}`,
+		`pr_summary=${progressState.summaryDrafts.prSummary ? "recorded" : "missing"}`,
+	];
+}
+
+function buildPreToolLogMessage(input: PreToolUseInput): string {
+	return [
+		"Copilot requested tool",
+		input.toolName,
+		...buildToolLogFields(input.toolName, input.toolArgs),
+	].join(" ");
+}
+
+function buildPostToolLogMessage(
+	input: PostToolUseInput,
+	config: ReviewerConfig,
+	drafts: FindingDraft[],
+	progressState: ReviewProgressState,
+): string {
+	return [
+		"Copilot completed tool",
+		input.toolName,
+		`result=${input.toolResult.resultType}`,
+		formatToolLogValue(input.toolResult.error)
+			? `error=${formatToolLogValue(input.toolResult.error)}`
+			: undefined,
+		...buildToolLogFields(input.toolName, input.toolArgs),
+		...buildProgressFields(config, drafts, progressState),
+	]
+		.filter((entry): entry is string => entry !== undefined)
+		.join(" ");
+}
+
+export function createReviewSessionHooks(
+	config: ReviewerConfig,
+	logger: Logger,
+	drafts: FindingDraft[],
+	progressState: ReviewProgressState = {
+		reviewedFileCount: 0,
+		summaryDrafts: { fileSummaries: [] },
+	},
+) {
+	return {
+		onSessionStart: async () => ({
+			additionalContext: buildSessionHint(config),
+		}),
+		onPreToolUse: async (input: PreToolUseInput) => {
+			logger.info(buildPreToolLogMessage(input));
+			if (!isReviewToolName(input.toolName)) {
+				return {
+					permissionDecision: "deny" as const,
+					permissionDecisionReason: `Tool ${input.toolName} is not allowed in CI review mode.`,
+				};
+			}
+
+			return {
+				permissionDecision: "allow" as const,
+				additionalContext: buildPreToolHint(input.toolName),
+			};
+		},
+		onPostToolUse: async (input: PostToolUseInput) => {
+			logger.info(
+				buildPostToolLogMessage(input, config, drafts, progressState),
+			);
+			if (!isReviewToolName(input.toolName)) {
+				return {
+					additionalContext:
+						"Keep findings distinct, evidence-backed, and continue until the reviewed risky changes have been covered.",
+				};
+			}
+
+			return {
+				additionalContext: buildPostToolHint(
+					input.toolName,
+					drafts.length,
+					config.review,
+				),
+			};
+		},
+		onErrorOccurred: async (input: {
+			errorContext: string;
+			error: unknown;
+		}) => {
+			logger.warn(
+				`Copilot session reported an error in ${input.errorContext}`,
+				input.error,
+			);
+			return { errorHandling: "abort" as const };
+		},
+	};
+}
+
+function summarizeOutcome(
+	context: ReviewContext,
+	assistantMessage: string | undefined,
+	findingsCount: number,
+): string {
+	if (context.reviewedFiles.length === 0) {
+		return "No reviewable files remained after exclusions, so no AI review was performed.";
+	}
+
+	if (findingsCount === 0) {
+		const normalized = assistantMessage?.trim();
+		if (normalized && normalized.length > 0) {
+			return truncateText(normalized, 1200, { suffix: "\n... truncated ..." });
+		}
+
+		return `No ${context.reviewedFiles.length > 0 ? "reportable" : "reviewable"} issues found in the reviewed pull request changes at the ${"configured confidence threshold"}.`;
+	}
+
+	return `Copilot identified ${findingsCount} reportable issue${findingsCount === 1 ? "" : "s"} in the reviewed pull request changes.`;
+}
+
+export async function runCopilotReview(
+	config: ReviewerConfig,
+	context: ReviewContext,
+	git: GitRepository,
+	logger: Logger,
+): Promise<ReviewOutcome> {
+	if (context.reviewedFiles.length === 0) {
+		return {
+			summary: summarizeOutcome(context, undefined, 0),
+			findings: [],
+			stale: false,
+		};
+	}
+
+	const drafts: FindingDraft[] = [];
+	const summaryDrafts: ReviewSummaryDrafts = { fileSummaries: [] };
+	const clientLogLevel: CopilotClientOptions["logLevel"] =
+		config.logLevel === "debug" ? "debug" : "error";
+	const clientOptions = omitUndefined({
+		useLoggedInUser: config.copilot.githubToken === undefined,
+		cwd: config.repoRoot,
+		logLevel: clientLogLevel,
+		githubToken: config.copilot.githubToken,
+	}) satisfies CopilotClientOptions;
+
+	const client = new CopilotClient(clientOptions);
+	await client.start();
+	const session = await client.createSession({
+		clientName: "bitbucket-copilot-pr-review",
+		model: config.copilot.model,
+		reasoningEffort: config.copilot.reasoningEffort,
+		streaming: true,
+		tools: createReviewTools(config, context, git, drafts, summaryDrafts),
+		availableTools: [...REVIEW_TOOL_NAMES],
+		onPermissionRequest: approveAll,
+		hooks: createReviewSessionHooks(config, logger, drafts, {
+			reviewedFileCount: context.reviewedFiles.length,
+			summaryDrafts,
+		}),
+		workingDirectory: config.repoRoot,
+		infiniteSessions: { enabled: false },
+	});
+
+	wireReasoningTrace(session, logger);
+
+	try {
+		const response = await session.sendAndWait(
+			{ prompt: buildPrompt(config, context) },
+			config.copilot.timeoutMs,
+		);
+		const findings = finalizeFindings(
+			drafts,
+			context.reviewedFiles,
+			config.review.maxFindings,
+			config.review.minConfidence,
+		);
+		const reviewSummary = finalizeReviewSummary(context, summaryDrafts);
+		const assistantMessage = response?.data.content;
+
+		return omitUndefined({
+			summary: summarizeOutcome(context, assistantMessage, findings.length),
+			findings,
+			assistantMessage,
+			prSummary: reviewSummary.prSummary,
+			fileSummaries: reviewSummary.fileSummaries,
+			stale: false,
+		}) satisfies ReviewOutcome;
+	} finally {
+		await session.disconnect();
+		const errors = await client.stop();
+		for (const error of errors) {
+			logger.warn("Copilot client cleanup reported an error", error);
+		}
+	}
+}

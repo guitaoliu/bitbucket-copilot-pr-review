@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.pnpm-store/
+coverage/
+
+.env
+.env.*
+
+*.log

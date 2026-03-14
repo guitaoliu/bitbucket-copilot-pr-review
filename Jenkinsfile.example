@@ -1,0 +1,46 @@
+pipeline {
+  agent { label "DK_UBCOMMON2404" }
+
+  options {
+    timestamps()
+    disableConcurrentBuilds(abortPrevious: true)
+  }
+
+  stages {
+    stage("Tooling") {
+      steps {
+        sh "n lts && hash -r && npm install -g pnpm@10 && node -v && pnpm -v && copilot version"
+      }
+    }
+
+    stage("Install") {
+      steps {
+        sh "pnpm install --frozen-lockfile"
+      }
+    }
+
+    stage("Typecheck") {
+      steps {
+        sh "pnpm typecheck"
+      }
+    }
+
+    stage("AI Review") {
+      steps {
+        withCredentials([
+          string(credentialsId: "github-copilot-token", variable: "COPILOT_GITHUB_TOKEN"),
+          string(credentialsId: "bitbucket-review-token", variable: "BITBUCKET_TOKEN")
+        ]) {
+          withEnv([
+            "BITBUCKET_BASE_URL=https://bitbucket.example.com",
+            "BITBUCKET_PROJECT_KEY=PROJ",
+            "BITBUCKET_REPO_SLUG=my-service",
+            "BITBUCKET_PR_ID=${env.CHANGE_ID}"
+          ]) {
+            sh "node src/cli.ts"
+          }
+        }
+      }
+    }
+  }
+}
