@@ -7,8 +7,16 @@ import type {
 	ReviewSummaryDrafts,
 } from "./types.ts";
 
+export const MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES = 25;
+
 const MAX_PR_SUMMARY_LENGTH = 500;
 const MAX_FILE_SUMMARY_LENGTH = 220;
+
+export function shouldCreatePerFileSummaries(
+	reviewedFileCount: number,
+): boolean {
+	return reviewedFileCount <= MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES;
+}
 
 function collapseWhitespace(value: string): string {
 	return value.trim().replace(/\s+/g, " ");
@@ -121,6 +129,17 @@ export function finalizeReviewSummary(
 	context: ReviewContext,
 	drafts: ReviewSummaryDrafts,
 ): Pick<ReviewSummaryDrafts, "prSummary" | "fileSummaries"> {
+	const prSummary =
+		normalizeSummaryText(drafts.prSummary, MAX_PR_SUMMARY_LENGTH) ??
+		buildDefaultPullRequestSummary(context);
+
+	if (!shouldCreatePerFileSummaries(context.reviewedFiles.length)) {
+		return {
+			prSummary,
+			fileSummaries: [],
+		};
+	}
+
 	const reviewedFileMap = createReviewedFileLookup(context.reviewedFiles);
 	const normalizedFileSummaries = new Map<string, string>();
 
@@ -147,9 +166,7 @@ export function finalizeReviewSummary(
 	);
 
 	return {
-		prSummary:
-			normalizeSummaryText(drafts.prSummary, MAX_PR_SUMMARY_LENGTH) ??
-			buildDefaultPullRequestSummary(context),
+		prSummary,
 		fileSummaries,
 	};
 }

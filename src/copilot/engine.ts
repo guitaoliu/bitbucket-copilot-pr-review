@@ -7,7 +7,11 @@ import { approveAll, CopilotClient } from "@github/copilot-sdk";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import { finalizeFindings } from "../policy/findings.ts";
-import { finalizeReviewSummary } from "../review/summary.ts";
+import {
+	finalizeReviewSummary,
+	MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES,
+	shouldCreatePerFileSummaries,
+} from "../review/summary.ts";
 import type {
 	FindingDraft,
 	ReviewContext,
@@ -75,7 +79,13 @@ function isReviewToolName(toolName: string): toolName is ReviewToolName {
 	return REVIEW_TOOL_NAMES.includes(toolName as ReviewToolName);
 }
 
-function buildSessionHint(config: ReviewerConfig): string {
+function buildSessionHint(
+	config: ReviewerConfig,
+	reviewedFileCount: number,
+): string {
+	const perFileSummariesEnabled =
+		shouldCreatePerFileSummaries(reviewedFileCount);
+
 	return [
 		"Review all material issues introduced by this pull request.",
 		"Inspect diff plus relevant head/base code before emitting any finding.",
@@ -83,12 +93,23 @@ function buildSessionHint(config: ReviewerConfig): string {
 		"Ignore style, naming, formatting, and preference-only feedback.",
 		FINDING_TAXONOMY_HINT,
 		QUESTION_SHAPED_FINDING_HINT,
+		...(perFileSummariesEnabled
+			? []
+			: [
+					`Per-file summaries are disabled for large reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files; keep the PR summary current and continue reviewing without file summaries.`,
+				]),
 		"Cover the reviewed risk areas and continue after the first finding when more distinct issues may exist.",
 		`Keep findings distinct, evidence-backed, and limited to ${config.review.minConfidence} confidence or better, up to ${config.review.maxFindings} total.`,
 	].join(" ");
 }
 
-function buildPreToolHint(toolName: ReviewToolName): string {
+function buildPreToolHint(
+	toolName: ReviewToolName,
+	reviewedFileCount: number,
+): string {
+	const perFileSummariesEnabled =
+		shouldCreatePerFileSummaries(reviewedFileCount);
+
 	switch (toolName) {
 		case "get_pr_overview":
 			return "Use the overview to scope the review, find the highest-risk files, and cover each meaningful risk area.";
@@ -110,9 +131,13 @@ function buildPreToolHint(toolName: ReviewToolName): string {
 		case "get_ci_summary":
 			return "Treat CI output as a prioritization hint, not proof of a reportable issue.";
 		case "record_pr_summary":
-			return "Capture the PR's intended behavior change in one concise, evidence-backed summary once you understand the diff.";
+			return perFileSummariesEnabled
+				? "Capture the PR's intended behavior change in one concise, evidence-backed summary once you understand the diff."
+				: `Capture the PR's intended behavior change in one concise, evidence-backed summary once you understand the diff. Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files.`;
 		case "record_file_summary":
-			return "Record a short, concrete summary of what changed in a reviewed file once you have enough context to describe it accurately.";
+			return perFileSummariesEnabled
+				? "Record a short, concrete summary of what changed in a reviewed file once you have enough context to describe it accurately."
+				: `Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files; do not use this tool.`;
 		case "list_recorded_findings":
 			return "Check recorded findings before adding more to avoid duplicates and confirm whether important reviewed areas still lack coverage.";
 		case "remove_recorded_finding":
@@ -130,7 +155,11 @@ function buildPostToolHint(
 	toolName: ReviewToolName,
 	findingCount: number,
 	config: ReviewerConfig["review"],
+	reviewedFileCount: number,
 ): string {
+	const perFileSummariesEnabled =
+		shouldCreatePerFileSummaries(reviewedFileCount);
+
 	switch (toolName) {
 		case "get_pr_overview":
 			return "Choose the most suspicious files, inspect their diffs, then continue until the major reviewed risk areas are covered.";
@@ -150,9 +179,13 @@ function buildPostToolHint(
 		case "get_ci_summary":
 			return "CI may explain where to look next, but you still need code-level evidence before reporting anything.";
 		case "record_pr_summary":
-			return "Keep the PR summary concise and factual, then continue until each reviewed file also has a clear file-change summary.";
+			return perFileSummariesEnabled
+				? "Keep the PR summary concise and factual, then continue until each reviewed file also has a clear file-change summary."
+				: `Keep the PR summary concise and factual. Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files, so continue reviewing without recording them.`;
 		case "record_file_summary":
-			return "Keep file summaries concrete and per-file; continue until all reviewed files have coverage.";
+			return perFileSummariesEnabled
+				? "Keep file summaries concrete and per-file; continue until all reviewed files have coverage."
+				: `Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files; continue reviewing without recording them.`;
 		case "list_recorded_findings":
 			return `Recorded findings: ${findingCount}/${config.maxFindings}. Avoid duplicates, but continue looking if reviewed risky areas remain unchecked.`;
 		case "remove_recorded_finding":
@@ -328,9 +361,15 @@ function buildProgressFields(
 	drafts: FindingDraft[],
 	progressState: ReviewProgressState,
 ): string[] {
+	const fileSummaryProgress = shouldCreatePerFileSummaries(
+		progressState.reviewedFileCount,
+	)
+		? `file_summaries=${progressState.summaryDrafts.fileSummaries.length}/${progressState.reviewedFileCount}`
+		: "file_summaries=disabled";
+
 	return [
 		`findings=${drafts.length}/${config.review.maxFindings}`,
-		`file_summaries=${progressState.summaryDrafts.fileSummaries.length}/${progressState.reviewedFileCount}`,
+		fileSummaryProgress,
 		`pr_summary=${progressState.summaryDrafts.prSummary ? "recorded" : "missing"}`,
 	];
 }
@@ -374,7 +413,10 @@ export function createReviewSessionHooks(
 ) {
 	return {
 		onSessionStart: async () => ({
-			additionalContext: buildSessionHint(config),
+			additionalContext: buildSessionHint(
+				config,
+				progressState.reviewedFileCount,
+			),
 		}),
 		onPreToolUse: async (input: PreToolUseInput) => {
 			logger.info(buildPreToolLogMessage(input));
@@ -387,7 +429,10 @@ export function createReviewSessionHooks(
 
 			return {
 				permissionDecision: "allow" as const,
-				additionalContext: buildPreToolHint(input.toolName),
+				additionalContext: buildPreToolHint(
+					input.toolName,
+					progressState.reviewedFileCount,
+				),
 			};
 		},
 		onPostToolUse: async (input: PostToolUseInput) => {
@@ -406,6 +451,7 @@ export function createReviewSessionHooks(
 					input.toolName,
 					drafts.length,
 					config.review,
+					progressState.reviewedFileCount,
 				),
 			};
 		},

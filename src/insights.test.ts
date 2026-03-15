@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ReviewerConfig } from "./config/types.ts";
 import { buildInsightReport, buildPullRequestComment } from "./insights.ts";
+import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "./review/summary.ts";
 import type { ReviewContext, ReviewOutcome } from "./review/types.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "./shared/text.ts";
 
@@ -430,5 +431,48 @@ describe("buildPullRequestComment", () => {
 		assert.match(comment, /### What Changed/);
 		assert.match(comment, /### Review Scope/);
 		assert.match(comment, /omitted to fit Bitbucket comment limit/);
+	});
+
+	it("omits reviewed change summaries when the review is above the cutoff", () => {
+		const prLink =
+			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123";
+		const context = createContext(prLink);
+		context.reviewedFiles = Array.from(
+			{ length: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1 },
+			(_, index) => ({
+				path: `src/reviewed-${index}.ts`,
+				status: "modified" as const,
+				patch: `diff --git a/src/reviewed-${index}.ts b/src/reviewed-${index}.ts`,
+				changedLines: [index + 1],
+				hunks: [
+					{
+						oldStart: index + 1,
+						oldLines: 1,
+						newStart: index + 1,
+						newLines: 1,
+						header: "",
+						changedLines: [index + 1],
+					},
+				],
+				additions: 1,
+				deletions: 0,
+				isBinary: false,
+			}),
+		);
+		context.diffStats = {
+			fileCount: context.reviewedFiles.length + context.skippedFiles.length,
+			additions: context.reviewedFiles.length,
+			deletions: 0,
+		};
+
+		const comment = buildPullRequestComment(config, context, {
+			...createOutcome(),
+			fileSummaries: [],
+		});
+
+		assert.match(comment, /### Conclusion/);
+		assert.match(comment, /### What Changed/);
+		assert.match(comment, /### Review Scope/);
+		assert.doesNotMatch(comment, /### Reviewed Changes/);
 	});
 });

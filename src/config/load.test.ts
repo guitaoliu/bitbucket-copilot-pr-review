@@ -293,7 +293,7 @@ describe("loadConfig feature flags", () => {
 		assert.equal(config.report.commentStrategy, "recreate");
 		assert.equal(config.review.forceReview, false);
 		assert.equal(config.review.confirmRerun, false);
-		assert.equal(config.review.maxFiles, 200);
+		assert.equal(config.review.maxFiles, 300);
 		assert.equal(config.review.maxFindings, 25);
 		assert.equal(config.review.minConfidence, "medium");
 		assert.deepEqual(config.review.ignorePaths, []);

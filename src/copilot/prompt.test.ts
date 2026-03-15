@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { ReviewerConfig } from "../config/types.ts";
+import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "../review/summary.ts";
 import type { ReviewContext } from "../review/types.ts";
 import { buildPrompt } from "./prompt.ts";
 
@@ -152,6 +153,49 @@ describe("buildPrompt", () => {
 		assert.match(
 			prompt,
 			/Use emit_finding only for concrete validated issues\. If a concern is still a question, investigate more or drop it/,
+		);
+	});
+
+	it("disables per-file summary instructions for large reviews", () => {
+		const prompt = buildPrompt(config, {
+			...context,
+			reviewedFiles: Array.from(
+				{ length: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1 },
+				(_, index) => ({
+					path: `src/example-${index}.ts`,
+					status: "modified" as const,
+					patch: `diff --git a/src/example-${index}.ts b/src/example-${index}.ts`,
+					changedLines: [index + 1],
+					hunks: [
+						{
+							oldStart: index + 1,
+							oldLines: 1,
+							newStart: index + 1,
+							newLines: 1,
+							header: "",
+							changedLines: [index + 1],
+						},
+					],
+					additions: 1,
+					deletions: 0,
+					isBinary: false,
+				}),
+			),
+			diffStats: {
+				fileCount: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1,
+				additions: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1,
+				deletions: 0,
+			},
+		});
+
+		assert.match(
+			prompt,
+			/new_file_summaries|per_file_summaries: disabled|per-file summaries are disabled/i,
+		);
+		assert.match(prompt, /do not call record_file_summary for this review/);
+		assert.match(
+			prompt,
+			/Do not record per-file summaries when reviewed files exceed 25/,
 		);
 	});
 });

@@ -56,7 +56,7 @@ const baseConfig: ReviewerConfig = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFiles: 200,
+		maxFiles: 300,
 		maxFindings: 25,
 		minConfidence: "medium",
 		maxPatchChars: 12000,

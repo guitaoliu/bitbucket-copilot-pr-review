@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { Tool } from "@github/copilot-sdk";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
+import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "../review/summary.ts";
 import type {
 	FindingDraft,
 	ReviewContext,
@@ -1240,6 +1241,68 @@ describe("Copilot tools", () => {
 		assert.equal(
 			result.textResultForLlm,
 			"The file src/not-reviewed.ts is not one of the reviewed files.",
+		);
+	});
+
+	it("rejects file summaries when the review is above the cutoff", async () => {
+		const summaryDrafts = createSummaryDrafts();
+		const tool = createRecordFileSummaryTool(
+			createReviewToolContext(
+				config,
+				{
+					...reviewContext,
+					reviewedFiles: Array.from(
+						{ length: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1 },
+						(_, index) => ({
+							path: `src/large-${index}.ts`,
+							status: "modified" as const,
+							patch: `diff --git a/src/large-${index}.ts b/src/large-${index}.ts`,
+							changedLines: [index + 1],
+							hunks: [
+								{
+									oldStart: index + 1,
+									oldLines: 1,
+									newStart: index + 1,
+									newLines: 1,
+									header: "",
+									changedLines: [index + 1],
+								},
+							],
+							additions: 1,
+							deletions: 0,
+							isBinary: false,
+						}),
+					),
+					diffStats: {
+						fileCount: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1,
+						additions: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1,
+						deletions: 0,
+					},
+				},
+				createGitStub(),
+				[],
+				summaryDrafts,
+			),
+		);
+		const handler = getHandler<
+			{ path: string; summary: string },
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
+
+		const result = await handler(
+			{ path: "src/large-0.ts", summary: "Nope." },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "record_file_summary",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.equal(
+			result.textResultForLlm,
+			"Per-file summaries are disabled when reviewed files exceed 25.",
 		);
 	});
 });

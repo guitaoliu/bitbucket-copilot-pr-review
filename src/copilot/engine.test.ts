@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { ChangedFile, HunkSummary } from "../git/types.ts";
+import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "../review/summary.ts";
 import type {
 	FindingDraft,
 	ReviewContext,
@@ -534,6 +535,60 @@ describe("createReviewSessionHooks", () => {
 			{
 				message:
 					"Copilot completed tool record_file_summary result=success path=src/third.ts findings=0/3 file_summaries=2/4 pr_summary=recorded",
+				details: [],
+			},
+		]);
+	});
+
+	it("disables file summary progress and guidance for large reviews", async () => {
+		const largeReviewCount = MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1;
+		const { logger, infoEntries } = createLoggerSpy();
+		const hooks = createReviewSessionHooks(
+			config,
+			logger,
+			[],
+			createProgressState(
+				{ prSummary: "done", fileSummaries: [] },
+				largeReviewCount,
+			),
+		);
+
+		const sessionStart = await hooks.onSessionStart();
+		assert.match(
+			sessionStart.additionalContext,
+			/per-file summaries are disabled for large reviews with more than 25 reviewed files/i,
+		);
+
+		const preUse = await hooks.onPreToolUse({
+			toolName: "record_file_summary",
+			toolArgs: { path: "src/file.ts", summary: "adds guard" },
+			cwd: "/tmp/repo",
+		});
+		assert.deepEqual(preUse, {
+			permissionDecision: "allow",
+			additionalContext:
+				"Per-file summaries are disabled for reviews with more than 25 reviewed files; do not use this tool.",
+		});
+
+		const postUse = await hooks.onPostToolUse({
+			toolName: "record_pr_summary",
+			toolArgs: { summary: "ok" },
+			toolResult: { textResultForLlm: "ok", resultType: "success" },
+			cwd: "/tmp/repo",
+		});
+		assert.deepEqual(postUse, {
+			additionalContext:
+				"Keep the PR summary concise and factual. Per-file summaries are disabled for reviews with more than 25 reviewed files, so continue reviewing without recording them.",
+		});
+
+		assert.deepEqual(infoEntries, [
+			{
+				message: "Copilot requested tool record_file_summary path=src/file.ts",
+				details: [],
+			},
+			{
+				message:
+					"Copilot completed tool record_pr_summary result=success summary_chars=2 findings=0/3 file_summaries=disabled pr_summary=recorded",
 				details: [],
 			},
 		]);

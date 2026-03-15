@@ -1,5 +1,9 @@
 import { defineTool } from "@github/copilot-sdk";
 import { z } from "zod";
+import {
+	MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES,
+	shouldCreatePerFileSummaries,
+} from "../../review/summary.ts";
 import { toRejectedResult } from "./common.ts";
 import type { ReviewToolContext } from "./context.ts";
 
@@ -9,7 +13,7 @@ const recordFileSummarySchema = z.object({
 });
 
 export function createRecordFileSummaryTool(toolContext: ReviewToolContext) {
-	const { summaryDrafts, reviewedFileMap } = toolContext;
+	const { context, summaryDrafts, reviewedFileMap } = toolContext;
 
 	return defineTool("record_file_summary", {
 		description:
@@ -31,6 +35,12 @@ export function createRecordFileSummaryTool(toolContext: ReviewToolContext) {
 			required: ["path", "summary"],
 		},
 		handler: async (args: { path: string; summary: string }) => {
+			if (!shouldCreatePerFileSummaries(context.reviewedFiles.length)) {
+				return toRejectedResult(
+					`Per-file summaries are disabled when reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES}.`,
+				);
+			}
+
 			const parsed = recordFileSummarySchema.safeParse(args);
 			if (!parsed.success) {
 				return toRejectedResult(

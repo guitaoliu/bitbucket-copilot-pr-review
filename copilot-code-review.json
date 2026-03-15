@@ -1,7 +1,7 @@
 {
 	"$schema": "./schemas/copilot-code-review.schema.json",
 	"review": {
-		"maxFiles": 200,
+		"maxFiles": 300,
 		"maxFindings": 25,
 		"minConfidence": "medium",
 		"maxPatchChars": 12000,

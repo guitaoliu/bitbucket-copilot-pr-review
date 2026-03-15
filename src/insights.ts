@@ -13,6 +13,7 @@ import {
 import {
 	buildDefaultPullRequestSummary,
 	buildSkippedFileSummary,
+	shouldCreatePerFileSummaries,
 	summarizeSkippedReason,
 } from "./review/summary.ts";
 import type {
@@ -271,6 +272,10 @@ function buildFileChangeSummaryLines(
 	context: ReviewContext,
 	outcome: ReviewOutcome,
 ): string[] {
+	if (!shouldCreatePerFileSummaries(context.reviewedFiles.length)) {
+		return [];
+	}
+
 	const reviewedSummaryMap = new Map(
 		(outcome.fileSummaries ?? []).map((entry) => [entry.path, entry.summary]),
 	);

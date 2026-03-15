@@ -10,6 +10,7 @@ import {
 	buildSkippedReviewOutput,
 } from "./result.ts";
 import type { ReviewArtifacts } from "./runner-types.ts";
+import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "./summary.ts";
 import type { ReviewContext, ReviewOutcome } from "./types.ts";
 
 const baseConfig: ReviewerConfig = {
@@ -383,6 +384,46 @@ describe("buildReviewArtifacts", () => {
 			artifacts.commentBody,
 			/omitted to fit Bitbucket comment limit/,
 		);
+	});
+
+	it("omits reviewed changes in artifacts for reviews above the summary cutoff", () => {
+		const context = createReviewContext();
+		context.reviewedFiles = Array.from(
+			{ length: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1 },
+			(_, index) => ({
+				path: `src/file-${index}.ts`,
+				status: "modified" as const,
+				patch: `diff --git a/src/file-${index}.ts b/src/file-${index}.ts`,
+				changedLines: [index + 1],
+				hunks: [
+					{
+						oldStart: index + 1,
+						oldLines: 1,
+						newStart: index + 1,
+						newLines: 1,
+						header: "",
+						changedLines: [index + 1],
+					},
+				],
+				additions: 1,
+				deletions: 0,
+				isBinary: false,
+			}),
+		);
+		context.diffStats = {
+			fileCount: context.reviewedFiles.length + context.skippedFiles.length,
+			additions: context.reviewedFiles.length,
+			deletions: 0,
+		};
+
+		const artifacts = buildReviewArtifacts(baseConfig, context, {
+			...createReviewOutcome(),
+			fileSummaries: [],
+		});
+
+		assert.doesNotMatch(artifacts.commentBody, /### Reviewed Changes/);
+		assert.match(artifacts.commentBody, /### What Changed/);
+		assert.match(artifacts.commentBody, /### Main Concerns/);
 	});
 });
 

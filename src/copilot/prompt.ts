@@ -1,4 +1,8 @@
 import type { ReviewerConfig } from "../config/types.ts";
+import {
+	MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES,
+	shouldCreatePerFileSummaries,
+} from "../review/summary.ts";
 import type { ReviewContext } from "../review/types.ts";
 import {
 	FINDING_TAXONOMY_PREFERENCE_PROMPT_LINE,
@@ -10,6 +14,9 @@ export function buildPrompt(
 	config: ReviewerConfig,
 	context: ReviewContext,
 ): string {
+	const perFileSummariesEnabled = shouldCreatePerFileSummaries(
+		context.reviewedFiles.length,
+	);
 	const rootAgentsSection = context.rootAgentsInstructions
 		? [
 				"",
@@ -33,6 +40,11 @@ export function buildPrompt(
 		`merge_base_commit: ${context.mergeBaseCommit}`,
 		`reviewed_files_available_through_tools: ${context.reviewedFiles.length}`,
 		`skipped_files: ${context.skippedFiles.length}`,
+		`per_file_summaries: ${
+			perFileSummariesEnabled
+				? "enabled"
+				: `disabled (reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES})`
+		}`,
 		"</pull_request_context>",
 		...rootAgentsSection,
 		"",
@@ -64,7 +76,9 @@ export function buildPrompt(
 		FINDING_TAXONOMY_PREFERENCE_PROMPT_LINE,
 		"",
 		"Finding rules:",
-		"- Record exactly one PR-purpose summary with record_pr_summary, and one file summary with record_file_summary for every reviewed file you understand.",
+		perFileSummariesEnabled
+			? "- Record exactly one PR-purpose summary with record_pr_summary, and one file summary with record_file_summary for every reviewed file you understand."
+			: `- Record exactly one PR-purpose summary with record_pr_summary. Per-file summaries are disabled when reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES}, so do not call record_file_summary for this review.`,
 		"- Use emit_finding only for concrete validated issues. If a concern is still a question, investigate more or drop it.",
 		"- Use list_recorded_findings before adding more if you need to avoid duplicates or confirm coverage; use replace_recorded_finding to strengthen a draft or remove_recorded_finding to drop a weak one.",
 		"- Emit one finding per root cause. The path must be a reviewed file; skipped files are never valid targets.",
@@ -79,7 +93,9 @@ export function buildPrompt(
 		"3. Use get_file_diff on a suspicious file; if the diff is truncated, page with get_file_diff_hunk.",
 		"4. Use get_file_content on head and base as needed to verify the exact behavioral change.",
 		"5. Use related-file and search tools narrowly to validate cross-file assumptions.",
-		"6. As you confirm intent, call record_pr_summary once and record_file_summary for each reviewed file.",
+		perFileSummariesEnabled
+			? "6. As you confirm intent, call record_pr_summary once and record_file_summary for each reviewed file."
+			: `6. As you confirm intent, call record_pr_summary once. Do not record per-file summaries when reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES}.`,
 		"7. Use list_recorded_findings, replace_recorded_finding, or remove_recorded_finding when refining the final distinct set.",
 		"8. Call emit_finding for every validated distinct issue you find, then sanity-check coverage and end with a concise plain-text conclusion.",
 		"",
