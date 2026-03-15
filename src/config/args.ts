@@ -70,7 +70,7 @@ export function getHelpText(): string {
 	});
 
 	return [
-		"Usage: pnpm review -- [options]",
+		"Usage: bitbucket-copilot-pr-review [options]",
 		"",
 		"Options:",
 		...optionLines,

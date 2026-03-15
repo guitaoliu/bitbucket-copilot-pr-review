@@ -42,10 +42,11 @@ This file is for agentic coding assistants working in this repository.
 
 ## Running the CLI
 
-- Normal run: `pnpm review --`
+- Build distributable CLI: `pnpm build`
+- Normal run: `pnpm review`
 - Dry run without publishing: `pnpm review:dry-run`
-- Direct invocation: `node src/cli.ts --dry-run`
-- Help: `node src/cli.ts --help`
+- Source invocation: `pnpm review:src:dry-run`
+- Built CLI help: `node dist/cli.js --help`
 
 ## Single-test commands
 

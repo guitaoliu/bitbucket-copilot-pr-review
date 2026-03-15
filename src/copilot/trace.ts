@@ -1,9 +1,8 @@
-import type { CopilotSession } from "@github/copilot-sdk";
-
 import type { Logger } from "../shared/logger.ts";
+import type { CopilotSessionLike } from "./engine.ts";
 
 export function wireReasoningTrace(
-	session: CopilotSession,
+	session: CopilotSessionLike,
 	logger: Logger,
 ): void {
 	const reasoningContentById = new Map<string, string>();

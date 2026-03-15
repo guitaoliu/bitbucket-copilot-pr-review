@@ -53,7 +53,6 @@ fi
 require_command git
 require_command node
 require_command pnpm
-require_command copilot
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REVIEWER_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"

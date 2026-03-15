@@ -11,9 +11,9 @@ Automated Bitbucket Data Center pull request review for Jenkins, powered by the 
 
 ## Runtime requirements
 
-- Node.js 22+
+- Node.js 24.12+
 - pnpm 10+
-- `copilot` CLI installed on the Jenkins agent and available in `PATH`
+- `@github/copilot` is installed with this package so the reviewer can resolve and launch the bundled Copilot CLI runtime from `node_modules`
 - a GitHub Copilot-enabled account for CI
 
 ## Required credentials
@@ -82,16 +82,32 @@ If your Bitbucket environment requires basic auth instead of bearer tokens, prov
 ```bash
 corepack enable
 pnpm install
+pnpm build
 pnpm typecheck
 ```
 
 Note: `@github/copilot-sdk` currently needs a small pnpm patch in this repo to import `vscode-jsonrpc/node.js` correctly under Node ESM. The patch is tracked in `patches/@github__copilot-sdk@0.1.32.patch` and applied automatically by pnpm.
 
+## CLI package
+
+The project now builds a distributable CLI with `tsdown` into `dist/cli.js`.
+
+```bash
+pnpm build
+node dist/cli.js --help
+```
+
+After publishing, the package can be invoked with `npx`:
+
+```bash
+npx bitbucket-copilot-pr-review --help
+```
+
 ## Run locally
 
 ```bash
 pnpm typecheck
-node src/cli.ts --dry-run
+pnpm review:dry-run
 ```
 
 ## Test locally against a real repo and PR
@@ -202,7 +218,7 @@ export BITBUCKET_CA_CERT_PATH="/path/to/corporate-root-ca.pem"
 export LOG_LEVEL="debug"
 export REPORT_TITLE="Copilot PR Review (local dry run)"
 
-node src/cli.ts --dry-run
+pnpm review:dry-run
 ```
 
 Copilot reasoning is always written through the logger to `stderr`, while the final review payload is always printed as JSON on `stdout`.
@@ -212,7 +228,7 @@ If you want to include local CI context in the review:
 ```bash
 printf 'Unit tests passed\nLint passed\n' > /tmp/ci-summary.txt
 export CI_SUMMARY_PATH="/tmp/ci-summary.txt"
-node src/cli.ts --dry-run
+pnpm review:dry-run
 ```
 
 If you want the local run to publish to the Bitbucket PR page, remove `--dry-run` and use a unique report key so you do not overwrite the Jenkins report. Bitbucket Data Center limits report keys to 50 characters, and the reviewer still sanitizes and shortens overrides when needed:
@@ -222,7 +238,7 @@ export REPORT_KEY="copilot-local-$USER"
 export REPORT_TITLE="Copilot PR Review (local)"
 export REPORTER_NAME="GitHub Copilot Local Test"
 
-node src/cli.ts
+pnpm review
 ```
 
 What to expect:
@@ -235,7 +251,7 @@ Common local test issues:
 
 - the repo in `REPO_ROOT` is not the same repo as `BITBUCKET_PROJECT_KEY` and `BITBUCKET_REPO_SLUG`
 - the local checkout cannot fetch the source or target commit referenced by the PR
-- `copilot` CLI is not installed or authenticated
+- the bundled `@github/copilot` runtime is missing or the GitHub Copilot auth state is not ready
 - Node.js does not trust the Bitbucket TLS certificate chain; use `BITBUCKET_CA_CERT_PATH`, or keep the default `BITBUCKET_INSECURE_TLS=1` until trust is configured
 - the PR is from a fork and your local git credentials cannot fetch the fork remote URL returned by Bitbucket
 
@@ -251,13 +267,13 @@ Suggested pipeline flow:
 
 1. run your normal checkout, lint, test, and build stages first
 2. write a compact CI summary to `CI_SUMMARY_PATH`
-3. invoke `node src/cli.ts` in the PR workspace
+3. invoke `node dist/cli.js` in the PR workspace, or `pnpm review`
 
 Important Jenkins assumptions:
 
 - the Jenkins workspace is the repository root, or set `REPO_ROOT`
 - the PR source and target commits are fetchable from the workspace remotes
-- the `copilot` CLI is preinstalled on the agent
+- `pnpm install` has been run so the bundled `@github/copilot` runtime is available to the reviewer
 
 Useful reviewer env vars in Jenkins:
 

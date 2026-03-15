@@ -22,6 +22,7 @@ describe("getHelpText", () => {
 	it("renders help lines from shared CLI metadata", () => {
 		const helpText = getHelpText();
 
+		assert.match(helpText, /Usage: bitbucket-copilot-pr-review \[options\]/);
 		assert.match(helpText, /--dry-run, --no-publish/);
 		assert.match(helpText, /--repo-root <path>/);
 		assert.match(helpText, /-h, --help/);

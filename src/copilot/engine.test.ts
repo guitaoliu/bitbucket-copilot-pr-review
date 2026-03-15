@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ReviewerConfig } from "../config/types.ts";
-import type { FindingDraft, ReviewSummaryDrafts } from "../review/types.ts";
+import type { ChangedFile, HunkSummary } from "../git/types.ts";
+import type {
+	FindingDraft,
+	ReviewContext,
+	ReviewSummaryDrafts,
+} from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
-import { createReviewSessionHooks } from "./engine.ts";
+import {
+	buildCopilotClientOptions,
+	createReviewSessionHooks,
+	runCopilotReview,
+} from "./engine.ts";
 import {
 	FINDING_TAXONOMY_HINT,
 	QUESTION_SHAPED_FINDING_HINT,
@@ -82,6 +91,66 @@ function createFindingDraft(index: number): FindingDraft {
 		confidence: "high",
 		title: `Issue ${index}`,
 		details: `Details ${index}`,
+	};
+}
+
+function createChangedFile(overrides: Partial<ChangedFile> = {}): ChangedFile {
+	const defaultHunk: HunkSummary = {
+		oldStart: 1,
+		oldLines: 1,
+		newStart: 1,
+		newLines: 1,
+		header: "",
+		changedLines: [1],
+	};
+
+	return {
+		path: "src/example.ts",
+		status: "modified",
+		patch: "diff --git a/src/example.ts b/src/example.ts",
+		changedLines: [1],
+		hunks: [defaultHunk],
+		additions: 1,
+		deletions: 0,
+		isBinary: false,
+		...overrides,
+	};
+}
+
+function createReviewContext(): ReviewContext {
+	return {
+		repoRoot: "/tmp/repo",
+		pr: {
+			id: 123,
+			version: 1,
+			state: "OPEN",
+			title: "Test PR",
+			description: "",
+			source: {
+				repositoryId: 1,
+				projectKey: "PROJ",
+				repoSlug: "repo",
+				refId: "refs/heads/feature",
+				displayId: "feature",
+				latestCommit: "head-123",
+			},
+			target: {
+				repositoryId: 1,
+				projectKey: "PROJ",
+				repoSlug: "repo",
+				refId: "refs/heads/main",
+				displayId: "main",
+				latestCommit: "base-123",
+			},
+		},
+		headCommit: "head-123",
+		baseCommit: "base-123",
+		mergeBaseCommit: "base-123",
+		reviewRevision: "review-rev-123",
+		rawDiff: "",
+		diffStats: { fileCount: 1, additions: 1, deletions: 0 },
+		reviewedFiles: [createChangedFile()],
+		skippedFiles: [],
 	};
 }
 
@@ -468,5 +537,90 @@ describe("createReviewSessionHooks", () => {
 				details: [],
 			},
 		]);
+	});
+});
+
+describe("buildCopilotClientOptions", () => {
+	it("pins the resolved bundled copilot cli path into client options", () => {
+		const options = buildCopilotClientOptions(
+			config,
+			() => "/tmp/node_modules/@github/copilot/index.js",
+		);
+
+		assert.equal(options.cliPath, "/tmp/node_modules/@github/copilot/index.js");
+		assert.equal(options.cwd, config.repoRoot);
+		assert.equal(options.logLevel, "error");
+		assert.equal(options.useLoggedInUser, true);
+	});
+
+	it("passes the GitHub token and debug log level through when configured", () => {
+		const options = buildCopilotClientOptions(
+			{
+				...config,
+				logLevel: "debug",
+				copilot: {
+					...config.copilot,
+					githubToken: "token",
+				},
+			},
+			() => "/tmp/node_modules/@github/copilot/index.js",
+		);
+
+		assert.equal(options.cliPath, "/tmp/node_modules/@github/copilot/index.js");
+		assert.equal(options.logLevel, "debug");
+		assert.equal(options.githubToken, "token");
+		assert.equal(options.useLoggedInUser, false);
+	});
+});
+
+describe("runCopilotReview", () => {
+	it("passes the explicit bundled cli path into the created Copilot client", async () => {
+		const context = createReviewContext();
+		const createdOptions: Array<Record<string, unknown>> = [];
+
+		const session = {
+			on() {
+				return () => {};
+			},
+			async sendAndWait() {
+				return { data: { content: "Looks good." } };
+			},
+			async disconnect() {},
+		};
+
+		const outcome = await runCopilotReview(
+			config,
+			context,
+			{} as never,
+			createLoggerSpy().logger,
+			{
+				resolveCliPath: () => "/tmp/node_modules/@github/copilot/index.js",
+				createCopilotClient(options) {
+					createdOptions.push(options as Record<string, unknown>);
+
+					return {
+						async start() {},
+						async createSession() {
+							throw new Error("createSession should not be called directly");
+						},
+						async stop() {
+							return [];
+						},
+					};
+				},
+				async createReviewSession() {
+					return session;
+				},
+			},
+		);
+
+		assert.equal(createdOptions.length, 1);
+		assert.equal(
+			createdOptions[0]?.cliPath,
+			"/tmp/node_modules/@github/copilot/index.js",
+		);
+		assert.equal(createdOptions[0]?.cwd, config.repoRoot);
+		assert.equal(outcome.findings.length, 0);
+		assert.equal(outcome.assistantMessage, "Looks good.");
 	});
 });

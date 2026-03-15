@@ -9,7 +9,7 @@ pipeline {
   stages {
     stage("Tooling") {
       steps {
-        sh "n lts && hash -r && npm install -g pnpm@10 && node -v && pnpm -v && copilot version"
+        sh "n lts && hash -r && npm install -g pnpm@10 && node -v && pnpm -v"
       }
     }
 
@@ -37,7 +37,7 @@ pipeline {
             "BITBUCKET_REPO_SLUG=my-service",
             "BITBUCKET_PR_ID=${env.CHANGE_ID}"
           ]) {
-            sh "node src/cli.ts"
+            sh "pnpm review"
           }
         }
       }
