@@ -219,11 +219,11 @@ describe("buildReviewArtifacts", () => {
 			artifacts.report.data?.map(({ title, value }) => [title, value]),
 			[
 				["Findings", 1],
+				["Finding taxonomy", "1 bug"],
 				["Review revision", "review-rev-123"],
 				["Review schema", "2"],
 				["Reviewed commit", "head-123"],
-				["Reviewed files", 2],
-				["Skipped files", 1],
+				["Review scope", "2 reviewed, 1 skipped"],
 			],
 		);
 		assert.equal(artifacts.annotations.length, 1);
@@ -233,7 +233,7 @@ describe("buildReviewArtifacts", () => {
 			line: 42,
 			message: [
 				"Null handling is broken",
-				"Severity: HIGH | Type: BUG | Confidence: high",
+				"Type: BUG | Severity: HIGH | Confidence: high",
 				"The new branch dereferences a possibly null response.",
 			].join("\n"),
 			severity: "HIGH",
@@ -254,15 +254,25 @@ describe("buildReviewArtifacts", () => {
 		);
 		assert.match(
 			artifacts.commentBody,
-			/### Intent\nHardens the service validation path before merge\./,
+			/### What Changed\nHardens the service validation path before merge\./,
 		);
-		assert.match(artifacts.commentBody, /### Overview/);
-		assert.match(artifacts.commentBody, /### Findings/);
-		assert.match(artifacts.commentBody, /### Files/);
-		assert.match(artifacts.commentBody, /### Skipped/);
+		assert.match(artifacts.commentBody, /### Conclusion/);
+		assert.match(
+			artifacts.commentBody,
+			/- Recommendation: address 1 reportable issue before merge\./,
+		);
+		assert.match(artifacts.commentBody, /### Review Scope/);
+		assert.match(artifacts.commentBody, /### Main Concerns/);
+		assert.match(artifacts.commentBody, /### Reviewed Changes/);
+		assert.match(artifacts.commentBody, /### Outside Review Scope/);
 		assert.match(
 			artifacts.commentBody,
 			/src\/service\.ts.*Adds a null guard before dereferencing the service response\./s,
+		);
+		assert.match(artifacts.commentBody, /- Main risks: 1 bug/);
+		assert.match(
+			artifacts.commentBody,
+			/1\. \[BUG\/HIGH\/high\].*Null handling is broken/s,
 		);
 		assert.match(artifacts.commentBody, /Null handling is broken/);
 	});
@@ -302,7 +312,7 @@ describe("buildReviewArtifacts", () => {
 				path: "src/other.ts",
 				message: [
 					"File-level issue",
-					"Severity: MEDIUM | Type: BUG | Confidence: medium",
+					"Type: BUG | Severity: MEDIUM | Confidence: medium",
 					"Cannot be pinned to a single line.",
 				].join("\n"),
 				severity: "MEDIUM",

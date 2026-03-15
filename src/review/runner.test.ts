@@ -508,4 +508,92 @@ describe("runReview", () => {
 			/^confirm:Existing cached artifacts for PR revision review-rev-123 look unusable\./,
 		);
 	});
+
+	it("reruns automatically without prompting when the PR head changed", async () => {
+		const pr = createPullRequest();
+		const context = createReviewContext(pr);
+		const oldHead = "head-old";
+		let copilotCalled = false;
+		let confirmCalled = false;
+		const warnings: string[] = [];
+		const client: FakeBitbucketClient = {
+			async getPullRequest() {
+				return pr;
+			},
+			async getCodeInsightsReport(commitId) {
+				if (commitId === context.headCommit) {
+					return undefined;
+				}
+
+				const metadata = buildReviewMetadataFields({
+					revision: context.reviewRevision,
+					reviewedCommit: oldHead,
+				}).map(({ title, value }) => ({ title, value }));
+				return {
+					data: [{ title: "Findings", value: 1 }, ...metadata],
+				};
+			},
+			async listCodeInsightsAnnotations() {
+				return [];
+			},
+			async getCodeInsightsAnnotationCount() {
+				return 0;
+			},
+			async findPullRequestCommentByTag() {
+				return {
+					text: [
+						"<!-- copilot-pr-review -->",
+						"<!-- copilot-pr-review:schema:2 -->",
+						"<!-- copilot-pr-review:revision:review-rev-123 -->",
+						`<!-- copilot-pr-review:reviewed-commit:${oldHead} -->`,
+						`<!-- copilot-pr-review:published-commit:${oldHead} -->`,
+					].join("\n"),
+				};
+			},
+			async publishCodeInsights() {},
+			async upsertPullRequestComment() {},
+		};
+		const logSpy: Logger = {
+			...logger,
+			warn(message) {
+				warnings.push(message);
+			},
+		};
+
+		const result = await runReview(
+			{
+				...baseConfig,
+				review: {
+					...baseConfig.review,
+					confirmRerun: true,
+				},
+			},
+			logSpy,
+			{
+				createBitbucketClient: () => client as never,
+				buildReviewContext: async () => ({
+					config: baseConfig,
+					context,
+					git: {} as GitRepository,
+				}),
+				runCopilotReview: async () => {
+					copilotCalled = true;
+					return createReviewOutcome();
+				},
+				confirmRerun: async () => {
+					confirmCalled = true;
+					return false;
+				},
+			},
+		);
+
+		assert.equal(confirmCalled, false);
+		assert.equal(copilotCalled, true);
+		assert.equal(result.skipped, false);
+		assert.equal(warnings.length, 1);
+		assert.match(
+			warnings[0] ?? "",
+			/rerunning review to refresh the published output/,
+		);
+	});
 });

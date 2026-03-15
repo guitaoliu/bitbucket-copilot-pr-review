@@ -1,8 +1,24 @@
 import { defineTool } from "@github/copilot-sdk";
+import { z } from "zod";
 
 import { getRepoFileAccessDecision } from "../../policy/path-access.ts";
-import { buildFileSliceResult, toRejectedResult } from "./common.ts";
+import {
+	buildFileSliceResult,
+	buildMissingPathResult,
+	buildTextUnavailableResult,
+	toRejectedResult,
+	validateFileSliceRange,
+} from "./common.ts";
 import type { ReviewToolContext } from "./context.ts";
+
+const getRelatedFileContentArgsSchema = z
+	.object({
+		path: z.string().min(1),
+		version: z.enum(["head", "base"]),
+		startLine: z.number().int().min(1).optional(),
+		endLine: z.number().int().min(1).optional(),
+	})
+	.strict();
 
 export function createGetRelatedFileContentTool(
 	toolContext: ReviewToolContext,
@@ -14,6 +30,7 @@ export function createGetRelatedFileContentTool(
 			"Read a safe repo-relative file outside the changed set for nearby architectural context.",
 		parameters: {
 			type: "object",
+			additionalProperties: false,
 			properties: {
 				path: {
 					type: "string",
@@ -43,29 +60,62 @@ export function createGetRelatedFileContentTool(
 			startLine?: number;
 			endLine?: number;
 		}) => {
-			const decision = getRepoFileAccessDecision(args.path);
+			const parsedArgs = getRelatedFileContentArgsSchema.safeParse(args);
+			if (!parsedArgs.success) {
+				return toRejectedResult(
+					`Invalid related-file payload: ${parsedArgs.error.message}`,
+				);
+			}
+
+			const decision = getRepoFileAccessDecision(parsedArgs.data.path);
 			if (!decision.include) {
 				return toRejectedResult(
 					`Related file access rejected: ${decision.reason}`,
 				);
 			}
 
+			const rangeError = validateFileSliceRange(
+				parsedArgs.data.startLine,
+				parsedArgs.data.endLine,
+			);
+			if (rangeError) {
+				return toRejectedResult(rangeError);
+			}
+
 			const commit =
-				args.version === "head" ? context.headCommit : context.mergeBaseCommit;
-			const content = await git.readFileAtCommit(
+				parsedArgs.data.version === "head"
+					? context.headCommit
+					: context.mergeBaseCommit;
+			const content = await git.readTextFileAtCommit(
 				commit,
 				decision.normalizedPath,
 			);
-			if (content === undefined) {
-				return `File ${decision.normalizedPath} is not present in the ${args.version} revision.`;
+			if (content.status === "not_found") {
+				return buildMissingPathResult(
+					decision.normalizedPath,
+					parsedArgs.data.version,
+				);
+			}
+
+			if (content.status === "not_text") {
+				return buildTextUnavailableResult(
+					decision.normalizedPath,
+					parsedArgs.data.version,
+				);
+			}
+
+			if (content.status === "not_file") {
+				return toRejectedResult(
+					`Related file access rejected: ${decision.normalizedPath} is a directory, not a file.`,
+				);
 			}
 
 			return buildFileSliceResult(
-				content,
+				content.content,
 				decision.normalizedPath,
-				args.version,
-				args.startLine,
-				args.endLine,
+				parsedArgs.data.version,
+				parsedArgs.data.startLine,
+				parsedArgs.data.endLine,
 				config.review,
 			);
 		},

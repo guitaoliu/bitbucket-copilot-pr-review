@@ -56,6 +56,10 @@ type RepoDirectoryAccessDecision =
 	| { include: true; normalizedPath: string }
 	| { include: false; reason: string };
 
+type RepoDirectoriesAccessDecision =
+	| { include: true; normalizedPaths: string[] }
+	| { include: false; reason: string };
+
 type RepoFileAccessDecision =
 	| { include: true; normalizedPath: string }
 	| { include: false; reason: string };
@@ -118,30 +122,81 @@ function getBasePathRejectionReason(
 	return undefined;
 }
 
+function collapseNestedDirectoryPaths(paths: string[]): string[] {
+	let collapsed: string[] = [];
+
+	for (const normalizedPath of paths) {
+		if (
+			collapsed.some(
+				(existingPath) =>
+					existingPath === normalizedPath ||
+					normalizedPath.startsWith(`${existingPath}/`),
+			)
+		) {
+			continue;
+		}
+
+		collapsed = collapsed.filter(
+			(existingPath) => !existingPath.startsWith(`${normalizedPath}/`),
+		);
+		collapsed.push(normalizedPath);
+	}
+
+	return collapsed;
+}
+
+export function getRepoDirectoriesAccessDecision(
+	directoryPaths: string[] | undefined,
+): RepoDirectoriesAccessDecision {
+	if (!directoryPaths || directoryPaths.length === 0) {
+		return allow({ normalizedPaths: [] });
+	}
+
+	let repoRootRequested = false;
+	const normalizedPaths: string[] = [];
+
+	for (const directoryPath of directoryPaths) {
+		const trimmed = directoryPath.trim();
+		if (trimmed === "" || trimmed === ".") {
+			repoRootRequested = true;
+			continue;
+		}
+
+		const normalizedPath = normalizeRepoRelativePath(trimmed);
+		if (!normalizedPath) {
+			return reject(
+				"directory must be repo-relative and stay within the repository",
+			);
+		}
+
+		const pathReason = getBasePathRejectionReason(normalizedPath);
+		if (pathReason) {
+			return reject(pathReason);
+		}
+
+		normalizedPaths.push(normalizedPath);
+	}
+
+	if (repoRootRequested) {
+		return allow({ normalizedPaths: [] });
+	}
+
+	return allow({
+		normalizedPaths: collapseNestedDirectoryPaths(normalizedPaths),
+	});
+}
+
 export function getRepoDirectoryAccessDecision(
 	directoryPath: string | undefined,
 ): RepoDirectoryAccessDecision {
-	if (
-		directoryPath === undefined ||
-		directoryPath.trim() === "" ||
-		directoryPath.trim() === "."
-	) {
-		return allow({ normalizedPath: "" });
+	const decision = getRepoDirectoriesAccessDecision(
+		directoryPath === undefined ? undefined : [directoryPath],
+	);
+	if (!decision.include) {
+		return decision;
 	}
 
-	const normalizedPath = normalizeRepoRelativePath(directoryPath);
-	if (!normalizedPath) {
-		return reject(
-			"directory must be repo-relative and stay within the repository",
-		);
-	}
-
-	const pathReason = getBasePathRejectionReason(normalizedPath);
-	if (pathReason) {
-		return reject(pathReason);
-	}
-
-	return allow({ normalizedPath });
+	return allow({ normalizedPath: decision.normalizedPaths[0] ?? "" });
 }
 
 export function getRepoFileAccessDecision(

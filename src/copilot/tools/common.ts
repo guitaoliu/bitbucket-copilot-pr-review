@@ -1,10 +1,12 @@
 import type { ReviewerConfig } from "../../config/types.ts";
+import type { GitRepository } from "../../git/repo.ts";
 import type { ChangedFile } from "../../git/types.ts";
 import { formatLineRanges } from "../../policy/line-ranges.ts";
+import { getRepoFileAccessDecision } from "../../policy/path-access.ts";
 import { normalizeFindingDraftLocation } from "../../review/file.ts";
 import type { FindingDraft } from "../../review/types.ts";
 import { omitUndefined } from "../../shared/object.ts";
-import { formatFileSlice } from "../../shared/text.ts";
+import { formatFileSlice, truncateText } from "../../shared/text.ts";
 
 export function summarizeFile(file: ChangedFile): Record<string, unknown> {
 	return {
@@ -65,6 +67,32 @@ export function makeDirectoryPreview(
 	};
 }
 
+export function describeDirectoryScope(directoryPaths: string[]): string[] {
+	return directoryPaths.length > 0 ? directoryPaths : ["."];
+}
+
+export function filterSafeRepoPaths<T extends { path: string }>(
+	entries: T[],
+): {
+	entries: T[];
+	filteredCount: number;
+} {
+	const safeEntries: T[] = [];
+	let filteredCount = 0;
+
+	for (const entry of entries) {
+		const decision = getRepoFileAccessDecision(entry.path);
+		if (!decision.include) {
+			filteredCount += 1;
+			continue;
+		}
+
+		safeEntries.push(entry);
+	}
+
+	return { entries: safeEntries, filteredCount };
+}
+
 export function validateSearchQuery(
 	query: string,
 	maxLength: number,
@@ -83,6 +111,79 @@ export function validateSearchQuery(
 	}
 
 	return trimmed;
+}
+
+export function validateFileSliceRange(
+	startLine: number | undefined,
+	endLine: number | undefined,
+): string | undefined {
+	if (startLine !== undefined && endLine !== undefined && endLine < startLine) {
+		return `endLine (${endLine}) must be greater than or equal to startLine (${startLine}).`;
+	}
+
+	return undefined;
+}
+
+export async function validateDirectoryScopesAtCommit(
+	git: GitRepository,
+	commit: string,
+	directories: string[],
+): Promise<
+	| { status: "ok" }
+	| { status: "not_found"; path: string }
+	| { status: "not_directory"; path: string }
+> {
+	for (const directory of directories) {
+		const pathType = await git.getPathTypeAtCommit(commit, directory);
+		if (!pathType) {
+			return { status: "not_found", path: directory };
+		}
+
+		if (pathType !== "directory") {
+			return { status: "not_directory", path: directory };
+		}
+	}
+
+	return { status: "ok" };
+}
+
+export function buildMissingPathResult(
+	path: string,
+	version: "head" | "base",
+	kind: "file" | "directory" = "file",
+) {
+	return {
+		status: "not_found" as const,
+		kind,
+		path,
+		version,
+		message: `${kind === "directory" ? "Directory" : "File"} ${path} is not present in the ${version} revision.`,
+	};
+}
+
+export function buildTextUnavailableResult(
+	path: string,
+	version: "head" | "base",
+) {
+	return {
+		status: "unavailable" as const,
+		path,
+		version,
+		message: `File ${path} could not be read as UTF-8 text from the ${version} revision.`,
+	};
+}
+
+export function buildTruncatedPatchResult(patch: string, maxChars: number) {
+	const truncated = patch.length > maxChars;
+	const returnedPatch = truncateText(patch, maxChars, {
+		suffix: "\n... truncated ...",
+	});
+
+	return {
+		patch: returnedPatch,
+		truncated,
+		returnedPatchChars: returnedPatch.length,
+	};
 }
 
 export function validateFindingDraftLocation(
@@ -137,6 +238,16 @@ export function buildFileSliceResult(
 ) {
 	const totalLines = content.split(/\r?\n/).length;
 	const requestedStart = Math.max(1, startLine ?? 1);
+	if (requestedStart > totalLines) {
+		return {
+			status: "out_of_range" as const,
+			path: filePath,
+			version,
+			totalLines,
+			message: `Requested startLine ${requestedStart} is beyond the end of ${filePath} (${totalLines} lines).`,
+		};
+	}
+
 	const defaultEnd = requestedStart + reviewConfig.defaultFileSliceLines - 1;
 	const requestedEnd = endLine ?? defaultEnd;
 	const safeEnd = Math.min(

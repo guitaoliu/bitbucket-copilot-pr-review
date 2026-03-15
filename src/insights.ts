@@ -30,6 +30,7 @@ const FILE_STATUS_ORDER = [
 	"copied",
 	"deleted",
 ] as const;
+const FINDING_TYPE_ORDER = ["BUG", "VULNERABILITY", "CODE_SMELL"] as const;
 const SKIP_REASON_ORDER = [
 	"deleted file",
 	"binary diff",
@@ -88,8 +89,8 @@ function formatCommentReference(
 
 function buildAnnotationMetadataLine(finding: ReviewFinding): string {
 	const parts = [
-		`Severity: ${finding.severity}`,
 		`Type: ${finding.type}`,
+		`Severity: ${finding.severity}`,
 		`Confidence: ${finding.confidence}`,
 	];
 
@@ -98,6 +99,43 @@ function buildAnnotationMetadataLine(finding: ReviewFinding): string {
 	}
 
 	return parts.join(" | ");
+}
+
+function buildFindingBadge(finding: ReviewFinding): string {
+	return `${finding.type}/${finding.severity}/${finding.confidence}`;
+}
+
+function buildFindingTypeSummary(
+	findings: ReviewFinding[],
+): string | undefined {
+	if (findings.length === 0) {
+		return undefined;
+	}
+
+	const counts = new Map<ReviewFinding["type"], number>();
+	for (const finding of findings) {
+		counts.set(finding.type, (counts.get(finding.type) ?? 0) + 1);
+	}
+
+	const parts = FINDING_TYPE_ORDER.flatMap((type) => {
+		const count = counts.get(type) ?? 0;
+		if (count === 0) {
+			return [];
+		}
+
+		switch (type) {
+			case "BUG":
+				return `${count} ${pluralize(count, "bug")}`;
+			case "VULNERABILITY":
+				return `${count} ${pluralize(count, "vulnerability", "vulnerabilities")}`;
+			case "CODE_SMELL":
+				return `${count} ${pluralize(count, "code smell")}`;
+			default:
+				return [];
+		}
+	});
+
+	return parts.length > 0 ? parts.join(", ") : undefined;
 }
 
 function buildAnnotationMessage(finding: ReviewFinding): string {
@@ -112,7 +150,7 @@ function buildFindingSummaryLines(findings: ReviewFinding[]): string[] {
 	return findings.map((finding, index) => {
 		const location =
 			finding.line > 0 ? `${finding.path}:${finding.line}` : finding.path;
-		return `${index + 1}. [${finding.severity}/${finding.confidence}] ${location} - ${finding.title}`;
+		return `${index + 1}. [${buildFindingBadge(finding)}] ${location} - ${finding.title}`;
 	});
 }
 
@@ -127,8 +165,19 @@ function buildCommentFindingSummaryLines(
 			locationLabel,
 			buildPullRequestDiffLink(prLink, finding.path, finding.line),
 		);
-		return `${index + 1}. [${finding.severity}/${finding.confidence}] ${location} - ${finding.title}`;
+		return `${index + 1}. [${buildFindingBadge(finding)}] ${location} - ${finding.title}`;
 	});
+}
+
+function buildCommentFindingSummaryHeaderLines(
+	findings: ReviewFinding[],
+): string[] {
+	if (findings.length === 0) {
+		return [];
+	}
+
+	const typeSummary = buildFindingTypeSummary(findings);
+	return typeSummary ? [`- Main risks: ${typeSummary}`] : [];
 }
 
 function buildChangedFileStatusSummary(
@@ -188,13 +237,33 @@ function buildSkippedReasonSummary(
 	return parts.length > 0 ? parts.join(", ") : undefined;
 }
 
+function buildReviewScopeDataValue(context: ReviewContext): string {
+	return `${context.reviewedFiles.length} reviewed, ${context.skippedFiles.length} skipped`;
+}
+
 function buildPrIntentSection(
 	context: ReviewContext,
 	outcome: ReviewOutcome,
 ): string {
 	return [
-		"### Intent",
+		"### What Changed",
 		outcome.prSummary ?? buildDefaultPullRequestSummary(context),
+	].join("\n");
+}
+
+function buildCommentConclusionSection(outcome: ReviewOutcome): string {
+	const findingsCount = outcome.findings.length;
+	const typeSummary = buildFindingTypeSummary(outcome.findings);
+
+	return [
+		"### Conclusion",
+		outcome.summary,
+		findingsCount > 0
+			? `- Recommendation: address ${findingsCount} reportable ${pluralize(findingsCount, "issue")} before merge.`
+			: "- Recommendation: no reportable issues found in the reviewed scope.",
+		...(findingsCount > 0 && typeSummary
+			? [`- Main risks: ${typeSummary}`]
+			: []),
 	].join("\n");
 }
 
@@ -238,6 +307,7 @@ function getCommentLengthWithSections(sections: string[]): number {
 function fitCommentSection(options: {
 	baseSections: string[];
 	heading: string;
+	pinnedLines?: string[];
 	lines: string[];
 	omittedLabel: string;
 	maxChars: number;
@@ -248,7 +318,10 @@ function fitCommentSection(options: {
 
 	const tryBuild = (visibleCount: number): string | undefined => {
 		const omittedCount = options.lines.length - visibleCount;
-		const sectionLines = options.lines.slice(0, visibleCount);
+		const sectionLines = [
+			...(options.pinnedLines ?? []),
+			...options.lines.slice(0, visibleCount),
+		];
 		if (omittedCount > 0) {
 			sectionLines.push(
 				`- ... ${omittedCount} more ${options.omittedLabel} omitted to fit Bitbucket comment limit.`,
@@ -282,13 +355,18 @@ function buildPullRequestSummarySection(context: ReviewContext): string {
 	const skippedReasonSummary = buildSkippedReasonSummary(context.skippedFiles);
 	const prLabel = `#${context.pr.id} ${context.pr.title}`;
 	const lines = [
-		"### Overview",
+		"### Review Scope",
 		`- PR: ${formatCommentReference(prLabel, context.pr.link, false)}`,
-		`- Branch: \`${context.pr.source.displayId}\` -> \`${context.pr.target.displayId}\``,
-		`- Diff: ${context.diffStats.fileCount} ${pluralize(context.diffStats.fileCount, "file")}, +${context.diffStats.additions}, -${context.diffStats.deletions}`,
-		...(changedFileStatusSummary ? [`- Mix: ${changedFileStatusSummary}`] : []),
-		`- Scope: ${context.reviewedFiles.length} reviewed, ${context.skippedFiles.length} skipped`,
-		...(skippedReasonSummary ? [`- Skipped: ${skippedReasonSummary}`] : []),
+		`- Branches: \`${context.pr.source.displayId}\` -> \`${context.pr.target.displayId}\``,
+		`- Diff size: ${context.diffStats.fileCount} ${pluralize(context.diffStats.fileCount, "file")}, +${context.diffStats.additions}, -${context.diffStats.deletions}`,
+		...(changedFileStatusSummary
+			? [`- Change mix: ${changedFileStatusSummary}`]
+			: []),
+		`- Reviewed in scope: ${context.reviewedFiles.length} ${pluralize(context.reviewedFiles.length, "file")}`,
+		`- Outside scope: ${context.skippedFiles.length} ${pluralize(context.skippedFiles.length, "file")}`,
+		...(skippedReasonSummary
+			? [`- Outside-scope reasons: ${skippedReasonSummary}`]
+			: []),
 	];
 
 	return lines.join("\n");
@@ -299,21 +377,27 @@ function buildReportData(
 	context: ReviewContext,
 	outcome: ReviewOutcome,
 ): InsightReportDataField[] {
+	const findingTypeSummary = buildFindingTypeSummary(outcome.findings);
+
 	return [
 		{ title: "Findings", type: "NUMBER", value: outcome.findings.length },
+		...(findingTypeSummary
+			? [
+					{
+						title: "Finding taxonomy",
+						type: "TEXT" as const,
+						value: findingTypeSummary,
+					},
+				]
+			: []),
 		...buildReviewMetadataFields({
 			revision: context.reviewRevision,
 			reviewedCommit: context.headCommit,
 		}),
 		{
-			title: "Reviewed files",
-			type: "NUMBER",
-			value: context.reviewedFiles.length,
-		},
-		{
-			title: "Skipped files",
-			type: "NUMBER",
-			value: context.skippedFiles.length,
+			title: "Review scope",
+			type: "TEXT",
+			value: buildReviewScopeDataValue(context),
 		},
 	];
 }
@@ -325,10 +409,10 @@ export function buildInsightReport(
 ): InsightReportPayload {
 	const findingSummary =
 		outcome.findings.length > 0
-			? `\n\nTop findings:\n${buildFindingSummaryLines(outcome.findings).join("\n")}`
+			? `\n\nTaxonomy: ${buildFindingTypeSummary(outcome.findings) ?? "reportable findings"}\n\nTop validated findings:\n${buildFindingSummaryLines(outcome.findings).join("\n")}`
 			: "";
 	const details = truncateText(
-		`${outcome.summary}\n\nAdvisory AI review generated by GitHub Copilot in Jenkins. Findings are limited to reviewable changed files and changed lines.${findingSummary}`,
+		`${outcome.summary}\n\nAdvisory AI review generated by GitHub Copilot. Only validated findings on reviewable changed files and changed lines are published.${findingSummary}`,
 		1900,
 	);
 	const result: InsightReportPayload["result"] =
@@ -374,13 +458,15 @@ export function buildPullRequestComment(
 		reviewedCommit: context.headCommit,
 		publishedCommit: context.headCommit,
 	});
-	const summary = `## ${config.report.title}\n\n${outcome.summary}`;
+	const title = `## ${config.report.title}`;
+	const conclusion = buildCommentConclusionSection(outcome);
 	const prIntent = buildPrIntentSection(context, outcome);
 	const prSummary = buildPullRequestSummarySection(context);
 	const stableSections = [
 		header,
 		...metadataMarkers,
-		summary,
+		title,
+		conclusion,
 		prIntent,
 		prSummary,
 	]
@@ -390,17 +476,17 @@ export function buildPullRequestComment(
 	const optionalSections: string[] = [];
 	for (const [heading, lines, omittedLabel] of [
 		[
-			"### Findings",
+			"### Main Concerns",
 			buildCommentFindingSummaryLines(context.pr.link, outcome.findings),
 			pluralize(outcome.findings.length, "finding"),
 		],
 		[
-			"### Files",
+			"### Reviewed Changes",
 			buildFileChangeSummaryLines(context, outcome),
 			pluralize(context.reviewedFiles.length, "file summary", "file summaries"),
 		],
 		[
-			"### Skipped",
+			"### Outside Review Scope",
 			buildSkippedFilesLines(context),
 			pluralize(context.skippedFiles.length, "skipped file", "skipped files"),
 		],
@@ -408,6 +494,13 @@ export function buildPullRequestComment(
 		const section = fitCommentSection({
 			baseSections: [...stableSections, ...optionalSections],
 			heading,
+			...(heading === "### Main Concerns"
+				? {
+						pinnedLines: buildCommentFindingSummaryHeaderLines(
+							outcome.findings,
+						),
+					}
+				: {}),
 			lines,
 			omittedLabel,
 			maxChars: BITBUCKET_PR_COMMENT_MAX_CHARS,

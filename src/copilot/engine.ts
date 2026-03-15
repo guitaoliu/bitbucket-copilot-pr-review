@@ -17,6 +17,10 @@ import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
 import { truncateText } from "../shared/text.ts";
 import { buildPrompt } from "./prompt.ts";
+import {
+	FINDING_TAXONOMY_HINT,
+	QUESTION_SHAPED_FINDING_HINT,
+} from "./review-guidance.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
 import { wireReasoningTrace } from "./trace.ts";
 
@@ -43,10 +47,13 @@ function isReviewToolName(toolName: string): toolName is ReviewToolName {
 
 function buildSessionHint(config: ReviewerConfig): string {
 	return [
-		"Review for all material issues introduced by this pull request.",
-		"Inspect the diff and relevant head/base code before emitting any finding.",
+		"Review all material issues introduced by this pull request.",
+		"Inspect diff plus relevant head/base code before emitting any finding.",
 		"Flag any meaningful behavior change that lacks appropriate automated test coverage unless it is genuinely not testable.",
-		"Be exhaustive within the reviewed files and continue after the first finding when more distinct issues may exist.",
+		"Ignore style, naming, formatting, and preference-only feedback.",
+		FINDING_TAXONOMY_HINT,
+		QUESTION_SHAPED_FINDING_HINT,
+		"Cover the reviewed risk areas and continue after the first finding when more distinct issues may exist.",
 		`Keep findings distinct, evidence-backed, and limited to ${config.review.minConfidence} confidence or better, up to ${config.review.maxFindings} total.`,
 	].join(" ");
 }
@@ -54,36 +61,36 @@ function buildSessionHint(config: ReviewerConfig): string {
 function buildPreToolHint(toolName: ReviewToolName): string {
 	switch (toolName) {
 		case "get_pr_overview":
-			return "Use the overview to scope the review, identify the highest-risk files, and make sure each meaningful risk area gets covered.";
+			return "Use the overview to scope the review, find the highest-risk files, and cover each meaningful risk area.";
 		case "list_changed_files":
-			return "Focus on the riskiest reviewed files first, but continue until the meaningful reviewed changes have been covered; skipped files are not valid finding targets.";
+			return "Start with the riskiest reviewed files, but continue until the meaningful reviewed changes are covered; skipped files are not valid targets.";
 		case "get_file_diff":
 			return "Study the exact changed lines and look for removed guards, altered control flow, or contract shifts.";
 		case "get_file_diff_hunk":
-			return "Use hunk paging to inspect a large diff incrementally without broadening scope beyond the file under review.";
+			return "Use hunk paging to inspect a large diff without broadening scope beyond the file under review.";
 		case "get_file_content":
 			return "Read head and base content as needed to verify a concrete regression, broken invariant, or API change.";
 		case "get_file_list_by_directory":
-			return "Use directory listing to orient around nearby code and impacted areas, but keep the review anchored to PR-introduced behavior.";
+			return "Use directory listing to orient around nearby code, but keep the review anchored to PR-introduced behavior.";
 		case "get_related_file_content":
-			return "Read nearby files to confirm concrete hypotheses about impact, invariants, or call paths, including additional affected paths.";
+			return "Read nearby files to confirm concrete hypotheses about impact, invariants, call paths, or additional affected paths.";
 		case "search_text_in_repo":
 		case "search_symbol_name":
-			return "Search narrowly to validate suspected code paths and uncover additional impacted call sites. Avoid broad repo fishing expeditions.";
+			return "Search narrowly to validate suspected code paths or impacted call sites. Avoid broad repo fishing expeditions.";
 		case "get_ci_summary":
 			return "Treat CI output as a prioritization hint, not proof of a reportable issue.";
 		case "record_pr_summary":
-			return "Capture the PR's intended behavior change in one concise, evidence-backed summary after you understand the diff.";
+			return "Capture the PR's intended behavior change in one concise, evidence-backed summary once you understand the diff.";
 		case "record_file_summary":
-			return "Record a short, concrete summary of what changed in a reviewed file once you have inspected enough context to describe it accurately.";
+			return "Record a short, concrete summary of what changed in a reviewed file once you have enough context to describe it accurately.";
 		case "list_recorded_findings":
-			return "Check recorded findings before adding more so you avoid duplicates and can confirm whether important reviewed areas still lack coverage.";
+			return "Check recorded findings before adding more to avoid duplicates and confirm whether important reviewed areas still lack coverage.";
 		case "remove_recorded_finding":
 			return "Remove a recorded finding only when it is duplicate, superseded, or too weak to keep in the final set.";
 		case "replace_recorded_finding":
 			return "Replace a recorded finding only when the new draft is clearly stronger, more accurate, or better located.";
 		case "emit_finding":
-			return "Only emit a finding after verifying the issue from inspected code. Use one finding per root cause, prefer a changed head-side line, and keep looking for additional distinct issues after recording one.";
+			return `Only emit a finding after verifying the issue from inspected code. ${FINDING_TAXONOMY_HINT} ${QUESTION_SHAPED_FINDING_HINT} Use one finding per root cause, prefer a changed head-side line, and keep looking for additional distinct issues after recording one.`;
 		default:
 			return "Stay focused on distinct, evidence-backed issues introduced by the pull request.";
 	}
@@ -96,15 +103,15 @@ function buildPostToolHint(
 ): string {
 	switch (toolName) {
 		case "get_pr_overview":
-			return "Now choose the most suspicious files and inspect their diffs before exploring more context, then continue until the major reviewed risk areas are covered.";
+			return "Choose the most suspicious files, inspect their diffs, then continue until the major reviewed risk areas are covered.";
 		case "list_changed_files":
-			return "Prioritize files touching validation, auth, persistence, async flow, serialization, and public interfaces, and do not stop after inspecting only one risky file.";
+			return "Prioritize files touching validation, auth, persistence, async flow, serialization, and public interfaces; do not stop after one risky file.";
 		case "get_file_diff":
 			return "If the diff looks risky, confirm the exact behavior in head/base code before deciding whether an issue exists.";
 		case "get_file_diff_hunk":
-			return "Continue with the next relevant hunk or matching code context until the file's meaningful changed behavior is covered; do not scan the entire repo unnecessarily.";
+			return "Continue with the next relevant hunk or matching code context until the file's meaningful changed behavior is covered; do not scan the repo unnecessarily.";
 		case "get_file_content":
-			return "Do not emit a finding unless the code you inspected shows a concrete, material bug introduced by the PR, and keep checking for other distinct bugs after confirming one.";
+			return "Do not emit a finding unless the inspected code shows a concrete, material issue introduced by the PR, and keep checking for other distinct issues after confirming one.";
 		case "get_file_list_by_directory":
 		case "get_related_file_content":
 		case "search_text_in_repo":
@@ -113,7 +120,7 @@ function buildPostToolHint(
 		case "get_ci_summary":
 			return "CI may explain where to look next, but you still need code-level evidence before reporting anything.";
 		case "record_pr_summary":
-			return "Keep the PR summary concise and factual, then continue ensuring each reviewed file also gets a clear file-change summary.";
+			return "Keep the PR summary concise and factual, then continue until each reviewed file also has a clear file-change summary.";
 		case "record_file_summary":
 			return "Keep file summaries concrete and per-file; continue until all reviewed files have coverage.";
 		case "list_recorded_findings":
@@ -173,6 +180,22 @@ function getToolArgsRecord(toolArgs: unknown): Record<string, unknown> {
 	return toolArgs as Record<string, unknown>;
 }
 
+function describeLoggedDirectories(value: unknown): string | undefined {
+	if (!Array.isArray(value)) {
+		return undefined;
+	}
+
+	const directories = value
+		.filter((entry): entry is string => typeof entry === "string")
+		.map((entry) => normalizeToolLogString(entry))
+		.filter((entry) => entry.length > 0);
+	if (directories.length === 0) {
+		return undefined;
+	}
+
+	return directories.join(",");
+}
+
 function buildToolLogFields(toolName: string, toolArgs: unknown): string[] {
 	const record = getToolArgsRecord(toolArgs);
 	const field = (key: string, value: unknown): string | undefined => {
@@ -200,21 +223,27 @@ function buildToolLogFields(toolName: string, toolArgs: unknown): string[] {
 			].filter((entry): entry is string => entry !== undefined);
 		case "get_file_list_by_directory":
 			return [
-				field("directory", record.directory),
+				field("directories", describeLoggedDirectories(record.directories)),
 				field("version", record.version),
 			].filter((entry): entry is string => entry !== undefined);
 		case "search_text_in_repo":
 			return [
-				field("query", record.query),
+				field(
+					"query_chars",
+					typeof record.query === "string" ? record.query.length : undefined,
+				),
 				field("version", record.version),
-				field("directory", record.directory),
+				field("directories", describeLoggedDirectories(record.directories)),
 				field("mode", record.mode),
 			].filter((entry): entry is string => entry !== undefined);
 		case "search_symbol_name":
 			return [
-				field("symbol", record.symbol),
+				field(
+					"symbol_chars",
+					typeof record.symbol === "string" ? record.symbol.length : undefined,
+				),
 				field("version", record.version),
-				field("directory", record.directory),
+				field("directories", describeLoggedDirectories(record.directories)),
 			].filter((entry): entry is string => entry !== undefined);
 		case "record_pr_summary":
 			return [

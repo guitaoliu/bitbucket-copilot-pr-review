@@ -4,7 +4,7 @@
 	"private": true,
 	"description": "Jenkins-driven Bitbucket Data Center pull request review with GitHub Copilot SDK",
 	"type": "module",
-	"packageManager": "pnpm@10.29.2",
+	"packageManager": "pnpm@10.32.1",
 	"engines": {
 		"node": ">=24.12.0",
 		"pnpm": ">=10.29.2"
@@ -13,6 +13,7 @@
 		"typecheck": "tsc -p tsconfig.json",
 		"check": "biome check",
 		"check:fix": "biome check --fix",
+		"generate:config-docs": "node scripts/generate-config-docs.mjs",
 		"review": "node src/cli.ts",
 		"review:dry-run": "node src/cli.ts --dry-run",
 		"generate:repo-config-schema": "node scripts/generate-repo-config-schema.mjs",
@@ -25,8 +26,8 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.7",
-		"@types/node": "^24.0.0",
+		"@types/node": "^24.12.0",
 		"pino-pretty": "^13.1.3",
-		"typescript": "^5.8.0"
+		"typescript": "^5.9.3"
 	}
 }

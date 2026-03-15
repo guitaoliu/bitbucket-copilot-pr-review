@@ -1,7 +1,10 @@
 import { defineTool } from "@github/copilot-sdk";
 
-import { truncateText } from "../../shared/text.ts";
-import { summarizeFile, toRejectedResult } from "./common.ts";
+import {
+	buildTruncatedPatchResult,
+	summarizeFile,
+	toRejectedResult,
+} from "./common.ts";
 import type { ReviewToolContext } from "./context.ts";
 
 export function createGetFileDiffTool(toolContext: ReviewToolContext) {
@@ -11,6 +14,7 @@ export function createGetFileDiffTool(toolContext: ReviewToolContext) {
 		description: "Get the unified diff for a specific reviewed file.",
 		parameters: {
 			type: "object",
+			additionalProperties: false,
 			properties: {
 				path: { type: "string", description: "Path of the reviewed file." },
 			},
@@ -26,9 +30,7 @@ export function createGetFileDiffTool(toolContext: ReviewToolContext) {
 
 			return {
 				...summarizeFile(file),
-				patch: truncateText(file.patch, config.review.maxPatchChars, {
-					suffix: "\n... truncated ...",
-				}),
+				...buildTruncatedPatchResult(file.patch, config.review.maxPatchChars),
 			};
 		},
 	});

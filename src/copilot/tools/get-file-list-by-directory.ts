@@ -1,8 +1,23 @@
 import { defineTool } from "@github/copilot-sdk";
+import { z } from "zod";
 
-import { getRepoDirectoryAccessDecision } from "../../policy/path-access.ts";
-import { makeDirectoryPreview, toRejectedResult } from "./common.ts";
+import { getRepoDirectoriesAccessDecision } from "../../policy/path-access.ts";
+import {
+	describeDirectoryScope,
+	filterSafeRepoPaths,
+	makeDirectoryPreview,
+	toRejectedResult,
+	validateDirectoryScopesAtCommit,
+} from "./common.ts";
 import type { ReviewToolContext } from "./context.ts";
+
+const getFileListByDirectoryArgsSchema = z
+	.object({
+		directories: z.array(z.string()).max(50).optional(),
+		version: z.enum(["head", "base"]),
+		limit: z.number().int().min(1).optional(),
+	})
+	.strict();
 
 export function createGetFileListByDirectoryTool(
 	toolContext: ReviewToolContext,
@@ -14,11 +29,13 @@ export function createGetFileListByDirectoryTool(
 			"List repo files under a safe directory at the head or base revision for architectural context.",
 		parameters: {
 			type: "object",
+			additionalProperties: false,
 			properties: {
-				directory: {
-					type: "string",
+				directories: {
+					type: "array",
+					items: { type: "string" },
 					description:
-						"Repo-relative directory path. Use '.' or omit for the repo root.",
+						"Repo-relative directories. Use ['.'] or omit for the repo root.",
 				},
 				version: {
 					type: "string",
@@ -35,11 +52,20 @@ export function createGetFileListByDirectoryTool(
 			required: ["version"],
 		},
 		handler: async (args: {
-			directory?: string;
+			directories?: string[];
 			version: "head" | "base";
 			limit?: number;
 		}) => {
-			const decision = getRepoDirectoryAccessDecision(args.directory);
+			const parsedArgs = getFileListByDirectoryArgsSchema.safeParse(args);
+			if (!parsedArgs.success) {
+				return toRejectedResult(
+					`Invalid directory-list payload: ${parsedArgs.error.message}`,
+				);
+			}
+
+			const decision = getRepoDirectoriesAccessDecision(
+				parsedArgs.data.directories,
+			);
 			if (!decision.include) {
 				return toRejectedResult(
 					`Directory access rejected: ${decision.reason}`,
@@ -47,18 +73,44 @@ export function createGetFileListByDirectoryTool(
 			}
 
 			const commit =
-				args.version === "head" ? context.headCommit : context.mergeBaseCommit;
+				parsedArgs.data.version === "head"
+					? context.headCommit
+					: context.mergeBaseCommit;
+			const directoryValidation = await validateDirectoryScopesAtCommit(
+				git,
+				commit,
+				decision.normalizedPaths,
+			);
+			if (directoryValidation.status === "not_found") {
+				return toRejectedResult(
+					`Directory access rejected: ${directoryValidation.path} is not present in the ${parsedArgs.data.version} revision.`,
+				);
+			}
+
+			if (directoryValidation.status === "not_directory") {
+				return toRejectedResult(
+					`Directory access rejected: ${directoryValidation.path} is a file, not a directory.`,
+				);
+			}
+
 			const files = await git.listFilesAtCommit(
 				commit,
-				decision.normalizedPath,
+				decision.normalizedPaths,
 			);
-			const limit = Math.min(200, Math.max(1, args.limit ?? 50));
-			const preview = makeDirectoryPreview(files, limit);
+			const filtered = filterSafeRepoPaths(files.map((path) => ({ path })));
+			const limit = Math.min(200, Math.max(1, parsedArgs.data.limit ?? 50));
+			const preview = makeDirectoryPreview(
+				filtered.entries.map((entry) => entry.path),
+				limit,
+			);
 
 			return {
-				directory: decision.normalizedPath || ".",
-				version: args.version,
-				...preview,
+				directories: describeDirectoryScope(decision.normalizedPaths),
+				version: parsedArgs.data.version,
+				filteredFileCount: filtered.filteredCount,
+				files: preview.files,
+				truncated: preview.truncated || filtered.filteredCount > 0,
+				totalFiles: preview.totalFiles,
 			};
 		},
 	});

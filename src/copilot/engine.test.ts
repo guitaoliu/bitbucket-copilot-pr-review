@@ -4,6 +4,10 @@ import type { ReviewerConfig } from "../config/types.ts";
 import type { FindingDraft, ReviewSummaryDrafts } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { createReviewSessionHooks } from "./engine.ts";
+import {
+	FINDING_TAXONOMY_HINT,
+	QUESTION_SHAPED_FINDING_HINT,
+} from "./review-guidance.ts";
 
 const config: ReviewerConfig = {
 	repoRoot: "/tmp/repo",
@@ -109,12 +113,18 @@ describe("createReviewSessionHooks", () => {
 		);
 		assert.match(
 			result.additionalContext,
-			/Inspect the diff and relevant head\/base code/,
+			/Inspect diff plus relevant head\/base code/,
 		);
 		assert.match(
 			result.additionalContext,
 			/Flag any meaningful behavior change that lacks appropriate automated test coverage/,
 		);
+		assert.match(
+			result.additionalContext,
+			/Ignore style, naming, formatting, and preference-only feedback/,
+		);
+		assert.ok(result.additionalContext.includes(FINDING_TAXONOMY_HINT));
+		assert.ok(result.additionalContext.includes(QUESTION_SHAPED_FINDING_HINT));
 		assert.match(
 			result.additionalContext,
 			/continue after the first finding when more distinct issues may exist/,
@@ -237,6 +247,24 @@ describe("createReviewSessionHooks", () => {
 		]);
 	});
 
+	it("returns pre-use guidance for emitting findings with taxonomy discipline", async () => {
+		const hooks = createReviewSessionHooks(
+			config,
+			createLoggerSpy().logger,
+			[],
+		);
+		const result = await hooks.onPreToolUse({
+			toolName: "emit_finding",
+			toolArgs: { path: "src/file.ts", line: 12 },
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(result, {
+			permissionDecision: "allow",
+			additionalContext: `Only emit a finding after verifying the issue from inspected code. ${FINDING_TAXONOMY_HINT} ${QUESTION_SHAPED_FINDING_HINT} Use one finding per root cause, prefer a changed head-side line, and keep looking for additional distinct issues after recording one.`,
+		});
+	});
+
 	it("warns when the finding limit has been reached", async () => {
 		const drafts = [
 			createFindingDraft(1),
@@ -271,7 +299,7 @@ describe("createReviewSessionHooks", () => {
 		);
 		const result = await hooks.onPostToolUse({
 			toolName: "search_text_in_repo",
-			toolArgs: { query: "foo", version: "head", directory: "src" },
+			toolArgs: { query: "foo", version: "head", directories: ["src"] },
 			toolResult: { textResultForLlm: "[]", resultType: "success" },
 			cwd: "/tmp/repo",
 		});
@@ -283,7 +311,7 @@ describe("createReviewSessionHooks", () => {
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool search_text_in_repo result=success query=foo version=head directory=src findings=0/3 file_summaries=0/4 pr_summary=missing",
+					"Copilot completed tool search_text_in_repo result=success query_chars=3 version=head directories=src findings=0/3 file_summaries=0/4 pr_summary=missing",
 				details: [],
 			},
 		]);

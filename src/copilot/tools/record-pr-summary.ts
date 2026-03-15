@@ -15,6 +15,7 @@ export function createRecordPrSummaryTool(toolContext: ReviewToolContext) {
 			"Record a concise plain-language summary of what the pull request is trying to do.",
 		parameters: {
 			type: "object",
+			additionalProperties: false,
 			properties: {
 				summary: {
 					type: "string",

@@ -4,35 +4,20 @@ import { z } from "zod";
 
 import { omitUndefined } from "../shared/object.ts";
 import type {
-	Confidence,
-	LogLevel,
-	PullRequestCommentStrategy,
-	ReasoningEffort,
-	ReviewerConfigExplicitEnvOverrides,
-} from "./types.ts";
+	ConfigFieldEnvParser,
+	ConfigFieldEnvValue,
+	ConfigFieldMetadata,
+	EnvConfigFieldMetadata,
+} from "./metadata.ts";
+import {
+	CONFIG_FIELD_METADATA,
+	isEnvConfigField,
+	isEnvRepoOverrideField,
+} from "./metadata.ts";
+import { setConfigPathValue, splitConfigPath } from "./path.ts";
+import { createEmptyRepoOverrides } from "./reviewer-config.ts";
+import type { ReviewerConfigRepoOverrides } from "./types.ts";
 
-const CONFIDENCE_VALUES = [
-	"low",
-	"medium",
-	"high",
-] as const satisfies readonly Confidence[];
-const LOG_LEVEL_VALUES = [
-	"debug",
-	"info",
-	"warn",
-	"error",
-] as const satisfies readonly LogLevel[];
-const BITBUCKET_AUTH_TYPE_VALUES = ["basic", "bearer"] as const;
-const REASONING_EFFORT_VALUES = [
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-] as const satisfies readonly ReasoningEffort[];
-const REPORT_COMMENT_STRATEGY_VALUES = [
-	"update",
-	"recreate",
-] as const satisfies readonly PullRequestCommentStrategy[];
 const MAX_REPORT_KEY_LENGTH = 50;
 const REPORT_KEY_SAFE_CHAR_PATTERN = /[^A-Za-z0-9._-]+/g;
 
@@ -51,65 +36,6 @@ function normalizeOptionalEnvString(value: unknown): string | undefined {
 
 function optionalEnvString() {
 	return z.preprocess(normalizeOptionalEnvString, z.string().optional());
-}
-
-function optionalStringArray(name: string) {
-	return optionalEnvString().transform((value, ctx): string[] | undefined => {
-		if (value === undefined) {
-			return undefined;
-		}
-
-		const parts = value
-			.split(",")
-			.map((part) => part.trim())
-			.filter((part) => part.length > 0);
-		if (parts.length === 0) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message: `${name} must contain at least one non-empty value when provided.`,
-			});
-			return z.NEVER;
-		}
-
-		return parts;
-	});
-}
-
-function requiredEnvString(name: string) {
-	return optionalEnvString().transform((value, ctx): string => {
-		if (value !== undefined) {
-			return value;
-		}
-
-		ctx.addIssue({
-			code: z.ZodIssueCode.custom,
-			message: `${name} is required.`,
-		});
-		return z.NEVER;
-	});
-}
-
-function optionalEnumValue<TValues extends readonly [string, ...string[]]>(
-	name: string,
-	values: TValues,
-) {
-	return optionalEnvString().transform(
-		(value, ctx): TValues[number] | undefined => {
-			if (value === undefined) {
-				return undefined;
-			}
-
-			if ((values as readonly string[]).includes(value)) {
-				return value as TValues[number];
-			}
-
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message: `${name} must be one of: ${values.join(", ")}.`,
-			});
-			return z.NEVER;
-		},
-	);
 }
 
 function toPositiveInteger(
@@ -137,21 +63,235 @@ function toPositiveInteger(
 	return parsed;
 }
 
-function requiredPositiveInteger(name: string) {
-	return requiredEnvString(name).transform((value, ctx) =>
-		toPositiveInteger(name, value, ctx),
+function buildEnvString(_name: string, normalize?: "baseUrl") {
+	return optionalEnvString().transform((value): string | undefined => {
+		if (value === undefined) {
+			return undefined;
+		}
+
+		if (normalize === "baseUrl") {
+			return normalizeBaseUrl(value);
+		}
+
+		return value;
+	});
+}
+
+function buildEnvEnum<TValues extends readonly [string, ...string[]]>(
+	name: string,
+	values: TValues,
+) {
+	return optionalEnvString().transform(
+		(value, ctx): TValues[number] | undefined => {
+			if (value === undefined) {
+				return undefined;
+			}
+
+			if ((values as readonly string[]).includes(value)) {
+				return value as TValues[number];
+			}
+
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: `${name} must be one of: ${values.join(", ")}.`,
+			});
+			return z.NEVER;
+		},
 	);
 }
 
-function optionalPositiveInteger(name: string, fallback: number) {
-	return optionalEnvString().transform((value, ctx) => {
+function buildEnvPositiveInteger(name: string) {
+	return optionalEnvString().transform((value, ctx): number | undefined => {
 		if (value === undefined) {
-			return fallback;
+			return undefined;
 		}
 
 		return toPositiveInteger(name, value, ctx);
 	});
 }
+
+function buildEnvBoolean(name: string) {
+	return optionalEnvString().transform((value, ctx): boolean | undefined => {
+		if (value === undefined) {
+			return undefined;
+		}
+
+		const normalized = value.toLowerCase();
+		if (["1", "true", "yes", "y", "on"].includes(normalized)) {
+			return true;
+		}
+
+		if (["0", "false", "no", "n", "off"].includes(normalized)) {
+			return false;
+		}
+
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			message: `${name} must be a boolean value such as true/false or 1/0.`,
+		});
+		return z.NEVER;
+	});
+}
+
+function buildEnvStringArray(name: string) {
+	return optionalEnvString().transform((value, ctx): string[] | undefined => {
+		if (value === undefined) {
+			return undefined;
+		}
+
+		const parts = value
+			.split(",")
+			.map((part) => part.trim())
+			.filter((part) => part.length > 0);
+		if (parts.length === 0) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: `${name} must contain at least one non-empty value when provided.`,
+			});
+			return z.NEVER;
+		}
+
+		return parts;
+	});
+}
+
+type EnvSchemaShape<TMetadata extends Record<string, ConfigFieldMetadata>> = {
+	[K in keyof TMetadata as TMetadata[K] extends {
+		env: infer TEnv extends string;
+		envParser: ConfigFieldEnvParser;
+	}
+		? TEnv
+		: never]: TMetadata[K] extends {
+		envParser: infer TParser extends ConfigFieldEnvParser;
+	}
+		? z.ZodType<ConfigFieldEnvValue<TParser>>
+		: never;
+};
+
+function buildEnvValueSchema(field: EnvConfigFieldMetadata): z.ZodType {
+	switch (field.envParser.kind) {
+		case "string":
+			return buildEnvString(field.env, field.envParser.normalize);
+		case "enum":
+			return buildEnvEnum(field.env, field.envParser.values);
+		case "positiveInteger":
+			return buildEnvPositiveInteger(field.env);
+		case "boolean":
+			return buildEnvBoolean(field.env);
+		case "stringArray":
+			return buildEnvStringArray(field.env);
+	}
+
+	throw new Error(`Unsupported environment parser for ${field.env}.`);
+}
+
+function createEnvSchemaShape<
+	TMetadata extends Record<string, ConfigFieldMetadata>,
+>(metadata: TMetadata): EnvSchemaShape<TMetadata> {
+	const shape: Record<string, z.ZodType> = {};
+
+	for (const field of Object.values(metadata)) {
+		if (!isEnvConfigField(field)) {
+			continue;
+		}
+
+		shape[field.env] = buildEnvValueSchema(field);
+	}
+
+	return shape as EnvSchemaShape<TMetadata>;
+}
+
+function getEnvRepoOverridePaths(): Record<string, readonly string[]> {
+	return Object.values(CONFIG_FIELD_METADATA).reduce<
+		Record<string, readonly string[]>
+	>((paths, field) => {
+		if (!isEnvRepoOverrideField(field)) {
+			return paths;
+		}
+
+		paths[field.env] = splitConfigPath(field.path);
+		return paths;
+	}, {});
+}
+
+function requireEnvValue<T>(value: T | undefined, message: string): T {
+	if (value === undefined) {
+		throw new Error(message);
+	}
+
+	return value;
+}
+
+const envShape = createEnvSchemaShape(CONFIG_FIELD_METADATA);
+const envRepoOverridePaths = getEnvRepoOverridePaths();
+
+const envSchema = z.object(envShape).superRefine((env, ctx) => {
+	const hasBearerToken = env.BITBUCKET_TOKEN !== undefined;
+	const hasUsername = env.BITBUCKET_USERNAME !== undefined;
+	const hasPassword = env.BITBUCKET_PASSWORD !== undefined;
+
+	const addIssue = (message: string, path?: keyof typeof env): void => {
+		ctx.addIssue(
+			omitUndefined({
+				code: z.ZodIssueCode.custom,
+				message,
+				path: path ? [path] : undefined,
+			}),
+		);
+	};
+
+	if (env.BITBUCKET_AUTH_TYPE === "basic") {
+		if (!hasUsername) {
+			addIssue(
+				"BITBUCKET_USERNAME is required when BITBUCKET_AUTH_TYPE=basic.",
+				"BITBUCKET_USERNAME",
+			);
+		}
+		if (!hasPassword) {
+			addIssue(
+				"BITBUCKET_PASSWORD is required when BITBUCKET_AUTH_TYPE=basic.",
+				"BITBUCKET_PASSWORD",
+			);
+		}
+		return;
+	}
+
+	if (env.BITBUCKET_AUTH_TYPE === "bearer") {
+		if (!hasBearerToken) {
+			addIssue(
+				"BITBUCKET_TOKEN is required when BITBUCKET_AUTH_TYPE=bearer.",
+				"BITBUCKET_TOKEN",
+			);
+		}
+		return;
+	}
+
+	if (hasBearerToken) {
+		return;
+	}
+
+	if (hasUsername || hasPassword) {
+		if (!hasUsername) {
+			addIssue(
+				"BITBUCKET_USERNAME is required when using basic Bitbucket authentication.",
+				"BITBUCKET_USERNAME",
+			);
+		}
+		if (!hasPassword) {
+			addIssue(
+				"BITBUCKET_PASSWORD is required when using basic Bitbucket authentication.",
+				"BITBUCKET_PASSWORD",
+			);
+		}
+		return;
+	}
+
+	addIssue(
+		"Provide BITBUCKET_TOKEN or BITBUCKET_USERNAME and BITBUCKET_PASSWORD for Bitbucket authentication.",
+	);
+});
+
+export type ParsedEnvironment = z.output<typeof envSchema>;
 
 export function normalizeReportKey(reportKey: string): string {
 	const sanitized = reportKey
@@ -177,199 +317,64 @@ export function normalizeReportKey(reportKey: string): string {
 	return `${sanitized.slice(0, prefixLength)}${suffix}`;
 }
 
-function optionalBoolean(name: string, fallback: boolean) {
-	return optionalEnvString().transform((value, ctx) => {
+export function getEnvRepoOverrides(
+	parsedEnv: ParsedEnvironment,
+): ReviewerConfigRepoOverrides {
+	const overrides = createEmptyRepoOverrides();
+
+	for (const [envName, path] of Object.entries(envRepoOverridePaths)) {
+		const value = parsedEnv[envName as keyof ParsedEnvironment];
 		if (value === undefined) {
-			return fallback;
+			continue;
 		}
 
-		const normalized = value.toLowerCase();
-		if (["1", "true", "yes", "y", "on"].includes(normalized)) {
-			return true;
-		}
+		setConfigPathValue(overrides, path, value);
+	}
 
-		if (["0", "false", "no", "n", "off"].includes(normalized)) {
-			return false;
-		}
-
-		ctx.addIssue({
-			code: z.ZodIssueCode.custom,
-			message: `${name} must be a boolean value such as true/false or 1/0.`,
-		});
-		return z.NEVER;
-	});
-}
-
-const envSchema = z
-	.object({
-		REPO_ROOT: optionalEnvString(),
-		BITBUCKET_BASE_URL:
-			requiredEnvString("BITBUCKET_BASE_URL").transform(normalizeBaseUrl),
-		BITBUCKET_PROJECT_KEY: requiredEnvString("BITBUCKET_PROJECT_KEY"),
-		BITBUCKET_REPO_SLUG: requiredEnvString("BITBUCKET_REPO_SLUG"),
-		BITBUCKET_PR_ID: requiredPositiveInteger("BITBUCKET_PR_ID"),
-		BITBUCKET_AUTH_TYPE: optionalEnumValue(
-			"BITBUCKET_AUTH_TYPE",
-			BITBUCKET_AUTH_TYPE_VALUES,
-		),
-		BITBUCKET_TOKEN: optionalEnvString(),
-		BITBUCKET_USERNAME: optionalEnvString(),
-		BITBUCKET_PASSWORD: optionalEnvString(),
-		BITBUCKET_CA_CERT_PATH: optionalEnvString(),
-		BITBUCKET_INSECURE_TLS: optionalBoolean("BITBUCKET_INSECURE_TLS", true),
-		GIT_REMOTE_NAME: optionalEnvString().transform(
-			(value) => value ?? "origin",
-		),
-		LOG_LEVEL: optionalEnumValue("LOG_LEVEL", LOG_LEVEL_VALUES).transform(
-			(value): LogLevel => value ?? "info",
-		),
-		REVIEW_MIN_CONFIDENCE: optionalEnumValue(
-			"REVIEW_MIN_CONFIDENCE",
-			CONFIDENCE_VALUES,
-		).transform((value): Confidence => value ?? "medium"),
-		COPILOT_MODEL: optionalEnvString().transform((value) => value ?? "gpt-5.4"),
-		COPILOT_REASONING_EFFORT: optionalEnumValue(
-			"COPILOT_REASONING_EFFORT",
-			REASONING_EFFORT_VALUES,
-		).transform((value): ReasoningEffort => value ?? "xhigh"),
-		COPILOT_TIMEOUT_MS: optionalPositiveInteger("COPILOT_TIMEOUT_MS", 1800000),
-		REPORT_KEY: optionalEnvString().transform(
-			(value) => value ?? "copilot-pr-review",
-		),
-		REPORT_TITLE: optionalEnvString().transform(
-			(value) => value ?? "Copilot PR Review",
-		),
-		REPORTER_NAME: optionalEnvString().transform(
-			(value) => value ?? "GitHub Copilot via Jenkins",
-		),
-		REPORT_COMMENT_TAG: optionalEnvString().transform(
-			(value) => value ?? "copilot-pr-review",
-		),
-		REPORT_COMMENT_STRATEGY: optionalEnumValue(
-			"REPORT_COMMENT_STRATEGY",
-			REPORT_COMMENT_STRATEGY_VALUES,
-		).transform((value): PullRequestCommentStrategy => value ?? "recreate"),
-		REPORT_LINK: optionalEnvString(),
-		BUILD_URL: optionalEnvString(),
-		REVIEW_FORCE: optionalBoolean("REVIEW_FORCE", false),
-		REVIEW_MAX_FILES: optionalPositiveInteger("REVIEW_MAX_FILES", 200),
-		REVIEW_MAX_FINDINGS: optionalPositiveInteger("REVIEW_MAX_FINDINGS", 25),
-		REVIEW_MAX_PATCH_CHARS: optionalPositiveInteger(
-			"REVIEW_MAX_PATCH_CHARS",
-			12000,
-		),
-		REVIEW_DEFAULT_FILE_SLICE_LINES: optionalPositiveInteger(
-			"REVIEW_DEFAULT_FILE_SLICE_LINES",
-			250,
-		),
-		REVIEW_MAX_FILE_SLICE_LINES: optionalPositiveInteger(
-			"REVIEW_MAX_FILE_SLICE_LINES",
-			400,
-		),
-		REVIEW_IGNORE_PATHS: optionalStringArray("REVIEW_IGNORE_PATHS"),
-		CI_SUMMARY_PATH: optionalEnvString(),
-		COPILOT_GITHUB_TOKEN: optionalEnvString(),
-		GH_TOKEN: optionalEnvString(),
-		GITHUB_TOKEN: optionalEnvString(),
-	})
-	.superRefine((env, ctx) => {
-		const hasBearerToken = env.BITBUCKET_TOKEN !== undefined;
-		const hasUsername = env.BITBUCKET_USERNAME !== undefined;
-		const hasPassword = env.BITBUCKET_PASSWORD !== undefined;
-
-		const addIssue = (message: string, path?: keyof typeof env): void => {
-			ctx.addIssue(
-				omitUndefined({
-					code: z.ZodIssueCode.custom,
-					message,
-					path: path ? [path] : undefined,
-				}),
-			);
-		};
-
-		if (env.BITBUCKET_AUTH_TYPE === "basic") {
-			if (!hasUsername) {
-				addIssue(
-					"BITBUCKET_USERNAME is required when BITBUCKET_AUTH_TYPE=basic.",
-					"BITBUCKET_USERNAME",
-				);
-			}
-			if (!hasPassword) {
-				addIssue(
-					"BITBUCKET_PASSWORD is required when BITBUCKET_AUTH_TYPE=basic.",
-					"BITBUCKET_PASSWORD",
-				);
-			}
-			return;
-		}
-
-		if (env.BITBUCKET_AUTH_TYPE === "bearer") {
-			if (!hasBearerToken) {
-				addIssue(
-					"BITBUCKET_TOKEN is required when BITBUCKET_AUTH_TYPE=bearer.",
-					"BITBUCKET_TOKEN",
-				);
-			}
-			return;
-		}
-
-		if (hasBearerToken) {
-			return;
-		}
-
-		if (hasUsername || hasPassword) {
-			if (!hasUsername) {
-				addIssue(
-					"BITBUCKET_USERNAME is required when using basic Bitbucket authentication.",
-					"BITBUCKET_USERNAME",
-				);
-			}
-			if (!hasPassword) {
-				addIssue(
-					"BITBUCKET_PASSWORD is required when using basic Bitbucket authentication.",
-					"BITBUCKET_PASSWORD",
-				);
-			}
-			return;
-		}
-
-		addIssue(
-			"Provide BITBUCKET_TOKEN or BITBUCKET_USERNAME and BITBUCKET_PASSWORD for Bitbucket authentication.",
-		);
-	});
-
-export type ParsedEnvironment = z.output<typeof envSchema>;
-
-export function getExplicitEnvOverrides(
-	env: NodeJS.ProcessEnv,
-): ReviewerConfigExplicitEnvOverrides {
-	const hasValue = (name: string): boolean =>
-		normalizeOptionalEnvString(env[name]) !== undefined;
-
-	return {
-		copilot: {
-			model: hasValue("COPILOT_MODEL"),
-			reasoningEffort: hasValue("COPILOT_REASONING_EFFORT"),
-			timeoutMs: hasValue("COPILOT_TIMEOUT_MS"),
-		},
-		report: {
-			title: hasValue("REPORT_TITLE"),
-			commentStrategy: hasValue("REPORT_COMMENT_STRATEGY"),
-		},
-		review: {
-			maxFiles: hasValue("REVIEW_MAX_FILES"),
-			maxFindings: hasValue("REVIEW_MAX_FINDINGS"),
-			minConfidence: hasValue("REVIEW_MIN_CONFIDENCE"),
-			maxPatchChars: hasValue("REVIEW_MAX_PATCH_CHARS"),
-			defaultFileSliceLines: hasValue("REVIEW_DEFAULT_FILE_SLICE_LINES"),
-			maxFileSliceLines: hasValue("REVIEW_MAX_FILE_SLICE_LINES"),
-			ignorePaths: hasValue("REVIEW_IGNORE_PATHS"),
-		},
-	};
+	return overrides;
 }
 
 function formatEnvironmentError(error: z.ZodError): string {
 	return error.issues.map((issue) => issue.message).join("\n");
+}
+
+export function getRequiredEnvValue<TKey extends keyof ParsedEnvironment>(
+	env: ParsedEnvironment,
+	key: TKey,
+): Exclude<ParsedEnvironment[TKey], undefined> {
+	const field = CONFIG_FIELD_METADATA[keyToMetadataKey(key)];
+	if (!isEnvConfigField(field)) {
+		throw new Error(
+			`Metadata registered for environment key ${String(key)} is incomplete.`,
+		);
+	}
+
+	return requireEnvValue(env[key], `${field.env} is required.`) as Exclude<
+		ParsedEnvironment[TKey],
+		undefined
+	>;
+}
+
+export function getRequiredEnvValueWithMessage<T>(
+	value: T | undefined,
+	message: string,
+): T {
+	return requireEnvValue(value, message);
+}
+
+function keyToMetadataKey(
+	key: keyof ParsedEnvironment,
+): keyof typeof CONFIG_FIELD_METADATA {
+	const entry = Object.entries(CONFIG_FIELD_METADATA).find(
+		([, field]) => "env" in field && field.env === key,
+	);
+	if (!entry) {
+		throw new Error(
+			`No metadata registered for environment key ${String(key)}.`,
+		);
+	}
+
+	return entry[0] as keyof typeof CONFIG_FIELD_METADATA;
 }
 
 export function parseEnvironment(env: NodeJS.ProcessEnv): ParsedEnvironment {

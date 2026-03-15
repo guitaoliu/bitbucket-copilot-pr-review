@@ -1,27 +1,17 @@
 import { z } from "zod";
 
-import type {
-	Confidence,
-	PullRequestCommentStrategy,
-	ReasoningEffort,
-	ReviewerConfig,
-} from "./types.ts";
-
-const CONFIDENCE_VALUES = [
-	"low",
-	"medium",
-	"high",
-] as const satisfies readonly Confidence[];
-const REASONING_EFFORT_VALUES = [
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-] as const satisfies readonly ReasoningEffort[];
-const REPORT_COMMENT_STRATEGY_VALUES = [
-	"update",
-	"recreate",
-] as const satisfies readonly PullRequestCommentStrategy[];
+import {
+	CONFIDENCE_VALUES,
+	REASONING_EFFORT_VALUES,
+	REPORT_COMMENT_STRATEGY_VALUES,
+} from "./metadata.ts";
+import {
+	applyRepoOverrides,
+	createEmptyRepoOverrides,
+	mergeRepoOverrides,
+	pickRepoOverrides,
+} from "./reviewer-config.ts";
+import type { ReviewerConfig, ReviewerConfigRepoOverrides } from "./types.ts";
 
 const REPO_CONFIG_LIMITS = {
 	schemaRefMaxLength: 2048,
@@ -172,6 +162,12 @@ const repoConfigSchema = z
 
 export type RepoReviewConfig = z.output<typeof repoConfigSchema>;
 
+export function toReviewerConfigRepoOverrides(
+	repoConfig: RepoReviewConfig,
+): ReviewerConfigRepoOverrides {
+	return pickRepoOverrides(repoConfig);
+}
+
 function formatRepoConfigError(error: z.ZodError): string {
 	return error.issues
 		.map((issue) => {
@@ -208,74 +204,14 @@ export function mergeRepoReviewConfig(
 	config: ReviewerConfig,
 	repoConfig: RepoReviewConfig,
 ): ReviewerConfig {
-	const explicit = config.internal?.explicitEnvOverrides;
-	if (!explicit) {
-		return config;
-	}
+	const envOverrides =
+		config.internal?.envRepoOverrides ?? createEmptyRepoOverrides();
+	const repoOverrides = toReviewerConfigRepoOverrides(repoConfig);
 
-	const nextConfig: ReviewerConfig = {
-		...config,
-		copilot: {
-			...config.copilot,
-			...(repoConfig.copilot?.model !== undefined && !explicit.copilot.model
-				? { model: repoConfig.copilot.model }
-				: {}),
-			...(repoConfig.copilot?.reasoningEffort !== undefined &&
-			!explicit.copilot.reasoningEffort
-				? { reasoningEffort: repoConfig.copilot.reasoningEffort }
-				: {}),
-			...(repoConfig.copilot?.timeoutMs !== undefined &&
-			!explicit.copilot.timeoutMs
-				? { timeoutMs: repoConfig.copilot.timeoutMs }
-				: {}),
-		},
-		report: {
-			...config.report,
-			...(repoConfig.report?.title !== undefined && !explicit.report.title
-				? { title: repoConfig.report.title }
-				: {}),
-			...(repoConfig.report?.commentStrategy !== undefined &&
-			!explicit.report.commentStrategy
-				? { commentStrategy: repoConfig.report.commentStrategy }
-				: {}),
-		},
-		review: {
-			...config.review,
-			...(repoConfig.review?.maxFiles !== undefined && !explicit.review.maxFiles
-				? { maxFiles: repoConfig.review.maxFiles }
-				: {}),
-			...(repoConfig.review?.maxFindings !== undefined &&
-			!explicit.review.maxFindings
-				? { maxFindings: repoConfig.review.maxFindings }
-				: {}),
-			...(repoConfig.review?.minConfidence !== undefined &&
-			!explicit.review.minConfidence
-				? { minConfidence: repoConfig.review.minConfidence }
-				: {}),
-			...(repoConfig.review?.maxPatchChars !== undefined &&
-			!explicit.review.maxPatchChars
-				? { maxPatchChars: repoConfig.review.maxPatchChars }
-				: {}),
-			...(repoConfig.review?.defaultFileSliceLines !== undefined &&
-			!explicit.review.defaultFileSliceLines
-				? { defaultFileSliceLines: repoConfig.review.defaultFileSliceLines }
-				: {}),
-			...(repoConfig.review?.maxFileSliceLines !== undefined &&
-			!explicit.review.maxFileSliceLines
-				? { maxFileSliceLines: repoConfig.review.maxFileSliceLines }
-				: {}),
-			...(repoConfig.review?.ignorePaths !== undefined &&
-			!explicit.review.ignorePaths
-				? { ignorePaths: [...repoConfig.review.ignorePaths] }
-				: {}),
-		},
-	};
-
-	if (config.internal) {
-		nextConfig.internal = { ...config.internal };
-	}
-
-	return nextConfig;
+	return applyRepoOverrides(
+		config,
+		mergeRepoOverrides(envOverrides, repoOverrides),
+	);
 }
 
 export function getRepoReviewConfigSchema(): object {

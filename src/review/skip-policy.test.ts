@@ -147,7 +147,7 @@ function createAnnotations(): InsightAnnotationPayload[] {
 			line: 10,
 			message: [
 				"Null handling is broken",
-				"Severity: HIGH | Type: BUG | Confidence: high",
+				"Type: BUG | Severity: HIGH | Confidence: high",
 				"The new branch dereferences a possibly null response.",
 			].join("\n"),
 			severity: "HIGH",
@@ -363,5 +363,86 @@ describe("buildReviewReusePlan", () => {
 			plan.repairWarning ?? "",
 			/reusable annotation count 0 != findings 1/,
 		);
+		assert.match(plan.confirmMessage ?? "", /Existing cached artifacts/);
+	});
+
+	it("prompts before rerunning when the cached artifacts are unusable for the current head and revision", () => {
+		const context = createContext();
+		const plan = buildReviewReusePlan(baseConfig, context, {
+			existingReport: createReport(context),
+			storedAnnotationCount: 1,
+			existingAnnotations: [],
+			existingComment: createTaggedComment(),
+			existingPublicationComplete: false,
+			reportCommit: context.headCommit,
+			reportRevision: context.reviewRevision,
+			reportReviewedCommit: context.headCommit,
+			reportSchema: "2",
+			commentRevision: context.reviewRevision,
+			commentPublishedCommit: context.headCommit,
+			commentReviewedCommit: context.headCommit,
+			unusableReasons: ["reusable annotation count 0 != findings 1"],
+		});
+
+		assert.equal(plan.action, "review");
+		assert.match(plan.confirmMessage ?? "", /Existing cached artifacts/);
+	});
+
+	it("reruns automatically when the head changed even if the cached artifacts are unusable", () => {
+		const context = createContext();
+		const oldHead = "head-old";
+		const plan = buildReviewReusePlan(baseConfig, context, {
+			existingReport: createReport(context, { reviewedCommit: oldHead }),
+			storedAnnotationCount: 1,
+			existingAnnotations: [],
+			existingComment: createTaggedComment({
+				reviewedCommit: oldHead,
+				publishedCommit: oldHead,
+			}),
+			existingPublicationComplete: false,
+			reportCommit: oldHead,
+			reportRevision: context.reviewRevision,
+			reportReviewedCommit: oldHead,
+			reportSchema: "2",
+			commentRevision: context.reviewRevision,
+			commentPublishedCommit: oldHead,
+			commentReviewedCommit: oldHead,
+			unusableReasons: [
+				`comment reviewed commit ${oldHead} != ${context.headCommit}`,
+				"reusable annotation count 0 != findings 1",
+			],
+		});
+
+		assert.equal(plan.action, "review");
+		assert.equal(plan.confirmMessage, undefined);
+	});
+
+	it("reruns automatically when the revision changed even if the head is unchanged", () => {
+		const context = createContext();
+		const oldRevision = "review-rev-old";
+		const plan = buildReviewReusePlan(baseConfig, context, {
+			existingReport: createReport(context),
+			storedAnnotationCount: 1,
+			existingAnnotations: [],
+			existingComment: createTaggedComment({
+				revision: oldRevision,
+			}),
+			existingPublicationComplete: false,
+			reportCommit: context.headCommit,
+			reportRevision: oldRevision,
+			reportReviewedCommit: context.headCommit,
+			reportSchema: "2",
+			commentRevision: oldRevision,
+			commentPublishedCommit: context.headCommit,
+			commentReviewedCommit: context.headCommit,
+			unusableReasons: [
+				`report revision ${oldRevision} != ${context.reviewRevision}`,
+				`comment revision ${oldRevision} != ${context.reviewRevision}`,
+				"reusable annotation count 0 != findings 1",
+			],
+		});
+
+		assert.equal(plan.action, "review");
+		assert.equal(plan.confirmMessage, undefined);
 	});
 });

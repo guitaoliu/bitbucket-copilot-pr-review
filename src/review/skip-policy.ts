@@ -45,6 +45,16 @@ export interface ReviewReusePlan {
 	reusedArtifacts?: ReviewArtifacts;
 }
 
+function shouldConfirmRerun(
+	context: ReviewContext,
+	status: ExistingPublicationStatus,
+): boolean {
+	return (
+		status.reportCommit === context.headCommit &&
+		status.reportRevision === context.reviewRevision
+	);
+}
+
 function parseAnnotationMessage(annotation: InsightAnnotationPayload): {
 	title: string;
 	confidence?: ReviewFinding["confidence"];
@@ -384,10 +394,13 @@ export function buildReviewReusePlan(
 			status.unusableReasons.length > 0
 				? ` Details: ${status.unusableReasons.join("; ")}.`
 				: "";
+		const confirmMessage = shouldConfirmRerun(context, status)
+			? `Existing cached artifacts for PR revision ${context.reviewRevision} look unusable. ${status.unusableReasons.join("; ") || "No additional details available."}`
+			: undefined;
 		return {
 			action: "review",
 			repairWarning: `Found an existing but unusable report ${config.report.key} for revision ${context.reviewRevision}; rerunning review to refresh the published output.${reasonSuffix}`,
-			confirmMessage: `Existing cached artifacts for PR revision ${context.reviewRevision} look unusable. ${status.unusableReasons.join("; ") || "No additional details available."}`,
+			...(confirmMessage ? { confirmMessage } : {}),
 		};
 	}
 

@@ -4,33 +4,35 @@ import type { LogLevel } from "../shared/types.ts";
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 export type PullRequestCommentStrategy = "update" | "recreate";
 
-export interface ReviewerConfigExplicitEnvOverrides {
+export interface ReviewerConfigRepoOverrides {
 	copilot: {
-		model: boolean;
-		reasoningEffort: boolean;
-		timeoutMs: boolean;
+		model?: string | undefined;
+		reasoningEffort?: ReasoningEffort | undefined;
+		timeoutMs?: number | undefined;
 	};
 	report: {
-		title: boolean;
-		commentStrategy: boolean;
+		title?: string | undefined;
+		commentStrategy?: PullRequestCommentStrategy | undefined;
 	};
 	review: {
-		maxFiles: boolean;
-		maxFindings: boolean;
-		minConfidence: boolean;
-		maxPatchChars: boolean;
-		defaultFileSliceLines: boolean;
-		maxFileSliceLines: boolean;
-		ignorePaths: boolean;
+		maxFiles?: number | undefined;
+		maxFindings?: number | undefined;
+		minConfidence?: Confidence | undefined;
+		maxPatchChars?: number | undefined;
+		defaultFileSliceLines?: number | undefined;
+		maxFileSliceLines?: number | undefined;
+		ignorePaths?: string[] | undefined;
 	};
 }
 
 export interface ReviewerConfigInternal {
-	explicitEnvOverrides: ReviewerConfigExplicitEnvOverrides;
-	trustedRepoConfig?: {
-		path: string;
-		commit: string;
-	};
+	envRepoOverrides: ReviewerConfigRepoOverrides;
+	trustedRepoConfig?:
+		| {
+				path: string;
+				commit: string;
+		  }
+		| undefined;
 }
 
 export interface BearerAuthConfig {
@@ -57,13 +59,13 @@ export interface ReviewerConfig {
 		prId: number;
 		auth: BitbucketAuthConfig;
 		tls: {
-			caCertPath?: string;
+			caCertPath?: string | undefined;
 			insecureSkipVerify: boolean;
 		};
 	};
 	copilot: {
 		model: string;
-		githubToken?: string;
+		githubToken?: string | undefined;
 		reasoningEffort: ReasoningEffort;
 		timeoutMs: number;
 	};
@@ -71,7 +73,7 @@ export interface ReviewerConfig {
 		key: string;
 		title: string;
 		reporter: string;
-		link?: string;
+		link?: string | undefined;
 		commentTag: string;
 		commentStrategy: PullRequestCommentStrategy;
 	};
@@ -87,8 +89,8 @@ export interface ReviewerConfig {
 		maxFileSliceLines: number;
 		ignorePaths: string[];
 	};
-	ciSummaryPath?: string;
-	internal?: ReviewerConfigInternal;
+	ciSummaryPath?: string | undefined;
+	internal?: ReviewerConfigInternal | undefined;
 }
 
-export type { LogLevel, Confidence };
+export type { Confidence, LogLevel };

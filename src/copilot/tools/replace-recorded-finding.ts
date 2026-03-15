@@ -15,6 +15,7 @@ export function createReplaceRecordedFindingTool(
 			"Replace an already recorded finding draft with a stronger or more accurate one.",
 		parameters: {
 			type: "object",
+			additionalProperties: false,
 			properties: {
 				findingNumber: {
 					type: "integer",

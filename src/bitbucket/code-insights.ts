@@ -9,6 +9,8 @@ import type {
 	RawBitbucketInsightAnnotation,
 } from "./types.ts";
 
+const MAX_INSIGHT_REPORT_DATA_FIELDS = 6;
+
 function normalizeInsightAnnotation(
 	annotation: RawBitbucketInsightAnnotation,
 ): InsightAnnotationPayload | undefined {
@@ -50,6 +52,17 @@ function getAnnotationsPageCount(
 	}
 
 	return getAnnotationsPageAnnotations(payload).length;
+}
+
+function validateInsightReportPayload(payload: InsightReportPayload): void {
+	if (
+		payload.data !== undefined &&
+		payload.data.length > MAX_INSIGHT_REPORT_DATA_FIELDS
+	) {
+		throw new Error(
+			`Bitbucket Code Insights supports at most ${MAX_INSIGHT_REPORT_DATA_FIELDS} report data fields, but got ${payload.data.length}.`,
+		);
+	}
 }
 
 export class CodeInsightsApi {
@@ -173,6 +186,7 @@ export class CodeInsightsApi {
 		reportKey: string,
 		payload: InsightReportPayload,
 	): Promise<void> {
+		validateInsightReportPayload(payload);
 		const pathname = `/rest/insights/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/commits/${encodeURIComponent(commitId)}/reports/${encodeURIComponent(reportKey)}`;
 		await this.request(pathname, {
 			method: "PUT",
@@ -205,6 +219,7 @@ export class CodeInsightsApi {
 		this.logger.info(
 			`Publishing Code Insights report ${reportKey} for commit ${commitId}`,
 		);
+		validateInsightReportPayload(report);
 		await this.deleteReport(commitId, reportKey);
 		await this.createReport(commitId, reportKey, report);
 		await this.addAnnotations(commitId, reportKey, annotations);

@@ -1,12 +1,32 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import { CONFIG_FIELD_METADATA, isRepoOverrideField } from "./metadata.ts";
 import {
 	getRepoReviewConfigSchema,
 	mergeRepoReviewConfig,
 	parseRepoReviewConfig,
 } from "./repo-config.ts";
 import type { ReviewerConfig } from "./types.ts";
+
+function getSchemaProperty(schema: unknown, path: readonly string[]): unknown {
+	let current = schema;
+
+	for (const segment of path) {
+		if (typeof current !== "object" || current === null) {
+			return undefined;
+		}
+
+		const properties = (current as { properties?: Record<string, unknown> })
+			.properties;
+		if (properties === undefined || !(segment in properties)) {
+			return undefined;
+		}
+
+		current = properties[segment];
+	}
+
+	return current;
+}
 
 const baseConfig: ReviewerConfig = {
 	repoRoot: "/tmp/repo",
@@ -45,18 +65,10 @@ const baseConfig: ReviewerConfig = {
 		ignorePaths: [],
 	},
 	internal: {
-		explicitEnvOverrides: {
-			copilot: { model: false, reasoningEffort: false, timeoutMs: false },
-			report: { title: false, commentStrategy: false },
-			review: {
-				maxFiles: false,
-				maxFindings: false,
-				minConfidence: false,
-				maxPatchChars: false,
-				defaultFileSliceLines: false,
-				maxFileSliceLines: false,
-				ignorePaths: false,
-			},
+		envRepoOverrides: {
+			copilot: {},
+			report: {},
+			review: {},
 		},
 	},
 };
@@ -157,20 +169,31 @@ describe("mergeRepoReviewConfig", () => {
 					...baseConfig.review,
 					maxFiles: 300,
 				},
+				copilot: {
+					...baseConfig.copilot,
+					model: "env-model",
+				},
 				internal: {
-					explicitEnvOverrides: {
-						...baseConfig.internal?.explicitEnvOverrides,
+					envRepoOverrides: {
+						copilot: {
+							...baseConfig.internal?.envRepoOverrides.copilot,
+							model: "env-model",
+						},
+						report: { ...baseConfig.internal?.envRepoOverrides.report },
 						review: {
-							...baseConfig.internal?.explicitEnvOverrides.review,
-							maxFiles: true,
+							...baseConfig.internal?.envRepoOverrides.review,
+							maxFiles: 300,
 						},
 					},
 				},
 			},
-			parseRepoReviewConfig('{"review":{"maxFiles":150}}'),
+			parseRepoReviewConfig(
+				'{"review":{"maxFiles":150},"copilot":{"model":"repo-model"}}',
+			),
 		);
 
 		assert.equal(merged.review.maxFiles, 300);
+		assert.equal(merged.copilot.model, "env-model");
 	});
 });
 
@@ -204,5 +227,21 @@ describe("getRepoReviewConfigSchema", () => {
 			schema.properties?.review?.properties?.ignorePaths?.items?.maxLength,
 			512,
 		);
+	});
+
+	it("covers every metadata-marked repo override field", () => {
+		const schema = getRepoReviewConfigSchema();
+		const repoOverridePaths = Object.values(CONFIG_FIELD_METADATA)
+			.filter(isRepoOverrideField)
+			.map((field) => field.path);
+
+		assert.ok(repoOverridePaths.length > 0);
+
+		for (const path of repoOverridePaths) {
+			assert.ok(
+				getSchemaProperty(schema, path.split(".")) !== undefined,
+				`Missing repo config schema coverage for ${path}`,
+			);
+		}
 	});
 });

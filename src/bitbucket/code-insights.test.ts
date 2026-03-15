@@ -63,6 +63,37 @@ describe("CodeInsightsApi", () => {
 		]);
 	});
 
+	it("rejects report payloads with more than six data fields before sending", async () => {
+		const calls: string[] = [];
+		const api = new CodeInsightsApi(
+			"PROJ",
+			"repo",
+			logger,
+			async (pathname, init) => {
+				calls.push(`${init?.method ?? "GET"} ${pathname}`);
+				return "";
+			},
+			async () => ({}) as never,
+		);
+
+		await assert.rejects(
+			() =>
+				api.createReport("commit-1", "report-key", {
+					title: "Copilot PR Review",
+					result: "FAIL",
+					reporter: "Copilot",
+					data: Array.from({ length: 7 }, (_, index) => ({
+						title: `Field ${index + 1}`,
+						type: "TEXT" as const,
+						value: `value-${index + 1}`,
+					})),
+				}),
+			/at most 6 report data fields/,
+		);
+
+		assert.deepEqual(calls, []);
+	});
+
 	it("lists annotations across paged results", async () => {
 		const requestedPaths: string[] = [];
 		const api = new CodeInsightsApi(

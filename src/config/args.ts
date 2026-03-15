@@ -1,3 +1,5 @@
+import { CLI_OPTION_METADATA } from "./metadata.ts";
+
 export interface CliOptions {
 	dryRun: boolean;
 	forceReview: boolean;
@@ -16,27 +18,30 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
+		if (arg === undefined) {
+			continue;
+		}
 
 		if (arg === "--") {
 			continue;
 		}
 
-		if (arg === "--dry-run" || arg === "--no-publish") {
+		if (CLI_OPTION_METADATA.dryRun.flags.includes(arg)) {
 			options.dryRun = true;
 			continue;
 		}
 
-		if (arg === "--force-review") {
+		if (CLI_OPTION_METADATA.forceReview.flags.includes(arg)) {
 			options.forceReview = true;
 			continue;
 		}
 
-		if (arg === "--confirm-rerun") {
+		if (CLI_OPTION_METADATA.confirmRerun.flags.includes(arg)) {
 			options.confirmRerun = true;
 			continue;
 		}
 
-		if (arg === "--repo-root") {
+		if (CLI_OPTION_METADATA.repoRoot.flags.includes(arg)) {
 			const next = argv[index + 1];
 			if (!next) {
 				throw new Error("--repo-root requires a value.");
@@ -46,7 +51,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
 			continue;
 		}
 
-		if (arg === "--help" || arg === "-h") {
+		if (CLI_OPTION_METADATA.help.flags.includes(arg)) {
 			options.help = true;
 			continue;
 		}
@@ -58,14 +63,16 @@ export function parseCliArgs(argv: string[]): CliOptions {
 }
 
 export function getHelpText(): string {
+	const optionLines = Object.values(CLI_OPTION_METADATA).map((option) => {
+		const flagText = option.flags.join(", ");
+		const left = `${flagText}${option.valueLabel ? ` ${option.valueLabel}` : ""}`;
+		return `  ${left.padEnd(16)} ${option.description}`;
+	});
+
 	return [
 		"Usage: pnpm review -- [options]",
 		"",
 		"Options:",
-		"  --dry-run       Run the review but skip Bitbucket publishing",
-		"  --force-review  Run even if the current PR revision already has a fully published result",
-		"  --confirm-rerun Prompt before rerunning an unchanged PR revision with unusable cached artifacts",
-		"  --repo-root     Path to the repository under review",
-		"  -h, --help      Show this help text",
+		...optionLines,
 	].join("\n");
 }

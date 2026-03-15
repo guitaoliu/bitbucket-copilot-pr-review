@@ -16,6 +16,7 @@ export function createRecordFileSummaryTool(toolContext: ReviewToolContext) {
 			"Record a concise summary of what changed in one reviewed file.",
 		parameters: {
 			type: "object",
+			additionalProperties: false,
 			properties: {
 				path: {
 					type: "string",

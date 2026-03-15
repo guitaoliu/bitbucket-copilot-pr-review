@@ -12,6 +12,7 @@ export function createListChangedFilesTool(toolContext: ReviewToolContext) {
 			"List the changed files available for review, with status and changed line ranges.",
 		parameters: {
 			type: "object",
+			additionalProperties: false,
 			properties: {
 				includeSkipped: {
 					type: "boolean",

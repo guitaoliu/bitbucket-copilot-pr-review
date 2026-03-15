@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ReviewerConfig } from "./config/types.ts";
-import { buildPullRequestComment } from "./insights.ts";
+import { buildInsightReport, buildPullRequestComment } from "./insights.ts";
 import type { ReviewContext, ReviewOutcome } from "./review/types.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "./shared/text.ts";
 
@@ -223,29 +223,36 @@ describe("buildPullRequestComment", () => {
 			createOutcome(),
 		);
 
-		assert.match(comment, /### Overview/);
+		assert.match(comment, /### Conclusion/);
 		assert.match(
 			comment,
-			/### Intent\nTightens request validation in the service flow and cleans up renamed modules before merge\./,
+			/### What Changed\nTightens request validation in the service flow and cleans up renamed modules before merge\./,
 		);
+		assert.match(
+			comment,
+			/- Recommendation: address 2 reportable issues before merge\./,
+		);
+		assert.match(comment, /### Review Scope/);
 		assert.match(
 			comment,
 			/- PR: \[#123 Test PR\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\)/,
 		);
-		assert.match(comment, /- Branch: `feature` -> `main`/);
-		assert.match(comment, /- Diff: 6 files, \+4, -1/);
+		assert.match(comment, /- Branches: `feature` -> `main`/);
+		assert.match(comment, /- Diff size: 6 files, \+4, -1/);
 		assert.match(
 			comment,
-			/- Mix: 1 added file, 3 modified files, 1 renamed file, 1 copied file, 1 deleted file/,
+			/- Change mix: 1 added file, 3 modified files, 1 renamed file, 1 copied file, 1 deleted file/,
 		);
-		assert.match(comment, /- Scope: 3 reviewed, 4 skipped/);
+		assert.match(comment, /- Reviewed in scope: 3 files/);
+		assert.match(comment, /- Outside scope: 4 files/);
 		assert.match(
 			comment,
-			/- Skipped: deleted file \(1\), generated or vendored path \(1\), ignored path pattern \(1\), max-files limit \(1\)/,
+			/- Outside-scope reasons: deleted file \(1\), generated or vendored path \(1\), ignored path pattern \(1\), max-files limit \(1\)/,
 		);
 		assert.doesNotMatch(comment, /Changed files:/);
-		assert.match(comment, /### Findings/);
-		assert.match(comment, /### Files/);
+		assert.match(comment, /### Main Concerns/);
+		assert.match(comment, /- Main risks: 1 bug, 1 code smell/);
+		assert.match(comment, /### Reviewed Changes/);
 		assert.match(
 			comment,
 			/- \[src\/service\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fservice\.ts\): Adds stricter null handling and updates the main service branch behavior\./,
@@ -258,7 +265,7 @@ describe("buildPullRequestComment", () => {
 			comment,
 			/- \[src\/new-name\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fnew-name\.ts\): Renames the module and adjusts its imports to match the new location\./,
 		);
-		assert.match(comment, /### Skipped/);
+		assert.match(comment, /### Outside Review Scope/);
 		assert.match(
 			comment,
 			/- \[dist\/generated\.js\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#dist%2Fgenerated\.js\): generated or vendored path/,
@@ -277,11 +284,11 @@ describe("buildPullRequestComment", () => {
 		);
 		assert.match(
 			comment,
-			/1\. \[HIGH\/high\] \[src\/service\.ts:42\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fservice\.ts\?t=42\) - Null handling is broken/,
+			/1\. \[BUG\/HIGH\/high\] \[src\/service\.ts:42\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fservice\.ts\?t=42\) - Null handling is broken/,
 		);
 		assert.match(
 			comment,
-			/2\. \[MEDIUM\/high\] \[src\/new-name\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fnew-name\.ts\) - Rename lost an import/,
+			/2\. \[CODE_SMELL\/MEDIUM\/high\] \[src\/new-name\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fnew-name\.ts\) - Rename lost an import/,
 		);
 	});
 
@@ -295,19 +302,24 @@ describe("buildPullRequestComment", () => {
 		assert.match(comment, /- PR: #123 Test PR/);
 		assert.match(
 			comment,
-			/### Intent\nTightens request validation in the service flow and cleans up renamed modules before merge\./,
+			/### What Changed\nTightens request validation in the service flow and cleans up renamed modules before merge\./,
 		);
 		assert.match(
 			comment,
-			/- Skipped: deleted file \(1\), generated or vendored path \(1\), ignored path pattern \(1\), max-files limit \(1\)/,
+			/- Recommendation: address 2 reportable issues before merge\./,
+		);
+		assert.match(
+			comment,
+			/- Outside-scope reasons: deleted file \(1\), generated or vendored path \(1\), ignored path pattern \(1\), max-files limit \(1\)/,
 		);
 		assert.doesNotMatch(comment, /- `src\/service\.ts` - modified/);
-		assert.match(comment, /### Findings/);
+		assert.match(comment, /### Main Concerns/);
+		assert.match(comment, /- Main risks: 1 bug, 1 code smell/);
 		assert.match(
 			comment,
 			/- `src\/service\.ts`: Adds stricter null handling and updates the main service branch behavior\./,
 		);
-		assert.match(comment, /### Skipped/);
+		assert.match(comment, /### Outside Review Scope/);
 		assert.match(
 			comment,
 			/- `dist\/generated\.js`: generated or vendored path/,
@@ -315,9 +327,42 @@ describe("buildPullRequestComment", () => {
 		assert.match(comment, /- `i18n\/locales\/en\.json`: ignored path pattern/);
 		assert.match(
 			comment,
-			/1\. \[HIGH\/high\] `src\/service\.ts:42` - Null handling is broken/,
+			/1\. \[BUG\/HIGH\/high\] `src\/service\.ts:42` - Null handling is broken/,
 		);
 		assert.doesNotMatch(comment, /\[src\/service\.ts:42\]\(/);
+	});
+
+	it("adds taxonomy detail to the insight report summary", () => {
+		const report = buildInsightReport(
+			config,
+			createContext(
+				"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
+			),
+			createOutcome(),
+		);
+
+		assert.match(
+			report.details ?? "",
+			/Only validated findings on reviewable changed files and changed lines are published\./,
+		);
+		assert.match(report.details ?? "", /Taxonomy: 1 bug, 1 code smell/);
+		assert.match(report.details ?? "", /Top validated findings:/);
+		assert.match(
+			report.details ?? "",
+			/1\. \[BUG\/HIGH\/high\] src\/service\.ts:42 - Null handling is broken/,
+		);
+		assert.ok((report.data?.length ?? 0) <= 6);
+		assert.deepEqual(
+			report.data?.map(({ title, value }) => [title, value]),
+			[
+				["Findings", 2],
+				["Finding taxonomy", "1 bug, 1 code smell"],
+				["Review revision", "review-rev-123"],
+				["Review schema", "2"],
+				["Reviewed commit", "head-123"],
+				["Review scope", "3 reviewed, 4 skipped"],
+			],
+		);
 	});
 
 	it("truncates low-priority sections to stay under the Bitbucket comment limit", () => {
@@ -381,8 +426,9 @@ describe("buildPullRequestComment", () => {
 		assert.ok(comment.length <= BITBUCKET_PR_COMMENT_MAX_CHARS);
 		assert.match(comment, /<!-- copilot-pr-review -->/);
 		assert.match(comment, /<!-- copilot-pr-review:revision:review-rev-123 -->/);
-		assert.match(comment, /### Intent/);
-		assert.match(comment, /### Overview/);
+		assert.match(comment, /### Conclusion/);
+		assert.match(comment, /### What Changed/);
+		assert.match(comment, /### Review Scope/);
 		assert.match(comment, /omitted to fit Bitbucket comment limit/);
 	});
 });

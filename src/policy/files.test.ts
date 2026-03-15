@@ -5,6 +5,7 @@ import type { FindingDraft } from "../review/types.ts";
 import { filterChangedFiles } from "./files.ts";
 import { finalizeFindings } from "./findings.ts";
 import {
+	getRepoDirectoriesAccessDecision,
 	getRepoDirectoryAccessDecision,
 	getRepoFileAccessDecision,
 } from "./path-access.ts";
@@ -105,6 +106,25 @@ describe("repo path access decisions", () => {
 
 		assert.equal(decision.include, false);
 		assert.equal(decision.reason, "generated or vendored path");
+	});
+
+	it("normalizes and collapses nested directory arrays", () => {
+		const decision = getRepoDirectoriesAccessDecision([
+			"src/service",
+			"src",
+			"src/service/internal",
+			"test",
+		]);
+
+		assert.equal(decision.include, true);
+		assert.deepEqual(decision.normalizedPaths, ["src", "test"]);
+	});
+
+	it("treats root scope as all directories when any entry targets dot", () => {
+		const decision = getRepoDirectoriesAccessDecision(["src", "."]);
+
+		assert.equal(decision.include, true);
+		assert.deepEqual(decision.normalizedPaths, []);
 	});
 });
 

@@ -21,7 +21,7 @@ Alternative Bitbucket auth:
 Optional environment:
   PUBLISH=1                    Publish to Bitbucket instead of dry-run
   FORCE_REVIEW=1               Force a rerun even if this commit already has the report key
-  CONFIRM_RERUN=1              Prompt before rerunning an unchanged revision with unusable cached artifacts
+  CONFIRM_RERUN=1              Prompt only when rerunning unusable cached artifacts for the current unchanged PR head and revision
   CI_SUMMARY_PATH=/tmp/ci.txt  Include CI context in the review
   BITBUCKET_CA_CERT_PATH=/path/to/corp-ca.pem
   BITBUCKET_INSECURE_TLS=0     Re-enable strict TLS verification after trust is configured

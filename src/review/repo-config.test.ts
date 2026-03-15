@@ -52,18 +52,10 @@ const baseConfig: ReviewerConfig = {
 		ignorePaths: [],
 	},
 	internal: {
-		explicitEnvOverrides: {
-			copilot: { model: false, reasoningEffort: false, timeoutMs: false },
-			report: { title: false, commentStrategy: false },
-			review: {
-				maxFiles: false,
-				maxFindings: false,
-				minConfidence: false,
-				maxPatchChars: false,
-				defaultFileSliceLines: false,
-				maxFileSliceLines: false,
-				ignorePaths: false,
-			},
+		envRepoOverrides: {
+			copilot: {},
+			report: {},
+			review: {},
 		},
 	},
 };
@@ -75,6 +67,15 @@ describe("loadTrustedRepoConfig", () => {
 				assert.equal(commit, "base-123");
 				assert.equal(filePath, "copilot-code-review.json");
 				return '{"review":{"ignorePaths":["i18n/locales/**/*.json"],"maxFiles":150}}';
+			},
+			async readTextFileAtCommit(commit: string, filePath: string) {
+				assert.equal(commit, "base-123");
+				assert.equal(filePath, "copilot-code-review.json");
+				return {
+					status: "ok" as const,
+					content:
+						'{"review":{"ignorePaths":["i18n/locales/**/*.json"],"maxFiles":150}}',
+				};
 			},
 		} as unknown as GitRepository;
 
@@ -97,6 +98,9 @@ describe("loadTrustedRepoConfig", () => {
 		const git = {
 			async readFileAtCommit() {
 				return undefined;
+			},
+			async readTextFileAtCommit() {
+				return { status: "not_found" as const };
 			},
 		} as unknown as GitRepository;
 

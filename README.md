@@ -23,36 +23,59 @@ Automated Bitbucket Data Center pull request review for Jenkins, powered by the 
 
 If your Bitbucket environment requires basic auth instead of bearer tokens, provide `BITBUCKET_USERNAME` and `BITBUCKET_PASSWORD` and set `BITBUCKET_AUTH_TYPE=basic`.
 
-## Required environment variables
+<!-- GENERATED_CONFIG_REFERENCE:START -->
+## Configuration Reference
 
-- `BITBUCKET_BASE_URL`
-- `BITBUCKET_PROJECT_KEY`
-- `BITBUCKET_REPO_SLUG`
-- `BITBUCKET_PR_ID`
-- `COPILOT_GITHUB_TOKEN`
-- `BITBUCKET_TOKEN` or `BITBUCKET_USERNAME` + `BITBUCKET_PASSWORD`
+### CLI options
 
-## Optional environment variables
+| Option | Description |
+| --- | --- |
+| `--dry-run`, `--no-publish` | Run the review but skip Bitbucket publishing |
+| `--force-review` | Run even if the current PR revision already has a fully published result |
+| `--confirm-rerun` | Prompt only when rerunning unusable cached artifacts for the current unchanged PR head and revision |
+| `--repo-root <path>` | Path to the repository under review |
+| `-h`, `--help` | Show this help text |
 
-- `COPILOT_MODEL` default `gpt-5.4`
-- `COPILOT_REASONING_EFFORT` default `xhigh`
-- `COPILOT_TIMEOUT_MS` default `1800000` (30 minutes)
-- Copilot reasoning is always streamed to the logger during review
-- `BITBUCKET_CA_CERT_PATH` path to a PEM CA bundle for corporate Bitbucket TLS
-- `BITBUCKET_INSECURE_TLS` default `true`; set to `0` to require strict TLS verification
-- `CI_SUMMARY_PATH` path to a build or test summary text file
-- `REPORT_KEY` default `copilot-pr-review`
-- `REPORT_TITLE` default `Copilot PR Review`
-- `REPORT_COMMENT_TAG` default `copilot-pr-review`
-- `REPORT_COMMENT_STRATEGY` default `recreate`; use `recreate` to post a fresh PR summary comment and delete older tagged ones so the latest summary stays near the top, or `update` to edit the existing tagged comment in place
-- `REPORT_LINK` defaults to `BUILD_URL` when available
-- `REVIEW_MAX_FILES` default `200`
-- `REVIEW_MAX_FINDINGS` default `25`
-- `REVIEW_IGNORE_PATHS` optional comma-separated repo-relative glob list for changed files to skip during review
-- `REVIEW_FORCE` default `false`; rerun even if the current effective PR revision already has a fully published result
-- `--confirm-rerun`; prompt before rerunning an unchanged PR revision when cached artifacts exist but look unusable
-- `REVIEW_MIN_CONFIDENCE` default `medium`
-- `LOG_LEVEL` default `info`
+### Environment variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BITBUCKET_BASE_URL` | required | Bitbucket Data Center base URL. |
+| `BITBUCKET_PROJECT_KEY` | required | Bitbucket project key. |
+| `BITBUCKET_REPO_SLUG` | required | Bitbucket repository slug. |
+| `BITBUCKET_PR_ID` | required | Pull request ID. |
+| `COPILOT_GITHUB_TOKEN` | primary; falls back to `GH_TOKEN` / `GITHUB_TOKEN` | Primary GitHub token for Copilot auth. |
+| `GH_TOKEN` | used when `COPILOT_GITHUB_TOKEN` is unset | Fallback GitHub token for Copilot auth. |
+| `GITHUB_TOKEN` | used when `COPILOT_GITHUB_TOKEN` and `GH_TOKEN` are unset | Fallback GitHub token for Copilot auth. |
+| `BITBUCKET_TOKEN` | required unless basic auth vars are used | Bitbucket bearer token. |
+| `BITBUCKET_USERNAME` | required with `BITBUCKET_PASSWORD` for basic auth | Bitbucket basic auth username. |
+| `BITBUCKET_PASSWORD` | required with `BITBUCKET_USERNAME` for basic auth | Bitbucket basic auth password. |
+| `REPO_ROOT` | current working directory | Path to the repository under review. |
+| `GIT_REMOTE_NAME` | `origin` | Git remote name used to fetch PR commits. |
+| `LOG_LEVEL` | `info` | Logger verbosity. |
+| `BITBUCKET_AUTH_TYPE` | auto-detected from provided credentials | Bitbucket authentication strategy. |
+| `BITBUCKET_CA_CERT_PATH` | - | PEM CA bundle path for Bitbucket TLS. |
+| `BITBUCKET_INSECURE_TLS` | `true` | Skip strict TLS verification for Bitbucket. |
+| `COPILOT_MODEL` | `gpt-5.4` | Copilot model override. |
+| `COPILOT_REASONING_EFFORT` | `xhigh` | Copilot reasoning effort. |
+| `COPILOT_TIMEOUT_MS` | `1800000` | Copilot timeout in milliseconds. |
+| `CI_SUMMARY_PATH` | - | Path to a CI summary file included in review context. |
+| `REPORT_KEY` | `copilot-pr-review` | Code Insights report key. |
+| `REPORT_TITLE` | `Copilot PR Review` | Code Insights report title. |
+| `REPORTER_NAME` | `GitHub Copilot via Jenkins` | Displayed report publisher name. |
+| `REPORT_COMMENT_TAG` | `copilot-pr-review` | Tag used to locate the PR summary comment. |
+| `REPORT_COMMENT_STRATEGY` | `recreate` | How the tagged PR summary comment is updated. |
+| `REPORT_LINK` | falls back to `BUILD_URL` when present | Code Insights report link. |
+| `BUILD_URL` | used when `REPORT_LINK` is unset | Fallback report link from CI build URL. |
+| `REVIEW_FORCE` | `false` | Force review even when the revision was already published. |
+| `REVIEW_MAX_FILES` | `200` | Maximum number of changed files to review. |
+| `REVIEW_MAX_FINDINGS` | `25` | Maximum number of findings to publish. |
+| `REVIEW_MIN_CONFIDENCE` | `medium` | Minimum confidence threshold for findings. |
+| `REVIEW_MAX_PATCH_CHARS` | `12000` | Maximum diff size sent to Copilot per file. |
+| `REVIEW_DEFAULT_FILE_SLICE_LINES` | `250` | Default line window when reading file slices. |
+| `REVIEW_MAX_FILE_SLICE_LINES` | `400` | Maximum line window for file slices. |
+| `REVIEW_IGNORE_PATHS` | [] | Comma-separated repo-relative glob patterns to skip. |
+<!-- GENERATED_CONFIG_REFERENCE:END -->
 
 ## Install
 

@@ -9,6 +9,14 @@ import { parseGitGrepLine } from "./search.ts";
 const execFileAsync = promisify(execFile);
 const GIT_BASE_ARGS = ["-c", "core.quotePath=false"];
 
+export type GitCommitPathType = "file" | "directory";
+
+export type GitReadTextFileResult =
+	| { status: "ok"; content: string }
+	| { status: "not_found" }
+	| { status: "not_file" }
+	| { status: "not_text" };
+
 interface GitCommandOptions {
 	allowFailure?: boolean;
 }
@@ -89,6 +97,29 @@ export class GitRepository {
 
 	private async hasCommit(commit: string): Promise<boolean> {
 		return this.checkGitObjectExists(`${commit}^{commit}`);
+	}
+
+	async getPathTypeAtCommit(
+		commit: string,
+		filePath: string,
+	): Promise<GitCommitPathType | undefined> {
+		const result = await this.runGitDetailed([
+			"cat-file",
+			"-t",
+			`${commit}:${filePath}`,
+		]);
+		if (result.exitCode !== 0) {
+			return undefined;
+		}
+
+		switch (result.stdout.trim()) {
+			case "blob":
+				return "file";
+			case "tree":
+				return "directory";
+			default:
+				return undefined;
+		}
 	}
 
 	private async getRemoteUrl(remoteOrUrl: string): Promise<string | undefined> {
@@ -192,28 +223,33 @@ export class GitRepository {
 
 	async listFilesAtCommit(
 		commit: string,
-		directoryPath?: string,
+		directoryPaths?: string[],
 	): Promise<string[]> {
+		const pathspecs = (directoryPaths ?? []).filter((path) => path.length > 0);
 		const args =
-			directoryPath && directoryPath.length > 0
-				? ["ls-tree", "-r", "--name-only", commit, "--", directoryPath]
+			pathspecs.length > 0
+				? ["ls-tree", "-r", "--name-only", commit, "--", ...pathspecs]
 				: ["ls-tree", "-r", "--name-only", commit];
 		const output = await this.runGit(args);
 		if (output.trim().length === 0) {
 			return [];
 		}
 
-		return output
-			.split(/\r?\n/)
-			.map((line) => line.trim())
-			.filter((line) => line.length > 0);
+		return [
+			...new Set(
+				output
+					.split(/\r?\n/)
+					.map((line) => line.trim())
+					.filter((line) => line.length > 0),
+			),
+		];
 	}
 
 	async searchTextAtCommit(
 		commit: string,
 		query: string,
 		options?: {
-			directoryPath?: string;
+			directoryPaths?: string[];
 			limit?: number;
 			mode?: "literal" | "regex";
 			wholeWord?: boolean;
@@ -232,8 +268,11 @@ export class GitRepository {
 		}
 
 		args.push("-e", query, commit);
-		if (options?.directoryPath && options.directoryPath.length > 0) {
-			args.push("--", options.directoryPath);
+		const pathspecs = (options?.directoryPaths ?? []).filter(
+			(path) => path.length > 0,
+		);
+		if (pathspecs.length > 0) {
+			args.push("--", ...pathspecs);
 		}
 
 		const result = await this.runGitDetailed(args);
@@ -251,29 +290,48 @@ export class GitRepository {
 			const parsed = parseGitGrepLine(line);
 			return parsed ? [parsed] : [];
 		});
+		const uniqueMatches = [
+			...new Map(
+				matches.map((match) => [
+					`${match.path}:${match.line}:${match.text}`,
+					match,
+				]),
+			).values(),
+		];
 
-		const limit = Math.max(1, options?.limit ?? 50);
 		return {
-			matches: matches.slice(0, limit),
-			truncated: matches.length > limit,
-			totalMatches: matches.length,
+			matches: uniqueMatches,
+			truncated: false,
+			totalMatches: uniqueMatches.length,
 		};
+	}
+
+	async readTextFileAtCommit(
+		commit: string,
+		filePath: string,
+	): Promise<GitReadTextFileResult> {
+		const pathType = await this.getPathTypeAtCommit(commit, filePath);
+		if (!pathType) {
+			return { status: "not_found" };
+		}
+
+		if (pathType !== "file") {
+			return { status: "not_file" };
+		}
+
+		const content = await this.runGit(["show", `${commit}:${filePath}`]);
+		if (content.includes("\u0000")) {
+			return { status: "not_text" };
+		}
+
+		return { status: "ok", content };
 	}
 
 	async readFileAtCommit(
 		commit: string,
 		filePath: string,
 	): Promise<string | undefined> {
-		const exists = await this.checkGitObjectExists(`${commit}:${filePath}`);
-		if (!exists) {
-			return undefined;
-		}
-
-		const content = await this.runGit(["show", `${commit}:${filePath}`]);
-		if (content.includes("\u0000")) {
-			return undefined;
-		}
-
-		return content;
+		const result = await this.readTextFileAtCommit(commit, filePath);
+		return result.status === "ok" ? result.content : undefined;
 	}
 }

@@ -12,6 +12,7 @@ export function createRemoveRecordedFindingTool(
 			"Remove a previously recorded finding draft that is duplicate, too weak, or superseded.",
 		parameters: {
 			type: "object",
+			additionalProperties: false,
 			properties: {
 				findingNumber: {
 					type: "integer",

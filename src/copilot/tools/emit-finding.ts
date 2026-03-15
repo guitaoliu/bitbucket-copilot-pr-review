@@ -13,6 +13,7 @@ export function createEmitFindingTool(toolContext: ReviewToolContext) {
 			"Record a validated review finding for later publication to Bitbucket Code Insights.",
 		parameters: {
 			type: "object",
+			additionalProperties: false,
 			properties: {
 				path: {
 					type: "string",

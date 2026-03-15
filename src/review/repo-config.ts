@@ -2,6 +2,10 @@ import {
 	mergeRepoReviewConfig,
 	parseRepoReviewConfig,
 } from "../config/repo-config.ts";
+import {
+	cloneRepoOverrides,
+	createEmptyRepoOverrides,
+} from "../config/reviewer-config.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import type { Logger } from "../shared/logger.ts";
@@ -16,10 +20,12 @@ export async function loadTrustedRepoConfig(
 ): Promise<ReviewerConfig> {
 	let repoConfigText: string | undefined;
 	try {
-		repoConfigText = await git.readFileAtCommit(
+		const repoConfigResult = await git.readTextFileAtCommit(
 			baseCommit,
 			TRUSTED_REPO_CONFIG_PATH,
 		);
+		repoConfigText =
+			repoConfigResult.status === "ok" ? repoConfigResult.content : undefined;
 	} catch (error) {
 		logger.warn(
 			`Unable to read trusted repo config from ${baseCommit}:${TRUSTED_REPO_CONFIG_PATH}`,
@@ -40,20 +46,10 @@ export async function loadTrustedRepoConfig(
 		`${baseCommit}:${TRUSTED_REPO_CONFIG_PATH}`,
 	);
 	const merged = mergeRepoReviewConfig(config, parsed);
+	const envRepoOverrides =
+		config.internal?.envRepoOverrides ?? createEmptyRepoOverrides();
 	merged.internal = {
-		explicitEnvOverrides: config.internal?.explicitEnvOverrides ?? {
-			copilot: { model: false, reasoningEffort: false, timeoutMs: false },
-			report: { title: false, commentStrategy: false },
-			review: {
-				maxFiles: false,
-				maxFindings: false,
-				minConfidence: false,
-				maxPatchChars: false,
-				defaultFileSliceLines: false,
-				maxFileSliceLines: false,
-				ignorePaths: false,
-			},
-		},
+		envRepoOverrides: cloneRepoOverrides(envRepoOverrides),
 		trustedRepoConfig: {
 			path: TRUSTED_REPO_CONFIG_PATH,
 			commit: baseCommit,

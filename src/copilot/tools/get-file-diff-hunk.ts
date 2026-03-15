@@ -1,7 +1,11 @@
 import { defineTool } from "@github/copilot-sdk";
 
-import { truncateText } from "../../shared/text.ts";
-import { extractPatchHunk, summarizeFile, toRejectedResult } from "./common.ts";
+import {
+	buildTruncatedPatchResult,
+	extractPatchHunk,
+	summarizeFile,
+	toRejectedResult,
+} from "./common.ts";
 import type { ReviewToolContext } from "./context.ts";
 
 export function createGetFileDiffHunkTool(toolContext: ReviewToolContext) {
@@ -12,6 +16,7 @@ export function createGetFileDiffHunkTool(toolContext: ReviewToolContext) {
 			"Get a specific diff hunk for a reviewed file, including file header context.",
 		parameters: {
 			type: "object",
+			additionalProperties: false,
 			properties: {
 				path: { type: "string", description: "Path of the reviewed file." },
 				hunkIndex: {
@@ -44,9 +49,10 @@ export function createGetFileDiffHunkTool(toolContext: ReviewToolContext) {
 				hunkIndex: args.hunkIndex,
 				totalHunks: file.hunks.length,
 				fileHeader: extracted.fileHeader,
-				patch: truncateText(extracted.hunkPatch, config.review.maxPatchChars, {
-					suffix: "\n... truncated ...",
-				}),
+				...buildTruncatedPatchResult(
+					extracted.hunkPatch,
+					config.review.maxPatchChars,
+				),
 			};
 		},
 	});

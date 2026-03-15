@@ -39,15 +39,18 @@ async function loadRootAgentsInstructions(
 	logger: Logger,
 ): Promise<string | undefined> {
 	try {
-		const content = await git.readFileAtCommit(baseCommit, "AGENTS.md");
-		if (content === undefined) {
+		const contentResult = await git.readTextFileAtCommit(
+			baseCommit,
+			"AGENTS.md",
+		);
+		if (contentResult.status !== "ok") {
 			logger.debug(
 				`No trusted root AGENTS.md found at ${baseCommit}:AGENTS.md`,
 			);
 			return undefined;
 		}
 
-		const trimmed = content.trim();
+		const trimmed = contentResult.content.trim();
 		if (!trimmed) {
 			return undefined;
 		}

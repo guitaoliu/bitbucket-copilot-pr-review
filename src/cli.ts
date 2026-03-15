@@ -6,13 +6,14 @@ import { runReview } from "./review/runner.ts";
 import { createLogger } from "./shared/logger.ts";
 
 async function main(): Promise<void> {
-	const cliOptions = parseCliArgs(process.argv.slice(2));
+	const argv = process.argv.slice(2);
+	const cliOptions = parseCliArgs(argv);
 	if (cliOptions.help) {
 		console.log(getHelpText());
 		return;
 	}
 
-	const config = loadConfig(process.argv.slice(2));
+	const config = loadConfig(argv, process.env, cliOptions);
 	const logger = createLogger(config.logLevel);
 	const output = await runReview(config, logger);
 	delete config.internal;

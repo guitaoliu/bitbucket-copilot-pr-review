@@ -11,13 +11,18 @@ import type {
 } from "../review/types.ts";
 import { createReviewToolContext } from "./tools/context.ts";
 import { createEmitFindingTool } from "./tools/emit-finding.ts";
+import { createGetCiSummaryTool } from "./tools/get-ci-summary.ts";
 import { createGetFileContentTool } from "./tools/get-file-content.ts";
+import { createGetFileDiffTool } from "./tools/get-file-diff.ts";
 import { createGetFileDiffHunkTool } from "./tools/get-file-diff-hunk.ts";
+import { createGetFileListByDirectoryTool } from "./tools/get-file-list-by-directory.ts";
+import { createGetRelatedFileContentTool } from "./tools/get-related-file-content.ts";
 import { createListRecordedFindingsTool } from "./tools/list-recorded-findings.ts";
 import { createRecordFileSummaryTool } from "./tools/record-file-summary.ts";
 import { createRecordPrSummaryTool } from "./tools/record-pr-summary.ts";
 import { createRemoveRecordedFindingTool } from "./tools/remove-recorded-finding.ts";
 import { createReplaceRecordedFindingTool } from "./tools/replace-recorded-finding.ts";
+import { createSearchSymbolNameTool } from "./tools/search-symbol-name.ts";
 import { createSearchTextInRepoTool } from "./tools/search-text-in-repo.ts";
 
 const config: ReviewerConfig = {
@@ -156,6 +161,9 @@ const reviewContext: ReviewContext = {
 function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 	return {
 		readFileAtCommit: async () => undefined,
+		readTextFileAtCommit: async () => ({ status: "not_found" as const }),
+		getPathTypeAtCommit: async () => undefined,
+		listFilesAtCommit: async () => [],
 		searchTextAtCommit: async () => ({
 			matches: [],
 			truncated: false,
@@ -184,10 +192,13 @@ function getHandler<TArgs, TResult>(tool: Tool<TArgs>) {
 describe("Copilot tools", () => {
 	it("reads base content from oldPath for renamed files", async () => {
 		const git = createGitStub({
-			readFileAtCommit: async (commit, filePath) => {
+			readTextFileAtCommit: async (commit, filePath) => {
 				assert.equal(commit, "base-123");
 				assert.equal(filePath, "src/old-name.ts");
-				return ["one", "two", "three", "four", "five"].join("\n");
+				return {
+					status: "ok" as const,
+					content: ["one", "two", "three", "four", "five"].join("\n"),
+				};
 			},
 		});
 		const tool = createGetFileContentTool(
@@ -327,11 +338,16 @@ describe("Copilot tools", () => {
 
 	it("normalizes search options and directory restriction", async () => {
 		const git = createGitStub({
+			getPathTypeAtCommit: async (commit, filePath) => {
+				assert.equal(commit, "head-123");
+				assert.equal(filePath, "src");
+				return "directory";
+			},
 			searchTextAtCommit: async (commit, query, options) => {
 				assert.equal(commit, "head-123");
 				assert.equal(query, "needle");
 				assert.deepEqual(options, {
-					directoryPath: "src",
+					directoryPaths: ["src"],
 					limit: 200,
 					mode: "literal",
 					wholeWord: true,
@@ -356,7 +372,7 @@ describe("Copilot tools", () => {
 			{
 				query: string;
 				version: "head" | "base";
-				directory?: string;
+				directories?: string[];
 				mode?: "literal" | "regex";
 				wholeWord?: boolean;
 				limit?: number;
@@ -368,7 +384,7 @@ describe("Copilot tools", () => {
 			{
 				query: "needle",
 				version: "head",
-				directory: "src",
+				directories: ["src"],
 				wholeWord: true,
 				limit: 999,
 			},
@@ -385,11 +401,370 @@ describe("Copilot tools", () => {
 			version: "head",
 			mode: "literal",
 			wholeWord: true,
-			directory: "src",
+			directories: ["src"],
 			matches: [{ path: "src/new-name.ts", line: 10, text: "needle" }],
 			truncated: false,
 			totalMatches: 1,
+			unfilteredMatchCount: 1,
+			filteredMatchCount: 0,
 		});
+	});
+
+	it("rejects invalid regex searches without aborting the tool", async () => {
+		const tool = createSearchTextInRepoTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{
+				query: string;
+				version: "head" | "base";
+				mode?: "literal" | "regex";
+			},
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
+
+		const result = await handler(
+			{ query: "(", version: "head", mode: "regex" },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "search_text_in_repo",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.match(result.textResultForLlm, /^Invalid regex search pattern:/);
+	});
+
+	it("rejects file paths passed as directories for repo search", async () => {
+		const git = createGitStub({
+			getPathTypeAtCommit: async () => "file",
+		});
+		const tool = createSearchTextInRepoTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{
+				query: string;
+				version: "head" | "base";
+				directories?: string[];
+			},
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
+
+		const result = await handler(
+			{
+				query: "needle",
+				version: "head",
+				directories: ["src/new-name.ts"],
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "search_text_in_repo",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.equal(
+			result.textResultForLlm,
+			"Directory access rejected: src/new-name.ts is a file, not a directory.",
+		);
+	});
+
+	it("filters blocked files out of symbol search results", async () => {
+		const git = createGitStub({
+			getPathTypeAtCommit: async () => "directory",
+			searchTextAtCommit: async () => ({
+				matches: [
+					{ path: "src/new-name.ts", line: 10, text: "PasswordChallenge" },
+					{ path: "src/.env.local", line: 1, text: "PasswordChallenge" },
+				],
+				truncated: false,
+				totalMatches: 2,
+			}),
+		});
+		const tool = createSearchSymbolNameTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{
+				symbol: string;
+				version: "head" | "base";
+				directories?: string[];
+			},
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{
+				symbol: "PasswordChallenge",
+				version: "head",
+				directories: ["src"],
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "search_symbol_name",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			symbol: "PasswordChallenge",
+			version: "head",
+			directories: ["src"],
+			matches: [
+				{ path: "src/new-name.ts", line: 10, text: "PasswordChallenge" },
+			],
+			truncated: true,
+			totalMatches: 1,
+			unfilteredMatchCount: 2,
+			filteredMatchCount: 1,
+		});
+	});
+
+	it("lists files across multiple directories and filters blocked descendants", async () => {
+		const git = createGitStub({
+			getPathTypeAtCommit: async (_commit, filePath) => {
+				assert.match(filePath, /^(src|test)$/);
+				return "directory";
+			},
+			listFilesAtCommit: async (commit, directoryPaths) => {
+				assert.equal(commit, "head-123");
+				assert.deepEqual(directoryPaths, ["src", "test"]);
+				return ["src/new-name.ts", "src/.env.local", "test/review.test.ts"];
+			},
+		});
+		const tool = createGetFileListByDirectoryTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{ directories?: string[]; version: "head" | "base"; limit?: number },
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{ directories: ["src", "test"], version: "head" },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_file_list_by_directory",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			directories: ["src", "test"],
+			version: "head",
+			filteredFileCount: 1,
+			files: ["src/new-name.ts", "test/review.test.ts"],
+			truncated: true,
+			totalFiles: 2,
+		});
+	});
+
+	it("rejects reversed file-content line ranges", async () => {
+		const tool = createGetFileContentTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{
+				path: string;
+				version: "head" | "base";
+				startLine?: number;
+				endLine?: number;
+			},
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
+
+		const result = await handler(
+			{ path: "src/new-name.ts", version: "head", startLine: 5, endLine: 4 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_file_content",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.equal(
+			result.textResultForLlm,
+			"endLine (4) must be greater than or equal to startLine (5).",
+		);
+	});
+
+	it("returns structured out-of-range details for file content", async () => {
+		const git = createGitStub({
+			readTextFileAtCommit: async () => ({
+				status: "ok",
+				content: ["one", "two", "three"].join("\n"),
+			}),
+		});
+		const tool = createGetFileContentTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{ path: string; version: "head" | "base"; startLine?: number },
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{ path: "src/new-name.ts", version: "head", startLine: 10 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_file_content",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			status: "out_of_range",
+			path: "src/new-name.ts",
+			version: "head",
+			totalLines: 3,
+			message:
+				"Requested startLine 10 is beyond the end of src/new-name.ts (3 lines).",
+		});
+	});
+
+	it("rejects directory reads for related file content", async () => {
+		const git = createGitStub({
+			readTextFileAtCommit: async () => ({ status: "not_file" }),
+		});
+		const tool = createGetRelatedFileContentTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{ path: string; version: "head" | "base" },
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
+
+		const result = await handler(
+			{ path: "src", version: "head" },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_related_file_content",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.equal(
+			result.textResultForLlm,
+			"Related file access rejected: src is a directory, not a file.",
+		);
+	});
+
+	it("returns structured CI summary responses", async () => {
+		const tool = createGetCiSummaryTool(
+			createReviewToolContext(
+				config,
+				{ ...reviewContext },
+				createGitStub(),
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<unknown, unknown>(tool);
+
+		const result = await handler(
+			{},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_ci_summary",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			status: "missing",
+			message: "No CI summary was provided.",
+		});
+	});
+
+	it("reports diff truncation metadata", async () => {
+		const diffConfig = {
+			...config,
+			review: {
+				...config.review,
+				maxPatchChars: 20,
+			},
+		};
+		const tool = createGetFileDiffTool(
+			createReviewToolContext(
+				diffConfig,
+				reviewContext,
+				createGitStub(),
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<{ path: string }, unknown>(tool);
+
+		const result = await handler(
+			{ path: "src/multi-hunk.ts" },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_file_diff",
+				arguments: {},
+			},
+		);
+
+		assert.equal((result as { truncated: boolean }).truncated, true);
+		assert.equal(
+			typeof (result as { returnedPatchChars: number }).returnedPatchChars,
+			"number",
+		);
 	});
 
 	it("returns a specific diff hunk with file header context", async () => {
@@ -442,6 +817,13 @@ describe("Copilot tools", () => {
 				"+const second = addedValue;",
 				" export { stable };",
 			].join("\n"),
+			truncated: false,
+			returnedPatchChars: [
+				"@@ -10,3 +10,4 @@",
+				" const stable = true;",
+				"+const second = addedValue;",
+				" export { stable };",
+			].join("\n").length,
 		});
 	});
 

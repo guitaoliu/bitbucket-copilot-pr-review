@@ -107,7 +107,51 @@ describe("buildPrompt", () => {
 		);
 		assert.match(
 			prompt,
-			/For any non-trivial behavior change, verify that tests cover the new or changed behavior at an appropriate level/,
+			/Tests: for every non-trivial behavior change, verify positive, negative, and edge-case coverage at an appropriate level/,
+		);
+	});
+
+	it("defines a concrete review checklist and finding taxonomy", () => {
+		const prompt = buildPrompt(config, context);
+
+		assert.match(prompt, /Review checklist:/);
+		assert.match(
+			prompt,
+			/Security and access control: authentication, authorization/,
+		);
+		assert.match(
+			prompt,
+			/Data integrity and concurrency: transactions, retries, idempotency/,
+		);
+		assert.match(prompt, /Finding taxonomy:/);
+		assert.match(
+			prompt,
+			/- BUG: concrete correctness, data integrity, contract, state-transition/,
+		);
+		assert.match(
+			prompt,
+			/- VULNERABILITY: concrete security defects such as auth or authz bypass/,
+		);
+		assert.match(
+			prompt,
+			/- CODE_SMELL: only for substantial merge-relevant fragility with concrete impact/,
+		);
+	});
+
+	it("discourages speculative and question-shaped findings", () => {
+		const prompt = buildPrompt(config, context);
+
+		assert.match(
+			prompt,
+			/No question-shaped or speculative findings: verify the code path or drop the concern/,
+		);
+		assert.match(
+			prompt,
+			/pass repo-relative directories as a directories array/,
+		);
+		assert.match(
+			prompt,
+			/Use emit_finding only for concrete validated issues\. If a concern is still a question, investigate more or drop it/,
 		);
 	});
 });
