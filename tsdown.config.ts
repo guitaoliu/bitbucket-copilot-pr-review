@@ -8,8 +8,7 @@ export default defineConfig({
 	format: "esm",
 	target: "node24",
 	clean: true,
-	sourcemap: true,
-	dts: false,
+	minify: true,
 	outExtensions() {
 		return {
 			js: ".js",
