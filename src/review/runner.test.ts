@@ -60,6 +60,7 @@ const baseConfig: ReviewerConfig = {
 		defaultFileSliceLines: 250,
 		maxFileSliceLines: 400,
 		ignorePaths: [],
+		skipBranchPrefixes: ["renovate/"],
 	},
 };
 
@@ -416,6 +417,225 @@ describe("runReview", () => {
 		assert.equal(buildContextCalled, false);
 		assert.equal(result.skipped, true);
 		assert.match(result.skipReason ?? "", /is MERGED/);
+	});
+
+	it("skips renovate pull requests before building review context", async () => {
+		const basePr = createPullRequest();
+		const pr = {
+			...basePr,
+			source: {
+				...basePr.source,
+				displayId: "renovate/typescript-5.x",
+			},
+		};
+		let buildContextCalled = false;
+
+		const client: FakeBitbucketClient = {
+			async getPullRequest() {
+				return pr;
+			},
+			async getCodeInsightsReport() {
+				throw new Error("should not read report state");
+			},
+			async listCodeInsightsAnnotations() {
+				throw new Error("should not read annotations");
+			},
+			async getCodeInsightsAnnotationCount() {
+				throw new Error("should not count annotations");
+			},
+			async findPullRequestCommentByTag() {
+				throw new Error("should not read comments");
+			},
+			async publishCodeInsights() {
+				throw new Error("should not publish");
+			},
+			async upsertPullRequestComment() {
+				throw new Error("should not update comment");
+			},
+		};
+
+		const result = await runReview(baseConfig, logger, {
+			createBitbucketClient: () => client as never,
+			buildReviewContext: async () => {
+				buildContextCalled = true;
+				return {
+					config: baseConfig,
+					context: createReviewContext(pr),
+					git: {} as GitRepository,
+				};
+			},
+		});
+
+		assert.equal(buildContextCalled, false);
+		assert.equal(result.skipped, true);
+		assert.match(result.skipReason ?? "", /matches skip prefix renovate\//);
+	});
+
+	it("skips draft pull requests before building review context", async () => {
+		const pr = {
+			...createPullRequest(),
+			draft: true,
+		};
+		let buildContextCalled = false;
+
+		const client: FakeBitbucketClient = {
+			async getPullRequest() {
+				return pr;
+			},
+			async getCodeInsightsReport() {
+				throw new Error("should not read report state");
+			},
+			async listCodeInsightsAnnotations() {
+				throw new Error("should not read annotations");
+			},
+			async getCodeInsightsAnnotationCount() {
+				throw new Error("should not count annotations");
+			},
+			async findPullRequestCommentByTag() {
+				throw new Error("should not read comments");
+			},
+			async publishCodeInsights() {
+				throw new Error("should not publish");
+			},
+			async upsertPullRequestComment() {
+				throw new Error("should not update comment");
+			},
+		};
+
+		const result = await runReview(baseConfig, logger, {
+			createBitbucketClient: () => client as never,
+			buildReviewContext: async () => {
+				buildContextCalled = true;
+				return {
+					config: baseConfig,
+					context: createReviewContext(pr),
+					git: {} as GitRepository,
+				};
+			},
+		});
+
+		assert.equal(buildContextCalled, false);
+		assert.equal(result.skipped, true);
+		assert.match(result.skipReason ?? "", /is a draft/);
+	});
+
+	it("uses repo-configured branch prefixes when deciding skips", async () => {
+		const pr = {
+			...createPullRequest(),
+			source: {
+				...createPullRequest().source,
+				displayId: "deps/typescript-5.x",
+			},
+		};
+		let copilotCalled = false;
+
+		const client: FakeBitbucketClient = {
+			async getPullRequest() {
+				return pr;
+			},
+			async getCodeInsightsReport() {
+				return undefined;
+			},
+			async listCodeInsightsAnnotations() {
+				return [];
+			},
+			async getCodeInsightsAnnotationCount() {
+				return 0;
+			},
+			async findPullRequestCommentByTag() {
+				return undefined;
+			},
+			async publishCodeInsights() {
+				throw new Error("should not publish");
+			},
+			async upsertPullRequestComment() {
+				throw new Error("should not update comment");
+			},
+		};
+
+		const result = await runReview(baseConfig, logger, {
+			createBitbucketClient: () => client as never,
+			buildReviewContext: async () => ({
+				config: {
+					...baseConfig,
+					review: {
+						...baseConfig.review,
+						skipBranchPrefixes: ["deps/"],
+					},
+				},
+				context: createReviewContext(pr),
+				git: {} as GitRepository,
+			}),
+			runCopilotReview: async () => {
+				copilotCalled = true;
+				return createReviewOutcome();
+			},
+		});
+
+		assert.equal(copilotCalled, false);
+		assert.equal(result.skipped, true);
+		assert.match(result.skipReason ?? "", /matches skip prefix deps\//);
+	});
+
+	it("skips before building context when config already matches the branch prefix", async () => {
+		const basePr = createPullRequest();
+		const pr = {
+			...basePr,
+			source: {
+				...basePr.source,
+				displayId: "deps/typescript-5.x",
+			},
+		};
+		let buildContextCalled = false;
+
+		const result = await runReview(
+			{
+				...baseConfig,
+				review: {
+					...baseConfig.review,
+					skipBranchPrefixes: ["deps/"],
+				},
+			},
+			logger,
+			{
+				createBitbucketClient: () =>
+					({
+						async getPullRequest() {
+							return pr;
+						},
+						async getCodeInsightsReport() {
+							throw new Error("should not read report state");
+						},
+						async listCodeInsightsAnnotations() {
+							throw new Error("should not read annotations");
+						},
+						async getCodeInsightsAnnotationCount() {
+							throw new Error("should not count annotations");
+						},
+						async findPullRequestCommentByTag() {
+							throw new Error("should not read comments");
+						},
+						async publishCodeInsights() {
+							throw new Error("should not publish");
+						},
+						async upsertPullRequestComment() {
+							throw new Error("should not update comment");
+						},
+					}) as never,
+				buildReviewContext: async () => {
+					buildContextCalled = true;
+					return {
+						config: baseConfig,
+						context: createReviewContext(pr),
+						git: {} as GitRepository,
+					};
+				},
+			},
+		);
+
+		assert.equal(buildContextCalled, false);
+		assert.equal(result.skipped, true);
+		assert.match(result.skipReason ?? "", /matches skip prefix deps\//);
 	});
 
 	it("skips rerun when confirm-rerun is enabled and the user declines", async () => {

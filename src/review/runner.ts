@@ -1,6 +1,7 @@
 import { BitbucketClient } from "../bitbucket/client.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import { runCopilotReview } from "../copilot/engine.ts";
+import { getPullRequestSkipReason } from "../policy/pull-requests.ts";
 import type { Logger } from "../shared/logger.ts";
 import { confirmRerun } from "./confirm.ts";
 import { buildReviewContext } from "./context.ts";
@@ -34,6 +35,19 @@ export async function runReview(
 		`Loaded pull request #${initialPullRequest.id} (${initialPullRequest.source.displayId} -> ${initialPullRequest.target.displayId})`,
 	);
 
+	const initialBranchSkipReason = getPullRequestSkipReason(
+		initialPullRequest,
+		config.review.skipBranchPrefixes,
+	);
+	if (initialBranchSkipReason) {
+		logger.info(initialBranchSkipReason);
+		return buildSkippedReviewOutput(
+			config,
+			initialPullRequest,
+			initialBranchSkipReason,
+		);
+	}
+
 	if (initialPullRequest.state && initialPullRequest.state !== "OPEN") {
 		const skipReason = `Skipping review because pull request #${initialPullRequest.id} is ${initialPullRequest.state}.`;
 		logger.info(skipReason);
@@ -45,6 +59,20 @@ export async function runReview(
 		context,
 		git,
 	} = await buildContext(config, logger, initialPullRequest);
+	const branchSkipReason = getPullRequestSkipReason(
+		initialPullRequest,
+		effectiveConfig.review.skipBranchPrefixes,
+	);
+	if (branchSkipReason) {
+		logger.info(branchSkipReason);
+		return buildSkippedReviewOutput(
+			effectiveConfig,
+			initialPullRequest,
+			branchSkipReason,
+			context.reviewRevision,
+			context.mergeBaseCommit,
+		);
+	}
 	logger.info(
 		`Review scope after file filtering: ${context.reviewedFiles.length} reviewed, ${context.skippedFiles.length} skipped out of ${context.diffStats.fileCount} changed files (REVIEW_MAX_FILES=${effectiveConfig.review.maxFiles}).`,
 	);

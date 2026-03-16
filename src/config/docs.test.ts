@@ -9,7 +9,9 @@ describe("buildConfigReferenceMarkdown", () => {
 
 		assert.match(markdown, /## Configuration Reference/);
 		assert.match(markdown, /`--dry-run`, `--no-publish`/);
+		assert.match(markdown, /`--repo-id <project\/repo>`/);
 		assert.match(markdown, /`BITBUCKET_BASE_URL`/);
 		assert.match(markdown, /`REPORT_COMMENT_STRATEGY`/);
+		assert.match(markdown, /### Batch review mode/);
 	});
 });

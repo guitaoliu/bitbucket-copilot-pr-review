@@ -30,6 +30,7 @@ export interface RawBitbucketPullRequest {
 	id: number;
 	version: number;
 	state?: string;
+	draft?: boolean;
 	title: string;
 	description?: string | null;
 	links?: {
@@ -53,6 +54,7 @@ export interface PullRequestInfo {
 	id: number;
 	version: number;
 	state?: string;
+	draft?: boolean;
 	title: string;
 	description: string;
 	link?: string;

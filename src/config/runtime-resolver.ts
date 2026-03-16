@@ -174,6 +174,10 @@ const RUNTIME_FIELD_RESOLVERS = [
 		envSource("reviewIgnorePaths"),
 		defaultSource(),
 	]),
+	runtimeFieldResolver("reviewSkipBranchPrefixes", [
+		envSource("reviewSkipBranchPrefixes"),
+		defaultSource(),
+	]),
 ] as const satisfies readonly RuntimeFieldResolver[];
 
 const TOP_LEVEL_RUNTIME_RESOLVERS: RuntimeTopLevelResolvers = {
@@ -293,7 +297,8 @@ function assertRuntimeGroupObjects(
 		!hasNumber(groups.review.maxPatchChars) ||
 		!hasNumber(groups.review.defaultFileSliceLines) ||
 		!hasNumber(groups.review.maxFileSliceLines) ||
-		!hasStringArray(groups.review.ignorePaths)
+		!hasStringArray(groups.review.ignorePaths) ||
+		!hasStringArray(groups.review.skipBranchPrefixes)
 	) {
 		throw new Error(
 			"Runtime resolver did not produce a complete review config.",

@@ -11,7 +11,7 @@ import {
 	normalizeReportKey,
 	parseEnvironment,
 } from "./env.ts";
-import { loadConfig } from "./load.ts";
+import { loadBatchConfig, loadConfig } from "./load.ts";
 import { CONFIG_FIELD_METADATA } from "./metadata.ts";
 import { mergeRepoReviewConfig, parseRepoReviewConfig } from "./repo-config.ts";
 import { resolveRuntimeConfigGroups } from "./runtime-resolver.ts";
@@ -89,6 +89,7 @@ describe("parseEnvironment", () => {
 			COPILOT_MODEL: "env-model",
 			REPORT_COMMENT_STRATEGY: "update",
 			REVIEW_IGNORE_PATHS: "generated/**, docs/**",
+			REVIEW_SKIP_BRANCH_PREFIXES: "renovate/, deps/",
 		});
 
 		assert.deepEqual(getEnvRepoOverrides(env), {
@@ -100,6 +101,7 @@ describe("parseEnvironment", () => {
 			},
 			review: {
 				ignorePaths: ["generated/**", "docs/**"],
+				skipBranchPrefixes: ["renovate/", "deps/"],
 			},
 		});
 	});
@@ -153,6 +155,10 @@ describe("resolveRuntimeConfigGroups", () => {
 		assert.equal(
 			resolved.review.maxFindings,
 			REVIEWER_CONFIG_DEFAULTS.review.maxFindings,
+		);
+		assert.deepEqual(
+			resolved.review.skipBranchPrefixes,
+			REVIEWER_CONFIG_DEFAULTS.review.skipBranchPrefixes,
 		);
 		assert.equal(
 			resolved.gitRemoteName,
@@ -297,6 +303,7 @@ describe("loadConfig feature flags", () => {
 		assert.equal(config.review.maxFindings, 25);
 		assert.equal(config.review.minConfidence, "medium");
 		assert.deepEqual(config.review.ignorePaths, []);
+		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/"]);
 		assert.equal(config.copilot.model, REVIEWER_CONFIG_DEFAULTS.copilot.model);
 		assert.deepEqual(config.internal?.envRepoOverrides, {
 			copilot: {},
@@ -313,6 +320,7 @@ describe("loadConfig feature flags", () => {
 			BITBUCKET_PR_ID: "123",
 			BITBUCKET_TOKEN: "token",
 			REVIEW_IGNORE_PATHS: "i18n/locales/**/*.json, docs/generated/**",
+			REVIEW_SKIP_BRANCH_PREFIXES: "renovate/, deps/",
 		});
 
 		assert.deepEqual(config.review.ignorePaths, [
@@ -323,6 +331,11 @@ describe("loadConfig feature flags", () => {
 			"i18n/locales/**/*.json",
 			"docs/generated/**",
 		]);
+		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/", "deps/"]);
+		assert.deepEqual(
+			config.internal?.envRepoOverrides.review.skipBranchPrefixes,
+			["renovate/", "deps/"],
+		);
 	});
 
 	it("allows overriding the pull request comment strategy from env", () => {
@@ -384,6 +397,7 @@ describe("loadConfig feature flags", () => {
 			BITBUCKET_TOKEN: "token",
 			REVIEW_MAX_FILES: "300",
 			REVIEW_IGNORE_PATHS: "env-only/**",
+			REVIEW_SKIP_BRANCH_PREFIXES: "env/",
 			COPILOT_MODEL: "env-model",
 		});
 
@@ -392,7 +406,8 @@ describe("loadConfig feature flags", () => {
 			parseRepoReviewConfig(`{
 			  "review": {
 			    "maxFiles": 150,
-			    "ignorePaths": ["i18n/locales/**/*.json"]
+			    "ignorePaths": ["i18n/locales/**/*.json"],
+			    "skipBranchPrefixes": ["renovate/", "deps/"]
 			  },
 			  "copilot": {
 			    "model": "repo-model"
@@ -402,6 +417,7 @@ describe("loadConfig feature flags", () => {
 
 		assert.equal(merged.review.maxFiles, 300);
 		assert.deepEqual(merged.review.ignorePaths, ["env-only/**"]);
+		assert.deepEqual(merged.review.skipBranchPrefixes, ["env/"]);
 		assert.equal(merged.copilot.model, "env-model");
 	});
 
@@ -417,6 +433,64 @@ describe("loadConfig feature flags", () => {
 			new RegExp(
 				`${CONFIG_FIELD_METADATA.bitbucketBaseUrl.env} is required\\.`,
 			),
+		);
+	});
+});
+
+describe("loadBatchConfig", () => {
+	it("builds batch review config from repo id and env", () => {
+		const config = loadBatchConfig(
+			["--repo-id", "AAAS/sbp", "--max-parallel", "4"],
+			{
+				BITBUCKET_BASE_URL: "https://bitbucket.example.com",
+				BITBUCKET_TOKEN: "token",
+				GIT_REMOTE_NAME: "upstream",
+				LOG_LEVEL: "debug",
+				REVIEW_FORCE: "1",
+			},
+		);
+
+		assert.equal(config.repoId, "AAAS/sbp");
+		assert.equal(config.bitbucket.projectKey, "AAAS");
+		assert.equal(config.bitbucket.repoSlug, "sbp");
+		assert.equal(config.maxParallel, 4);
+		assert.equal(config.gitRemoteName, "upstream");
+		assert.equal(config.logLevel, "debug");
+		assert.equal(config.review.forceReview, true);
+		assert.equal(config.review.dryRun, false);
+		assert.equal(config.keepWorkdirs, false);
+		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/"]);
+	});
+
+	it("reads batch skip branch prefixes from env", () => {
+		const config = loadBatchConfig(["--repo-id", "AAAS/sbp"], {
+			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
+			BITBUCKET_TOKEN: "token",
+			REVIEW_SKIP_BRANCH_PREFIXES: "renovate/, deps/",
+		});
+
+		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/", "deps/"]);
+	});
+
+	it("rejects unsupported single-pr-only flags", () => {
+		assert.throws(
+			() =>
+				loadBatchConfig(["--repo-id", "AAAS/sbp", "--confirm-rerun"], {
+					BITBUCKET_BASE_URL: "https://bitbucket.example.com",
+					BITBUCKET_TOKEN: "token",
+				}),
+			/--confirm-rerun is not supported in batch repository review mode/,
+		);
+	});
+
+	it("rejects malformed repo ids", () => {
+		assert.throws(
+			() =>
+				loadBatchConfig(["--repo-id", "AAAS"], {
+					BITBUCKET_BASE_URL: "https://bitbucket.example.com",
+					BITBUCKET_TOKEN: "token",
+				}),
+			/--repo-id must use the format <project\/repo>/,
 		);
 	});
 });

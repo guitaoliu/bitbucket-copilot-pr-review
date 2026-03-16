@@ -2,6 +2,7 @@ import { omitUndefined } from "../shared/object.ts";
 import type {
 	PullRequestInfo,
 	PullRequestSide,
+	RawBitbucketPagedResponse,
 	RawBitbucketPullRequest,
 	RawBitbucketRepository,
 } from "./types.ts";
@@ -45,6 +46,7 @@ function normalizePullRequest(
 		id: payload.id,
 		version: payload.version,
 		state: payload.state,
+		draft: payload.draft,
 		title: payload.title,
 		description: payload.description?.trim() || "",
 		link: selfLink,
@@ -78,5 +80,59 @@ export class PullRequestApi {
 		const pathname = `/rest/api/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/pull-requests/${this.prId}`;
 		const payload = await this.requestJson<RawBitbucketPullRequest>(pathname);
 		return normalizePullRequest(payload);
+	}
+}
+
+export class RepositoryPullRequestApi {
+	private readonly projectKey: string;
+	private readonly repoSlug: string;
+	private readonly requestJson: <T>(
+		pathname: string,
+		init?: RequestInit,
+	) => Promise<T>;
+
+	constructor(
+		projectKey: string,
+		repoSlug: string,
+		requestJson: <T>(pathname: string, init?: RequestInit) => Promise<T>,
+	) {
+		this.projectKey = projectKey;
+		this.repoSlug = repoSlug;
+		this.requestJson = requestJson;
+	}
+
+	async listPullRequests(state?: string): Promise<PullRequestInfo[]> {
+		let start = 0;
+		const pullRequests: PullRequestInfo[] = [];
+
+		while (true) {
+			const searchParams = new URLSearchParams({
+				limit: "1000",
+				start: String(start),
+			});
+			if (state !== undefined) {
+				searchParams.set("state", state);
+			}
+
+			const pathname = `/rest/api/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/pull-requests?${searchParams.toString()}`;
+			const payload =
+				await this.requestJson<
+					RawBitbucketPagedResponse<RawBitbucketPullRequest>
+				>(pathname);
+
+			for (const pullRequest of payload.values ?? []) {
+				pullRequests.push(normalizePullRequest(pullRequest));
+			}
+
+			if (payload.isLastPage === true || payload.nextPageStart === undefined) {
+				return pullRequests;
+			}
+
+			start = payload.nextPageStart;
+		}
+	}
+
+	async listOpenPullRequests(): Promise<PullRequestInfo[]> {
+		return this.listPullRequests("OPEN");
 	}
 }

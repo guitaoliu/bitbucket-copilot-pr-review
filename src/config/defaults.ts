@@ -36,5 +36,6 @@ export const REVIEWER_CONFIG_DEFAULTS = {
 		defaultFileSliceLines: 250,
 		maxFileSliceLines: 400,
 		ignorePaths: [] as string[],
+		skipBranchPrefixes: ["renovate/"] as string[],
 	},
 };

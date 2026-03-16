@@ -221,6 +221,10 @@ export class GitRepository {
 		]);
 	}
 
+	async checkoutDetached(commit: string): Promise<void> {
+		await this.runGit(["checkout", "--detach", "--force", commit]);
+	}
+
 	async listFilesAtCommit(
 		commit: string,
 		directoryPaths?: string[],

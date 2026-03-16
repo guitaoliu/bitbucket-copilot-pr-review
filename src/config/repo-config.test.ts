@@ -63,6 +63,7 @@ const baseConfig: ReviewerConfig = {
 		defaultFileSliceLines: 250,
 		maxFileSliceLines: 400,
 		ignorePaths: [],
+		skipBranchPrefixes: ["renovate/"],
 	},
 	internal: {
 		envRepoOverrides: {
@@ -79,7 +80,8 @@ describe("parseRepoReviewConfig", () => {
 		  "$schema": "./schemas/copilot-code-review.schema.json",
 		  "review": {
 		    "ignorePaths": ["i18n/locales/**/*.json"],
-		    "maxFiles": 150
+		    "maxFiles": 150,
+		    "skipBranchPrefixes": ["renovate/", "deps/"]
 		  },
 		  "copilot": {
 		    "model": "gpt-5.4"
@@ -88,6 +90,7 @@ describe("parseRepoReviewConfig", () => {
 
 		assert.deepEqual(config.review?.ignorePaths, ["i18n/locales/**/*.json"]);
 		assert.equal(config.review?.maxFiles, 150);
+		assert.deepEqual(config.review?.skipBranchPrefixes, ["renovate/", "deps/"]);
 		assert.equal(config.copilot?.model, "gpt-5.4");
 	});
 
@@ -138,6 +141,15 @@ describe("parseRepoReviewConfig", () => {
 				),
 			/at most 512 characters/,
 		);
+		assert.throws(
+			() =>
+				parseRepoReviewConfig(
+					JSON.stringify({
+						review: { skipBranchPrefixes: ["x".repeat(129)] },
+					}),
+				),
+			/at most 128 characters/,
+		);
 	});
 });
 
@@ -159,6 +171,19 @@ describe("mergeRepoReviewConfig", () => {
 		assert.equal(merged.review.maxFiles, 150);
 		assert.deepEqual(merged.review.ignorePaths, ["i18n/locales/**/*.json"]);
 		assert.equal(merged.report.commentStrategy, "update");
+	});
+
+	it("applies repo-configured skip branch prefixes", () => {
+		const merged = mergeRepoReviewConfig(
+			baseConfig,
+			parseRepoReviewConfig(`{
+			  "review": {
+			    "skipBranchPrefixes": ["renovate/", "deps/"]
+			  }
+			}`),
+		);
+
+		assert.deepEqual(merged.review.skipBranchPrefixes, ["renovate/", "deps/"]);
 	});
 
 	it("preserves explicit env overrides over repo config", () => {
@@ -194,11 +219,38 @@ describe("mergeRepoReviewConfig", () => {
 
 		assert.equal(merged.review.maxFiles, 300);
 		assert.equal(merged.copilot.model, "env-model");
+		assert.deepEqual(merged.review.skipBranchPrefixes, ["renovate/"]);
+	});
+
+	it("preserves explicit env skip branch prefixes over repo config", () => {
+		const merged = mergeRepoReviewConfig(
+			{
+				...baseConfig,
+				review: {
+					...baseConfig.review,
+					skipBranchPrefixes: ["env/"],
+				},
+				internal: {
+					envRepoOverrides: {
+						copilot: {},
+						report: {},
+						review: {
+							skipBranchPrefixes: ["env/"],
+						},
+					},
+				},
+			},
+			parseRepoReviewConfig(
+				'{"review":{"skipBranchPrefixes":["renovate/","deps/"]}}',
+			),
+		);
+
+		assert.deepEqual(merged.review.skipBranchPrefixes, ["env/"]);
 	});
 });
 
 describe("getRepoReviewConfigSchema", () => {
-	it("includes review ignore path support in the JSON schema", () => {
+	it("includes review ignore path and skip branch support in the JSON schema", () => {
 		const schema = getRepoReviewConfigSchema() as {
 			properties?: {
 				copilot?: { properties?: { timeoutMs?: { maximum?: number } } };
@@ -206,6 +258,10 @@ describe("getRepoReviewConfigSchema", () => {
 				review?: {
 					properties?: {
 						ignorePaths?: { maxItems?: number; items?: { maxLength?: number } };
+						skipBranchPrefixes?: {
+							maxItems?: number;
+							items?: { maxLength?: number };
+						};
 						maxFiles?: { maximum?: number };
 					};
 				};
@@ -226,6 +282,15 @@ describe("getRepoReviewConfigSchema", () => {
 		assert.equal(
 			schema.properties?.review?.properties?.ignorePaths?.items?.maxLength,
 			512,
+		);
+		assert.equal(
+			schema.properties?.review?.properties?.skipBranchPrefixes?.maxItems,
+			50,
+		);
+		assert.equal(
+			schema.properties?.review?.properties?.skipBranchPrefixes?.items
+				?.maxLength,
+			128,
 		);
 	});
 

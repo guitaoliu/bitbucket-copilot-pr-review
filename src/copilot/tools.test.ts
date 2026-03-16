@@ -61,6 +61,7 @@ const config: ReviewerConfig = {
 		defaultFileSliceLines: 3,
 		maxFileSliceLines: 4,
 		ignorePaths: [],
+		skipBranchPrefixes: ["renovate/"],
 	},
 };
 

@@ -83,6 +83,7 @@ export const reviewerConfigRepoOverridesSchema = z
 				defaultFileSliceLines: z.number().int().positive().optional(),
 				maxFileSliceLines: z.number().int().positive().optional(),
 				ignorePaths: z.array(z.string().min(1)).optional(),
+				skipBranchPrefixes: z.array(z.string().min(1)).optional(),
 			})
 			.strict(),
 	})
@@ -152,6 +153,7 @@ export const reviewerConfigSchema = z
 				defaultFileSliceLines: z.number().int().positive(),
 				maxFileSliceLines: z.number().int().positive(),
 				ignorePaths: z.array(z.string().min(1)),
+				skipBranchPrefixes: z.array(z.string().min(1)),
 			})
 			.strict(),
 		ciSummaryPath: z.string().min(1).optional(),

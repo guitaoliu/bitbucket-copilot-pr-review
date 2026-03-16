@@ -74,6 +74,14 @@ function buildCliRows(): string[] {
 	});
 }
 
+function buildAdditionalUsageRows(): string[] {
+	return [
+		"### Batch review mode",
+		"",
+		"Use `--repo-id <project/repo>` to clone the repository into a temp working area, list open PRs, and fan out one subprocess review per PR.",
+	];
+}
+
 export function buildConfigReferenceMarkdown(): string {
 	return [
 		"## Configuration Reference",
@@ -89,5 +97,7 @@ export function buildConfigReferenceMarkdown(): string {
 		"| Variable | Default | Description |",
 		"| --- | --- | --- |",
 		...buildEnvRows(),
+		"",
+		...buildAdditionalUsageRows(),
 	].join("\n");
 }

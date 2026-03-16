@@ -24,6 +24,7 @@ const REPO_CONFIG_LIMITS = {
 	defaultFileSliceLines: { min: 1, max: 500 },
 	maxFileSliceLines: { min: 1, max: 1_000 },
 	ignorePaths: { maxItems: 200, maxPatternLength: 512 },
+	skipBranchPrefixes: { maxItems: 50, maxPrefixLength: 128 },
 } as const;
 
 function boundedInteger(name: string, limits: { min: number; max: number }) {
@@ -83,6 +84,25 @@ const reviewRepoConfigSchema = z
 			)
 			.describe(
 				"Repo-relative glob patterns for changed files that should be skipped during review.",
+			)
+			.optional(),
+		skipBranchPrefixes: z
+			.array(
+				z
+					.string()
+					.min(1, "review.skipBranchPrefixes entries must not be empty.")
+					.max(
+						REPO_CONFIG_LIMITS.skipBranchPrefixes.maxPrefixLength,
+						`review.skipBranchPrefixes entries must be at most ${REPO_CONFIG_LIMITS.skipBranchPrefixes.maxPrefixLength} characters.`,
+					),
+			)
+			.min(1, "review.skipBranchPrefixes must contain at least one prefix.")
+			.max(
+				REPO_CONFIG_LIMITS.skipBranchPrefixes.maxItems,
+				`review.skipBranchPrefixes must contain at most ${REPO_CONFIG_LIMITS.skipBranchPrefixes.maxItems} prefixes.`,
+			)
+			.describe(
+				"Source branch prefixes that should always be skipped during review.",
 			)
 			.optional(),
 	})

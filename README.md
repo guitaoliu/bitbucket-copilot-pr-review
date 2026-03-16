@@ -34,6 +34,10 @@ If your Bitbucket environment requires basic auth instead of bearer tokens, prov
 | `--force-review` | Run even if the current PR revision already has a fully published result |
 | `--confirm-rerun` | Prompt only when rerunning unusable cached artifacts for the current unchanged PR head and revision |
 | `--repo-root <path>` | Path to the repository under review |
+| `--repo-id <project/repo>` | Review all open PRs for the given Bitbucket project/repo |
+| `--temp-root <path>` | Parent directory for temporary batch review clones |
+| `--max-parallel <count>` | Maximum concurrent PR review subprocesses in batch mode |
+| `--keep-workdirs` | Keep temporary batch review clones after the run completes |
 | `-h`, `--help` | Show this help text |
 
 ### Environment variables
@@ -75,6 +79,11 @@ If your Bitbucket environment requires basic auth instead of bearer tokens, prov
 | `REVIEW_DEFAULT_FILE_SLICE_LINES` | `250` | Default line window when reading file slices. |
 | `REVIEW_MAX_FILE_SLICE_LINES` | `400` | Maximum line window for file slices. |
 | `REVIEW_IGNORE_PATHS` | [] | Comma-separated repo-relative glob patterns to skip. |
+| `REVIEW_SKIP_BRANCH_PREFIXES` | `renovate/` | Comma-separated source branch prefixes that should be skipped. |
+
+### Batch review mode
+
+Use `--repo-id <project/repo>` to clone the repository into a temp working area, list open PRs, and fan out one subprocess review per PR.
 <!-- GENERATED_CONFIG_REFERENCE:END -->
 
 ## Install
@@ -109,6 +118,36 @@ npx bitbucket-copilot-pr-review --help
 pnpm typecheck
 pnpm review:dry-run
 ```
+
+## Review all open PRs in a repo
+
+Use batch mode when you want the tool to clone a Bitbucket repository into a temp working area, discover all open pull requests, and spawn one isolated review subprocess per PR.
+
+Quickest option:
+
+```bash
+scripts/run-local-batch-review.sh AAAS/sbp
+```
+
+Or run the CLI directly:
+
+```bash
+export BITBUCKET_BASE_URL="https://bitbucket.example.com"
+export BITBUCKET_TOKEN="<bitbucket token>"
+export COPILOT_GITHUB_TOKEN="<github token with copilot access>"
+
+node dist/cli.js --repo-id AAAS/sbp --dry-run --max-parallel 2
+```
+
+Batch mode keeps a shared bare mirror cache under the temp root and creates one disposable workspace per PR from that cache. Use `--temp-root` to choose the parent directory or `--keep-workdirs` to preserve the per-PR clones for debugging.
+
+The batch JSON output now includes `metrics.mirror` and `metrics.workspaces` so you can inspect mirror refresh timing, lock wait time, workspace provisioning totals, cleanup totals, and whether the run root was retained.
+
+The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, runs in dry-run mode unless you set `PUBLISH=1`, and forwards common batch-mode controls such as `MAX_PARALLEL`, `TEMP_ROOT`, `KEEP_WORKDIRS=1`, and `FORCE_REVIEW=1`.
+
+Pull requests whose source branch starts with `renovate/` are always skipped automatically.
+
+You can override the skipped branch prefixes with `REVIEW_SKIP_BRANCH_PREFIXES` or repo-level `review.skipBranchPrefixes`; the default remains `["renovate/"]`.
 
 ## Test locally against a real repo and PR
 

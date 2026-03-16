@@ -6,7 +6,8 @@
 		"minConfidence": "medium",
 		"maxPatchChars": 12000,
 		"defaultFileSliceLines": 250,
-		"maxFileSliceLines": 400
+		"maxFileSliceLines": 400,
+		"skipBranchPrefixes": ["renovate/"]
 	},
 	"report": {
 		"commentStrategy": "recreate"

@@ -22,6 +22,7 @@ export interface ReviewerConfigRepoOverrides {
 		defaultFileSliceLines?: number | undefined;
 		maxFileSliceLines?: number | undefined;
 		ignorePaths?: string[] | undefined;
+		skipBranchPrefixes?: string[] | undefined;
 	};
 }
 
@@ -88,6 +89,7 @@ export interface ReviewerConfig {
 		defaultFileSliceLines: number;
 		maxFileSliceLines: number;
 		ignorePaths: string[];
+		skipBranchPrefixes: string[];
 	};
 	ciSummaryPath?: string | undefined;
 	internal?: ReviewerConfigInternal | undefined;

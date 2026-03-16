@@ -2,7 +2,7 @@ import type { ReviewerConfig } from "../config/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { CodeInsightsApi } from "./code-insights.ts";
 import { PullRequestCommentsApi } from "./comments.ts";
-import { PullRequestApi } from "./pull-request.ts";
+import { PullRequestApi, RepositoryPullRequestApi } from "./pull-request.ts";
 import { BitbucketTransport } from "./transport.ts";
 import type {
 	InsightAnnotationPayload,
@@ -135,5 +135,30 @@ export class BitbucketClient {
 			report,
 			annotations,
 		);
+	}
+}
+
+export class BitbucketRepositoryClient {
+	private readonly pullRequests: RepositoryPullRequestApi;
+
+	constructor(
+		config: Pick<
+			ReviewerConfig["bitbucket"],
+			"baseUrl" | "projectKey" | "repoSlug" | "auth" | "tls"
+		>,
+	) {
+		const transport = new BitbucketTransport({
+			...config,
+			prId: 1,
+		});
+		this.pullRequests = new RepositoryPullRequestApi(
+			config.projectKey,
+			config.repoSlug,
+			transport.requestJson.bind(transport),
+		);
+	}
+
+	async listOpenPullRequests(): Promise<PullRequestInfo[]> {
+		return this.pullRequests.listOpenPullRequests();
 	}
 }

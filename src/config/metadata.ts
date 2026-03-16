@@ -107,6 +107,10 @@ export interface CliOptionMetadataMap {
 	forceReview: CliOptionMetadata;
 	confirmRerun: CliOptionMetadata;
 	repoRoot: CliOptionMetadata;
+	repoId: CliOptionMetadata;
+	tempRoot: CliOptionMetadata;
+	maxParallel: CliOptionMetadata;
+	keepWorkdirs: CliOptionMetadata;
 	help: CliOptionMetadata;
 }
 
@@ -430,6 +434,15 @@ export const CONFIG_FIELD_METADATA = {
 		...repoOverride(),
 		...envDoc(32, { defaultValuePath: ["review", "ignorePaths"] }),
 	},
+	reviewSkipBranchPrefixes: {
+		path: "review.skipBranchPrefixes",
+		env: "REVIEW_SKIP_BRANCH_PREFIXES",
+		description:
+			"Comma-separated source branch prefixes that should be skipped.",
+		...envParser({ kind: "stringArray" }),
+		...repoOverride(),
+		...envDoc(33, { defaultValuePath: ["review", "skipBranchPrefixes"] }),
+	},
 	ciSummaryPath: {
 		path: "ciSummaryPath",
 		env: "CI_SUMMARY_PATH",
@@ -458,6 +471,25 @@ export const CLI_OPTION_METADATA: CliOptionMetadataMap = {
 		flags: ["--repo-root"],
 		description: "Path to the repository under review",
 		valueLabel: "<path>",
+	},
+	repoId: {
+		flags: ["--repo-id"],
+		description: "Review all open PRs for the given Bitbucket project/repo",
+		valueLabel: "<project/repo>",
+	},
+	tempRoot: {
+		flags: ["--temp-root"],
+		description: "Parent directory for temporary batch review clones",
+		valueLabel: "<path>",
+	},
+	maxParallel: {
+		flags: ["--max-parallel"],
+		description: "Maximum concurrent PR review subprocesses in batch mode",
+		valueLabel: "<count>",
+	},
+	keepWorkdirs: {
+		flags: ["--keep-workdirs"],
+		description: "Keep temporary batch review clones after the run completes",
 	},
 	help: {
 		flags: ["-h", "--help"],

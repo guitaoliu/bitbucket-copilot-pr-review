@@ -96,6 +96,17 @@
 						"maxLength": 512
 					},
 					"description": "Repo-relative glob patterns for changed files that should be skipped during review."
+				},
+				"skipBranchPrefixes": {
+					"minItems": 1,
+					"maxItems": 50,
+					"type": "array",
+					"items": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 128
+					},
+					"description": "Source branch prefixes that should always be skipped during review."
 				}
 			},
 			"additionalProperties": false

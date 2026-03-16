@@ -16,6 +16,23 @@ describe("parseCliArgs", () => {
 
 		assert.equal(parsed.repoRoot, "/tmp/repo");
 	});
+
+	it("parses batch review options", () => {
+		const parsed = parseCliArgs([
+			"--repo-id",
+			"AAAS/sbp",
+			"--temp-root",
+			"/tmp/batch",
+			"--max-parallel",
+			"3",
+			"--keep-workdirs",
+		]);
+
+		assert.equal(parsed.repoId, "AAAS/sbp");
+		assert.equal(parsed.tempRoot, "/tmp/batch");
+		assert.equal(parsed.maxParallel, 3);
+		assert.equal(parsed.keepWorkdirs, true);
+	});
 });
 
 describe("getHelpText", () => {
@@ -25,6 +42,8 @@ describe("getHelpText", () => {
 		assert.match(helpText, /Usage: bitbucket-copilot-pr-review \[options\]/);
 		assert.match(helpText, /--dry-run, --no-publish/);
 		assert.match(helpText, /--repo-root <path>/);
+		assert.match(helpText, /--repo-id <project\/repo>/);
+		assert.match(helpText, /--keep-workdirs/);
 		assert.match(helpText, /-h, --help/);
 	});
 });
