@@ -12,6 +12,7 @@ describe("buildConfigReferenceMarkdown", () => {
 		assert.match(markdown, /`--repo-id <project\/repo>`/);
 		assert.match(markdown, /`BITBUCKET_BASE_URL`/);
 		assert.match(markdown, /`REPORT_COMMENT_STRATEGY`/);
+		assert.doesNotMatch(markdown, /`COPILOT_GITHUB_TOKEN`/);
 		assert.match(markdown, /### Batch review mode/);
 	});
 });

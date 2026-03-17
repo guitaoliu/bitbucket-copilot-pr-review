@@ -97,11 +97,6 @@ const RUNTIME_FIELD_RESOLVERS = [
 		envSource("copilotModel"),
 		defaultSource(),
 	]),
-	runtimeFieldResolver("copilotGithubToken", [
-		envSource("copilotGithubToken"),
-		envSource("ghToken"),
-		envSource("githubToken"),
-	]),
 	runtimeFieldResolver("copilotReasoningEffort", [
 		envSource("copilotReasoningEffort"),
 		defaultSource(),

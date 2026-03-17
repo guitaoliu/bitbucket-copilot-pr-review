@@ -12,12 +12,15 @@ Examples:
 
 Required environment:
   BITBUCKET_BASE_URL      Bitbucket Data Center base URL
-  COPILOT_GITHUB_TOKEN    GitHub token with Copilot access
   BITBUCKET_TOKEN         Bitbucket token
 
 Alternative Bitbucket auth:
   BITBUCKET_USERNAME
   BITBUCKET_PASSWORD
+
+Copilot authentication:
+  Use an existing Copilot or GitHub CLI login, or set a standard
+  GitHub token env var supported by the Copilot SDK if preferred.
 
 Optional environment:
   PUBLISH=1                    Publish to Bitbucket instead of dry-run
@@ -25,6 +28,7 @@ Optional environment:
   MAX_PARALLEL=2               Concurrent batch review workers
   TEMP_ROOT=/tmp/review-batch  Parent directory for temp clone/cache data
   KEEP_WORKDIRS=1              Preserve per-PR workdirs after the run
+  NODE_USE_SYSTEM_CA=0         Override the default system CA loading for Node.js
   BITBUCKET_CA_CERT_PATH=/path/to/corp-ca.pem
   BITBUCKET_INSECURE_TLS=0     Re-enable strict TLS verification after trust is configured
   COPILOT_MODEL=gpt-5.4
@@ -73,10 +77,6 @@ if [[ -z "${BITBUCKET_BASE_URL:-}" ]]; then
   die "Set BITBUCKET_BASE_URL before running this script"
 fi
 
-if [[ -z "${COPILOT_GITHUB_TOKEN:-}" ]]; then
-  die "Set COPILOT_GITHUB_TOKEN before running this script"
-fi
-
 if [[ -z "${BITBUCKET_TOKEN:-}" && ( -z "${BITBUCKET_USERNAME:-}" || -z "${BITBUCKET_PASSWORD:-}" ) ]]; then
   die "Set BITBUCKET_TOKEN or BITBUCKET_USERNAME and BITBUCKET_PASSWORD before running this script"
 fi
@@ -96,6 +96,7 @@ export COPILOT_MODEL="${COPILOT_MODEL:-gpt-5.4}"
 export COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 export LOG_LEVEL="${LOG_LEVEL:-debug}"
 export REPORT_KEY="${REPORT_KEY:-copilot-local-${USER:-local}}"
+export NODE_USE_SYSTEM_CA="${NODE_USE_SYSTEM_CA:-1}"
 
 declare -a REVIEW_ARGS=(--repo-id "$REPO_ID")
 
@@ -129,6 +130,7 @@ printf 'Bitbucket base URL: %s\n' "$BITBUCKET_BASE_URL"
 printf 'Repository: %s\n' "$REPO_ID"
 printf 'Model: %s\n' "$COPILOT_MODEL"
 printf 'Reasoning effort: %s\n' "$COPILOT_REASONING_EFFORT"
+printf 'Node system CA: %s\n' "$( [[ "$NODE_USE_SYSTEM_CA" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 printf 'Mode: %s\n' "$( [[ "${PUBLISH:-0}" == "1" ]] && printf 'publish' || printf 'dry-run' )"
 printf 'Force review: %s\n' "$( [[ "${FORCE_REVIEW:-0}" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 printf 'Keep workdirs: %s\n' "$( [[ "${KEEP_WORKDIRS:-0}" == "1" ]] && printf 'enabled' || printf 'disabled' )"

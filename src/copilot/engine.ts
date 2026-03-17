@@ -209,10 +209,8 @@ export function buildCopilotClientOptions(
 		config.logLevel === "debug" ? "debug" : "error";
 
 	return omitUndefined({
-		useLoggedInUser: config.copilot.githubToken === undefined,
 		cwd: config.repoRoot,
 		logLevel: clientLogLevel,
-		githubToken: config.copilot.githubToken,
 		cliPath: resolveCliPath(),
 	}) satisfies CopilotClientOptions;
 }

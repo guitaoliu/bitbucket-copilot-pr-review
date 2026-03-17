@@ -11,18 +11,22 @@ Examples:
     https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 
 Required environment:
-  COPILOT_GITHUB_TOKEN   GitHub token with Copilot access
   BITBUCKET_TOKEN        Bitbucket token
 
 Alternative Bitbucket auth:
   BITBUCKET_USERNAME
   BITBUCKET_PASSWORD
 
+Copilot authentication:
+  Use an existing Copilot or GitHub CLI login, or set a standard
+  GitHub token env var supported by the Copilot SDK if preferred.
+
 Optional environment:
   PUBLISH=1                    Publish to Bitbucket instead of dry-run
   FORCE_REVIEW=1               Force a rerun even if this commit already has the report key
   CONFIRM_RERUN=1              Prompt only when rerunning unusable cached artifacts for the current unchanged PR head and revision
   CI_SUMMARY_PATH=/tmp/ci.txt  Include CI context in the review
+  NODE_USE_SYSTEM_CA=0         Override the default system CA loading for Node.js
   BITBUCKET_CA_CERT_PATH=/path/to/corp-ca.pem
   BITBUCKET_INSECURE_TLS=0     Re-enable strict TLS verification after trust is configured
   COPILOT_MODEL=gpt-5.4
@@ -64,10 +68,6 @@ TARGET_REPO_ROOT="$(cd -- "$TARGET_REPO_INPUT" && pwd -P)" || die "Repository pa
 
 git -C "$TARGET_REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "Not a git repository: $TARGET_REPO_ROOT"
 
-if [[ -z "${COPILOT_GITHUB_TOKEN:-}" ]]; then
-  die "Set COPILOT_GITHUB_TOKEN before running this script"
-fi
-
 if [[ -z "${BITBUCKET_TOKEN:-}" && ( -z "${BITBUCKET_USERNAME:-}" || -z "${BITBUCKET_PASSWORD:-}" ) ]]; then
   die "Set BITBUCKET_TOKEN or BITBUCKET_USERNAME and BITBUCKET_PASSWORD before running this script"
 fi
@@ -90,6 +90,7 @@ export COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 export LOG_LEVEL="${LOG_LEVEL:-debug}"
 export REPORT_KEY="${REPORT_KEY:-copilot-local-${USER:-local}}"
 export REPORT_LINK="${REPORT_LINK:-$PR_URL}"
+export NODE_USE_SYSTEM_CA="${NODE_USE_SYSTEM_CA:-1}"
 
 declare -a REVIEW_ARGS=()
 
@@ -115,6 +116,7 @@ printf 'Target repo: %s\n' "$REPO_ROOT"
 printf 'Bitbucket PR: %s\n' "$PR_URL"
 printf 'Model: %s\n' "$COPILOT_MODEL"
 printf 'Reasoning effort: %s\n' "$COPILOT_REASONING_EFFORT"
+printf 'Node system CA: %s\n' "$( [[ "$NODE_USE_SYSTEM_CA" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 printf 'Mode: %s\n' "$( [[ "${PUBLISH:-0}" == "1" ]] && printf 'publish' || printf 'dry-run' )"
 printf 'Force review: %s\n' "$( [[ "${FORCE_REVIEW:-0}" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 printf 'Confirm rerun: %s\n' "$( [[ "${CONFIRM_RERUN:-0}" == "1" ]] && printf 'enabled' || printf 'disabled' )"

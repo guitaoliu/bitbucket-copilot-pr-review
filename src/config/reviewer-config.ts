@@ -126,7 +126,6 @@ export const reviewerConfigSchema = z
 		copilot: z
 			.object({
 				model: z.string().min(1),
-				githubToken: z.string().min(1).optional(),
 				reasoningEffort: z.enum(REASONING_EFFORT_VALUES),
 				timeoutMs: z.number().int().positive(),
 			})

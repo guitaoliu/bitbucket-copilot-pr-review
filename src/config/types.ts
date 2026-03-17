@@ -66,7 +66,6 @@ export interface ReviewerConfig {
 	};
 	copilot: {
 		model: string;
-		githubToken?: string | undefined;
 		reasoningEffort: ReasoningEffort;
 		timeoutMs: number;
 	};

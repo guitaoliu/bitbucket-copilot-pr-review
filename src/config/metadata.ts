@@ -282,33 +282,6 @@ export const CONFIG_FIELD_METADATA = {
 		...repoOverride(),
 		...envDoc(17, { defaultValuePath: ["copilot", "timeoutMs"] }),
 	},
-	copilotGithubToken: {
-		path: "copilot.githubToken",
-		env: "COPILOT_GITHUB_TOKEN",
-		description: "Primary GitHub token for Copilot auth.",
-		...envParser({ kind: "string" }),
-		...envDoc(5, {
-			defaultText: "primary; falls back to `GH_TOKEN` / `GITHUB_TOKEN`",
-		}),
-	},
-	ghToken: {
-		path: "copilot.githubToken",
-		env: "GH_TOKEN",
-		description: "Fallback GitHub token for Copilot auth.",
-		...envParser({ kind: "string" }),
-		...envDoc(5.1, {
-			defaultText: "used when `COPILOT_GITHUB_TOKEN` is unset",
-		}),
-	},
-	githubToken: {
-		path: "copilot.githubToken",
-		env: "GITHUB_TOKEN",
-		description: "Fallback GitHub token for Copilot auth.",
-		...envParser({ kind: "string" }),
-		...envDoc(5.2, {
-			defaultText: "used when `COPILOT_GITHUB_TOKEN` and `GH_TOKEN` are unset",
-		}),
-	},
 	reportKey: {
 		path: "report.key",
 		env: "REPORT_KEY",

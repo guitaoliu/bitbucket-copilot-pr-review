@@ -18,72 +18,72 @@ Automated Bitbucket Data Center pull request review for Jenkins, powered by the 
 
 ## Required credentials
 
-- `COPILOT_GITHUB_TOKEN` for Copilot SDK and CLI authentication
 - `BITBUCKET_TOKEN` for Bitbucket Data Center REST API access
+
+Copilot authentication is resolved by the GitHub Copilot SDK. You can rely on an existing `copilot` CLI login, `gh auth` credentials, or any supported GitHub token environment variable that the SDK already knows how to read. See the official SDK auth docs: <https://github.com/github/copilot-sdk/blob/main/docs/auth/index.md>.
 
 If your Bitbucket environment requires basic auth instead of bearer tokens, provide `BITBUCKET_USERNAME` and `BITBUCKET_PASSWORD` and set `BITBUCKET_AUTH_TYPE=basic`.
 
 <!-- GENERATED_CONFIG_REFERENCE:START -->
+
 ## Configuration Reference
 
 ### CLI options
 
-| Option | Description |
-| --- | --- |
-| `--dry-run`, `--no-publish` | Run the review but skip Bitbucket publishing |
-| `--force-review` | Run even if the current PR revision already has a fully published result |
-| `--confirm-rerun` | Prompt only when rerunning unusable cached artifacts for the current unchanged PR head and revision |
-| `--repo-root <path>` | Path to the repository under review |
-| `--repo-id <project/repo>` | Review all open PRs for the given Bitbucket project/repo |
-| `--temp-root <path>` | Parent directory for temporary batch review clones |
-| `--max-parallel <count>` | Maximum concurrent PR review subprocesses in batch mode |
-| `--keep-workdirs` | Keep temporary batch review clones after the run completes |
-| `-h`, `--help` | Show this help text |
+| Option                      | Description                                                                                         |
+| --------------------------- | --------------------------------------------------------------------------------------------------- |
+| `--dry-run`, `--no-publish` | Run the review but skip Bitbucket publishing                                                        |
+| `--force-review`            | Run even if the current PR revision already has a fully published result                            |
+| `--confirm-rerun`           | Prompt only when rerunning unusable cached artifacts for the current unchanged PR head and revision |
+| `--repo-root <path>`        | Path to the repository under review                                                                 |
+| `--repo-id <project/repo>`  | Review all open PRs for the given Bitbucket project/repo                                            |
+| `--temp-root <path>`        | Parent directory for temporary batch review clones                                                  |
+| `--max-parallel <count>`    | Maximum concurrent PR review subprocesses in batch mode                                             |
+| `--keep-workdirs`           | Keep temporary batch review clones after the run completes                                          |
+| `-h`, `--help`              | Show this help text                                                                                 |
 
 ### Environment variables
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `BITBUCKET_BASE_URL` | required | Bitbucket Data Center base URL. |
-| `BITBUCKET_PROJECT_KEY` | required | Bitbucket project key. |
-| `BITBUCKET_REPO_SLUG` | required | Bitbucket repository slug. |
-| `BITBUCKET_PR_ID` | required | Pull request ID. |
-| `COPILOT_GITHUB_TOKEN` | primary; falls back to `GH_TOKEN` / `GITHUB_TOKEN` | Primary GitHub token for Copilot auth. |
-| `GH_TOKEN` | used when `COPILOT_GITHUB_TOKEN` is unset | Fallback GitHub token for Copilot auth. |
-| `GITHUB_TOKEN` | used when `COPILOT_GITHUB_TOKEN` and `GH_TOKEN` are unset | Fallback GitHub token for Copilot auth. |
-| `BITBUCKET_TOKEN` | required unless basic auth vars are used | Bitbucket bearer token. |
-| `BITBUCKET_USERNAME` | required with `BITBUCKET_PASSWORD` for basic auth | Bitbucket basic auth username. |
-| `BITBUCKET_PASSWORD` | required with `BITBUCKET_USERNAME` for basic auth | Bitbucket basic auth password. |
-| `REPO_ROOT` | current working directory | Path to the repository under review. |
-| `GIT_REMOTE_NAME` | `origin` | Git remote name used to fetch PR commits. |
-| `LOG_LEVEL` | `info` | Logger verbosity. |
-| `BITBUCKET_AUTH_TYPE` | auto-detected from provided credentials | Bitbucket authentication strategy. |
-| `BITBUCKET_CA_CERT_PATH` | - | PEM CA bundle path for Bitbucket TLS. |
-| `BITBUCKET_INSECURE_TLS` | `true` | Skip strict TLS verification for Bitbucket. |
-| `COPILOT_MODEL` | `gpt-5.4` | Copilot model override. |
-| `COPILOT_REASONING_EFFORT` | `xhigh` | Copilot reasoning effort. |
-| `COPILOT_TIMEOUT_MS` | `1800000` | Copilot timeout in milliseconds. |
-| `CI_SUMMARY_PATH` | - | Path to a CI summary file included in review context. |
-| `REPORT_KEY` | `copilot-pr-review` | Code Insights report key. |
-| `REPORT_TITLE` | `Copilot PR Review` | Code Insights report title. |
-| `REPORTER_NAME` | `GitHub Copilot via Jenkins` | Displayed report publisher name. |
-| `REPORT_COMMENT_TAG` | `copilot-pr-review` | Tag used to locate the PR summary comment. |
-| `REPORT_COMMENT_STRATEGY` | `recreate` | How the tagged PR summary comment is updated. |
-| `REPORT_LINK` | falls back to `BUILD_URL` when present | Code Insights report link. |
-| `BUILD_URL` | used when `REPORT_LINK` is unset | Fallback report link from CI build URL. |
-| `REVIEW_FORCE` | `false` | Force review even when the revision was already published. |
-| `REVIEW_MAX_FILES` | `300` | Maximum number of changed files to review. |
-| `REVIEW_MAX_FINDINGS` | `25` | Maximum number of findings to publish. |
-| `REVIEW_MIN_CONFIDENCE` | `medium` | Minimum confidence threshold for findings. |
-| `REVIEW_MAX_PATCH_CHARS` | `12000` | Maximum diff size sent to Copilot per file. |
-| `REVIEW_DEFAULT_FILE_SLICE_LINES` | `250` | Default line window when reading file slices. |
-| `REVIEW_MAX_FILE_SLICE_LINES` | `400` | Maximum line window for file slices. |
-| `REVIEW_IGNORE_PATHS` | [] | Comma-separated repo-relative glob patterns to skip. |
-| `REVIEW_SKIP_BRANCH_PREFIXES` | `renovate/` | Comma-separated source branch prefixes that should be skipped. |
+| Variable                          | Default                                           | Description                                                    |
+| --------------------------------- | ------------------------------------------------- | -------------------------------------------------------------- |
+| `BITBUCKET_BASE_URL`              | required                                          | Bitbucket Data Center base URL.                                |
+| `BITBUCKET_PROJECT_KEY`           | required                                          | Bitbucket project key.                                         |
+| `BITBUCKET_REPO_SLUG`             | required                                          | Bitbucket repository slug.                                     |
+| `BITBUCKET_PR_ID`                 | required                                          | Pull request ID.                                               |
+| `BITBUCKET_TOKEN`                 | required unless basic auth vars are used          | Bitbucket bearer token.                                        |
+| `BITBUCKET_USERNAME`              | required with `BITBUCKET_PASSWORD` for basic auth | Bitbucket basic auth username.                                 |
+| `BITBUCKET_PASSWORD`              | required with `BITBUCKET_USERNAME` for basic auth | Bitbucket basic auth password.                                 |
+| `REPO_ROOT`                       | current working directory                         | Path to the repository under review.                           |
+| `GIT_REMOTE_NAME`                 | `origin`                                          | Git remote name used to fetch PR commits.                      |
+| `LOG_LEVEL`                       | `info`                                            | Logger verbosity.                                              |
+| `BITBUCKET_AUTH_TYPE`             | auto-detected from provided credentials           | Bitbucket authentication strategy.                             |
+| `BITBUCKET_CA_CERT_PATH`          | -                                                 | PEM CA bundle path for Bitbucket TLS.                          |
+| `BITBUCKET_INSECURE_TLS`          | `true`                                            | Skip strict TLS verification for Bitbucket.                    |
+| `COPILOT_MODEL`                   | `gpt-5.4`                                         | Copilot model override.                                        |
+| `COPILOT_REASONING_EFFORT`        | `xhigh`                                           | Copilot reasoning effort.                                      |
+| `COPILOT_TIMEOUT_MS`              | `1800000`                                         | Copilot timeout in milliseconds.                               |
+| `CI_SUMMARY_PATH`                 | -                                                 | Path to a CI summary file included in review context.          |
+| `REPORT_KEY`                      | `copilot-pr-review`                               | Code Insights report key.                                      |
+| `REPORT_TITLE`                    | `Copilot PR Review`                               | Code Insights report title.                                    |
+| `REPORTER_NAME`                   | `GitHub Copilot via Jenkins`                      | Displayed report publisher name.                               |
+| `REPORT_COMMENT_TAG`              | `copilot-pr-review`                               | Tag used to locate the PR summary comment.                     |
+| `REPORT_COMMENT_STRATEGY`         | `recreate`                                        | How the tagged PR summary comment is updated.                  |
+| `REPORT_LINK`                     | falls back to `BUILD_URL` when present            | Code Insights report link.                                     |
+| `BUILD_URL`                       | used when `REPORT_LINK` is unset                  | Fallback report link from CI build URL.                        |
+| `REVIEW_FORCE`                    | `false`                                           | Force review even when the revision was already published.     |
+| `REVIEW_MAX_FILES`                | `300`                                             | Maximum number of changed files to review.                     |
+| `REVIEW_MAX_FINDINGS`             | `25`                                              | Maximum number of findings to publish.                         |
+| `REVIEW_MIN_CONFIDENCE`           | `medium`                                          | Minimum confidence threshold for findings.                     |
+| `REVIEW_MAX_PATCH_CHARS`          | `12000`                                           | Maximum diff size sent to Copilot per file.                    |
+| `REVIEW_DEFAULT_FILE_SLICE_LINES` | `250`                                             | Default line window when reading file slices.                  |
+| `REVIEW_MAX_FILE_SLICE_LINES`     | `400`                                             | Maximum line window for file slices.                           |
+| `REVIEW_IGNORE_PATHS`             | []                                                | Comma-separated repo-relative glob patterns to skip.           |
+| `REVIEW_SKIP_BRANCH_PREFIXES`     | `renovate/`                                       | Comma-separated source branch prefixes that should be skipped. |
 
 ### Batch review mode
 
 Use `--repo-id <project/repo>` to clone the repository into a temp working area, list open PRs, and fan out one subprocess review per PR.
+
 <!-- GENERATED_CONFIG_REFERENCE:END -->
 
 ## Install
@@ -109,8 +109,10 @@ node dist/cli.js --help
 After publishing, the package can be invoked with `npx`:
 
 ```bash
-npx bitbucket-copilot-pr-review --help
+NODE_USE_SYSTEM_CA=1 npx bitbucket-copilot-pr-review --help
 ```
+
+When invoking the published CLI directly with `npx`, pass `NODE_USE_SYSTEM_CA=1` yourself if you want Node to trust your system CA store.
 
 ## Run locally
 
@@ -134,16 +136,15 @@ Or run the CLI directly:
 ```bash
 export BITBUCKET_BASE_URL="https://bitbucket.example.com"
 export BITBUCKET_TOKEN="<bitbucket token>"
-export COPILOT_GITHUB_TOKEN="<github token with copilot access>"
 
-node dist/cli.js --repo-id AAAS/sbp --dry-run --max-parallel 2
+NODE_USE_SYSTEM_CA=1 node dist/cli.js --repo-id AAAS/sbp --dry-run --max-parallel 2
 ```
 
 Batch mode keeps a shared bare mirror cache under the temp root and creates one disposable workspace per PR from that cache. Use `--temp-root` to choose the parent directory or `--keep-workdirs` to preserve the per-PR clones for debugging.
 
 The batch JSON output now includes `metrics.mirror` and `metrics.workspaces` so you can inspect mirror refresh timing, lock wait time, workspace provisioning totals, cleanup totals, and whether the run root was retained.
 
-The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, runs in dry-run mode unless you set `PUBLISH=1`, and forwards common batch-mode controls such as `MAX_PARALLEL`, `TEMP_ROOT`, `KEEP_WORKDIRS=1`, and `FORCE_REVIEW=1`.
+The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and forwards common batch-mode controls such as `MAX_PARALLEL`, `TEMP_ROOT`, `KEEP_WORKDIRS=1`, and `FORCE_REVIEW=1`.
 
 Pull requests whose source branch starts with `renovate/` are always skipped automatically.
 
@@ -160,9 +161,11 @@ scripts/run-local-review.sh /path/to/local/my-repo \
   https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
-The script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, and runs in dry-run mode unless you set `PUBLISH=1`.
+The script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, and runs in dry-run mode unless you set `PUBLISH=1`.
 
 If your Bitbucket Data Center uses an internal or self-signed certificate, prefer setting `BITBUCKET_CA_CERT_PATH` to a PEM file containing your corporate CA. Strict TLS verification is disabled by default. Set `BITBUCKET_INSECURE_TLS=0` after `BITBUCKET_CA_CERT_PATH` is configured if you want certificate validation enforced.
+
+For local helper-script runs, Node system CA loading is enabled by default with `NODE_USE_SYSTEM_CA=1`. Set `NODE_USE_SYSTEM_CA=0` if you need to disable that behavior for troubleshooting or environment-specific differences.
 
 When the target repository contains a root-level `AGENTS.md`, the reviewer reads it and appends its instructions to the Copilot review prompt. Nested `AGENTS.md` files are not used.
 
@@ -207,10 +210,7 @@ Example with common repo-specific customizations:
     "commentStrategy": "recreate"
   },
   "review": {
-    "ignorePaths": [
-      "i18n/locales/**/*.json",
-      "docs/generated/**"
-    ],
+    "ignorePaths": ["i18n/locales/**/*.json", "docs/generated/**"],
     "maxFiles": 300,
     "maxFindings": 25,
     "minConfidence": "medium",
@@ -250,7 +250,6 @@ export BITBUCKET_PROJECT_KEY="PROJ"
 export BITBUCKET_REPO_SLUG="my-repo"
 export BITBUCKET_PR_ID="123"
 
-export COPILOT_GITHUB_TOKEN="<github token with copilot access>"
 export BITBUCKET_TOKEN="<bitbucket token>"
 export COPILOT_MODEL="gpt-5.4"
 export COPILOT_REASONING_EFFORT="xhigh"
@@ -292,7 +291,7 @@ Common local test issues:
 
 - the repo in `REPO_ROOT` is not the same repo as `BITBUCKET_PROJECT_KEY` and `BITBUCKET_REPO_SLUG`
 - the local checkout cannot fetch the source or target commit referenced by the PR
-- the bundled `@github/copilot` runtime is missing or the GitHub Copilot auth state is not ready
+- the bundled `@github/copilot` runtime is missing or the Copilot SDK cannot resolve auth from your existing login or token setup
 - Node.js does not trust the Bitbucket TLS certificate chain; use `BITBUCKET_CA_CERT_PATH`, or keep the default `BITBUCKET_INSECURE_TLS=1` until trust is configured
 - the PR is from a fork and your local git credentials cannot fetch the fork remote URL returned by Bitbucket
 

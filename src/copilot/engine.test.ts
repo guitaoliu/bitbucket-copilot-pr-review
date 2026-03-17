@@ -606,26 +606,23 @@ describe("buildCopilotClientOptions", () => {
 		assert.equal(options.cliPath, "/tmp/node_modules/@github/copilot/index.js");
 		assert.equal(options.cwd, config.repoRoot);
 		assert.equal(options.logLevel, "error");
-		assert.equal(options.useLoggedInUser, true);
+		assert.equal("useLoggedInUser" in options, false);
+		assert.equal("githubToken" in options, false);
 	});
 
-	it("passes the GitHub token and debug log level through when configured", () => {
+	it("passes the debug log level through without overriding SDK auth", () => {
 		const options = buildCopilotClientOptions(
 			{
 				...config,
 				logLevel: "debug",
-				copilot: {
-					...config.copilot,
-					githubToken: "token",
-				},
 			},
 			() => "/tmp/node_modules/@github/copilot/index.js",
 		);
 
 		assert.equal(options.cliPath, "/tmp/node_modules/@github/copilot/index.js");
 		assert.equal(options.logLevel, "debug");
-		assert.equal(options.githubToken, "token");
-		assert.equal(options.useLoggedInUser, false);
+		assert.equal("useLoggedInUser" in options, false);
+		assert.equal("githubToken" in options, false);
 	});
 });
 
