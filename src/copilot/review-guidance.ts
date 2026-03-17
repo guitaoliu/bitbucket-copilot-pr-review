@@ -66,3 +66,11 @@ export const QUESTION_SHAPED_FINDING_HINT =
 
 export const QUESTION_SHAPED_FINDING_PROMPT_LINE =
 	"- No question-shaped or speculative findings: verify the code path or drop the concern.";
+
+export const TEST_COVERAGE_HINT =
+	"Only treat missing tests as a standalone finding when the gap materially reduces confidence in a risky behavior change; prefer concrete BUG or VULNERABILITY findings when the code is already wrong.";
+
+export const TEST_COVERAGE_PROMPT_LINES = [
+	"- Missing or inadequate tests are reportable only when the gap materially weakens confidence in a meaningful behavior change, especially in auth, validation, persistence, or public API paths.",
+	"- Do not emit a standalone test-coverage finding when a stronger concrete BUG or VULNERABILITY already captures the same root cause unless the missing coverage leaves a distinct untested risk.",
+] as const;

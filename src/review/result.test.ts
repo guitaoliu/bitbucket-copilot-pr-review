@@ -248,6 +248,10 @@ describe("buildReviewArtifacts", () => {
 		);
 		assert.match(
 			artifacts.commentBody,
+			/<!-- copilot-pr-review:findings-json:/,
+		);
+		assert.match(
+			artifacts.commentBody,
 			/<!-- copilot-pr-review:reviewed-commit:head-123 -->/,
 		);
 		assert.match(
@@ -431,7 +435,24 @@ describe("buildReviewArtifacts", () => {
 describe("buildReviewRunOutput", () => {
 	it("combines context, review, and published artifacts into the final output", () => {
 		const context = createReviewContext();
-		const review = createReviewOutcome();
+		const review: ReviewOutcome = {
+			...createReviewOutcome(),
+			toolTelemetry: {
+				totalRequested: 3,
+				totalAllowed: 3,
+				totalDenied: 0,
+				totalCompleted: 3,
+				byTool: {
+					get_pr_overview: {
+						requested: 1,
+						allowed: 1,
+						denied: 0,
+						completed: 1,
+						resultCounts: { success: 1 },
+					},
+				},
+			},
+		};
 		const artifacts: ReviewArtifacts = {
 			report: {
 				title: baseConfig.report.title,
@@ -464,7 +485,16 @@ describe("buildReviewRunOutput", () => {
 				reviewedFiles: 2,
 				skippedFiles: 1,
 			},
-			review,
+			metrics: {
+				toolTelemetry: review.toolTelemetry,
+			},
+			review: {
+				summary: review.summary,
+				prSummary: review.prSummary,
+				fileSummaries: review.fileSummaries,
+				findings: review.findings,
+				stale: review.stale,
+			},
 			report: artifacts.report,
 			annotations: artifacts.annotations,
 			commentBody: "comment body",

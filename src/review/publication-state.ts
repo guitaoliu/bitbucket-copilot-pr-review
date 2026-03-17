@@ -1,19 +1,39 @@
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 import type {
 	InsightReportDataField,
 	InsightReportPayload,
 } from "../bitbucket/types.ts";
 import { getReviewRevisionSchema } from "./revision.ts";
+import type { StoredReviewFinding } from "./types.ts";
 
 const REVIEW_REVISION_FIELD_TITLE = "Review revision";
 const REVIEW_SCHEMA_FIELD_TITLE = "Review schema";
 const REVIEWED_COMMIT_FIELD_TITLE = "Reviewed commit";
+const FINDINGS_METADATA_KEY = "findings-json";
 
 const COMMENT_METADATA_KEYS = [
 	"schema",
 	"revision",
 	"reviewed-commit",
 	"published-commit",
+	FINDINGS_METADATA_KEY,
 ] as const;
+
+function encodeCommentMetadataValue(value: string): string {
+	return deflateRawSync(Buffer.from(value, "utf8")).toString("base64");
+}
+
+function decodeCommentMetadataValue(value: string): string | undefined {
+	try {
+		return inflateRawSync(Buffer.from(value, "base64")).toString("utf8");
+	} catch {
+		try {
+			return Buffer.from(value, "base64").toString("utf8");
+		} catch {
+			return undefined;
+		}
+	}
+}
 
 function escapeRegexLiteral(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -55,6 +75,7 @@ export function buildPullRequestCommentMetadataMarkers(options: {
 	reviewedCommit: string;
 	publishedCommit: string;
 	schema?: string;
+	findingsJson?: string;
 }): string[] {
 	const schema = options.schema ?? getReviewRevisionSchema();
 	return [
@@ -62,6 +83,11 @@ export function buildPullRequestCommentMetadataMarkers(options: {
 		`<!-- ${options.tag}:revision:${options.revision} -->`,
 		`<!-- ${options.tag}:reviewed-commit:${options.reviewedCommit} -->`,
 		`<!-- ${options.tag}:published-commit:${options.publishedCommit} -->`,
+		...(options.findingsJson
+			? [
+					`<!-- ${options.tag}:${FINDINGS_METADATA_KEY}:${encodeCommentMetadataValue(options.findingsJson)} -->`,
+				]
+			: []),
 	];
 }
 
@@ -73,6 +99,7 @@ export function rewritePullRequestCommentMetadata(
 		reviewedCommit: string;
 		publishedCommit: string;
 		schema?: string;
+		findingsJson?: string;
 	},
 ): string {
 	const body = text
@@ -100,6 +127,7 @@ export function parsePullRequestCommentMetadata(
 			revision?: string;
 			reviewedCommit?: string;
 			publishedCommit?: string;
+			storedFindings?: StoredReviewFinding[];
 	  }
 	| undefined {
 	if (!text.includes(buildPullRequestCommentTagMarker(tag))) {
@@ -111,6 +139,7 @@ export function parsePullRequestCommentMetadata(
 		revision?: string;
 		reviewedCommit?: string;
 		publishedCommit?: string;
+		storedFindings?: StoredReviewFinding[];
 	} = {};
 
 	for (const key of COMMENT_METADATA_KEYS) {
@@ -135,6 +164,32 @@ export function parsePullRequestCommentMetadata(
 			case "published-commit":
 				metadata.publishedCommit = value;
 				break;
+			case FINDINGS_METADATA_KEY: {
+				const decoded = decodeCommentMetadataValue(value);
+				if (!decoded) {
+					break;
+				}
+
+				try {
+					const parsed = JSON.parse(decoded);
+					if (Array.isArray(parsed)) {
+						metadata.storedFindings = parsed.filter(
+							(entry): entry is StoredReviewFinding =>
+								Boolean(
+									entry &&
+										typeof entry === "object" &&
+										typeof entry.path === "string" &&
+										typeof entry.severity === "string" &&
+										typeof entry.type === "string" &&
+										typeof entry.title === "string",
+								),
+						);
+					}
+				} catch {
+					// Ignore malformed stored finding metadata and fall back to annotations.
+				}
+				break;
+			}
 		}
 	}
 

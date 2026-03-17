@@ -4,6 +4,7 @@ import type { InsightReportPayload } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import { buildPullRequestComment } from "../insights.ts";
 import {
+	buildPullRequestCommentMetadataMarkers,
 	buildReviewMetadataFields,
 	getInsightReportFindingCount,
 	isPullRequestPublicationComplete,
@@ -177,5 +178,41 @@ describe("publication completeness", () => {
 			reviewedCommit: "head-123",
 			publishedCommit: "head-456",
 		});
+	});
+
+	it("parses stored findings metadata from tagged comments", () => {
+		const comment = [
+			"<!-- copilot-pr-review -->",
+			...buildPullRequestCommentMetadataMarkers({
+				tag: "copilot-pr-review",
+				revision: "review-rev-123",
+				reviewedCommit: "head-123",
+				publishedCommit: "head-123",
+				findingsJson: JSON.stringify([
+					{
+						path: "src/service.ts",
+						line: 42,
+						severity: "HIGH",
+						type: "BUG",
+						title: "Null handling is broken",
+					},
+				]),
+			}),
+		].join("\n");
+
+		const metadata = parsePullRequestCommentMetadata(
+			"copilot-pr-review",
+			comment,
+		);
+
+		assert.deepEqual(metadata?.storedFindings, [
+			{
+				path: "src/service.ts",
+				line: 42,
+				severity: "HIGH",
+				type: "BUG",
+				title: "Null handling is broken",
+			},
+		]);
 	});
 });

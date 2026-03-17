@@ -18,6 +18,7 @@ import { createGetFileDiffTool } from "./tools/get-file-diff.ts";
 import { createGetFileDiffHunkTool } from "./tools/get-file-diff-hunk.ts";
 import { createGetFileListByDirectoryTool } from "./tools/get-file-list-by-directory.ts";
 import { createGetRelatedFileContentTool } from "./tools/get-related-file-content.ts";
+import { createGetRelatedTestsTool } from "./tools/get-related-tests.ts";
 import { createListRecordedFindingsTool } from "./tools/list-recorded-findings.ts";
 import { createRecordFileSummaryTool } from "./tools/record-file-summary.ts";
 import { createRecordPrSummaryTool } from "./tools/record-pr-summary.ts";
@@ -543,6 +544,68 @@ describe("Copilot tools", () => {
 			totalMatches: 1,
 			unfilteredMatchCount: 2,
 			filteredMatchCount: 1,
+		});
+	});
+
+	it("suggests nearby tests from concrete directories", async () => {
+		const git = createGitStub({
+			getPathTypeAtCommit: async (_commit, filePath) => {
+				if (filePath === "src" || filePath === "test") {
+					return "directory";
+				}
+
+				return undefined;
+			},
+			listFilesAtCommit: async (commit, directoryPaths) => {
+				assert.equal(commit, "head-123");
+				if (directoryPaths?.[0] === "src") {
+					return [
+						"src/new-name.ts",
+						"src/new-name.test.ts",
+						"src/helper.spec.ts",
+					];
+				}
+
+				if (directoryPaths?.[0] === "test") {
+					return ["test/new-name.test.ts", "test/unrelated.test.ts"];
+				}
+
+				return [];
+			},
+		});
+		const tool = createGetRelatedTestsTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{ path: string; version?: "head" | "base"; limit?: number },
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{ path: "src/new-name.ts", limit: 3 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_related_tests",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			path: "src/new-name.ts",
+			version: "head",
+			directoriesSearched: ["src", "test", "tests"],
+			candidateCount: 2,
+			candidates: [
+				{ path: "test/new-name.test.ts", score: 20 },
+				{ path: "src/new-name.test.ts", score: 15 },
+			],
 		});
 	});
 

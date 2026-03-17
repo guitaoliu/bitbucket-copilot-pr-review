@@ -11,12 +11,14 @@ import type {
 import type { Logger } from "../shared/logger.ts";
 import {
 	buildCopilotClientOptions,
+	createEmptyReviewToolTelemetry,
 	createReviewSessionHooks,
 	runCopilotReview,
 } from "./engine.ts";
 import {
 	FINDING_TAXONOMY_HINT,
 	QUESTION_SHAPED_FINDING_HINT,
+	TEST_COVERAGE_HINT,
 } from "./review-guidance.ts";
 
 const config: ReviewerConfig = {
@@ -188,7 +190,7 @@ describe("createReviewSessionHooks", () => {
 		);
 		assert.match(
 			result.additionalContext,
-			/Flag any meaningful behavior change that lacks appropriate automated test coverage/,
+			new RegExp(TEST_COVERAGE_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
 		);
 		assert.match(
 			result.additionalContext,
@@ -289,6 +291,60 @@ describe("createReviewSessionHooks", () => {
 		});
 	});
 
+	it("tracks explicit per-tool telemetry counters", async () => {
+		const telemetry = createEmptyReviewToolTelemetry();
+		const hooks = createReviewSessionHooks(
+			config,
+			createLoggerSpy().logger,
+			[],
+			{
+				reviewedFileCount: 4,
+				summaryDrafts: { fileSummaries: [] },
+				toolTelemetry: telemetry,
+			},
+		);
+
+		await hooks.onPreToolUse({
+			toolName: "get_pr_overview",
+			toolArgs: {},
+			cwd: "/tmp/repo",
+		});
+		await hooks.onPreToolUse({
+			toolName: "bash",
+			toolArgs: {},
+			cwd: "/tmp/repo",
+		});
+		await hooks.onPostToolUse({
+			toolName: "get_pr_overview",
+			toolArgs: {},
+			toolResult: { textResultForLlm: "ok", resultType: "success" },
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(telemetry, {
+			totalRequested: 2,
+			totalAllowed: 1,
+			totalDenied: 1,
+			totalCompleted: 1,
+			byTool: {
+				get_pr_overview: {
+					requested: 1,
+					allowed: 1,
+					denied: 0,
+					completed: 1,
+					resultCounts: { success: 1 },
+				},
+				bash: {
+					requested: 1,
+					allowed: 0,
+					denied: 1,
+					completed: 0,
+					resultCounts: {},
+				},
+			},
+		});
+	});
+
 	it("returns post-use guidance that reflects current finding count", async () => {
 		const drafts = [createFindingDraft(1)];
 		const { logger, infoEntries } = createLoggerSpy();
@@ -377,7 +433,7 @@ describe("createReviewSessionHooks", () => {
 
 		assert.deepEqual(result, {
 			additionalContext:
-				"Use this context to confirm or reject a specific hypothesis, then move to the next uncovered risky path and stay focused on PR-introduced risk.",
+				"Use this context to confirm or reject a specific hypothesis, then move to the next uncovered risky path. If repeated searches are not sharpening the hypothesis, stop searching and decide based on the evidence you have.",
 		});
 		assert.deepEqual(infoEntries, [
 			{
@@ -386,6 +442,25 @@ describe("createReviewSessionHooks", () => {
 				details: [],
 			},
 		]);
+	});
+
+	it("guides the model toward nearby-test discovery before broad search", async () => {
+		const hooks = createReviewSessionHooks(
+			config,
+			createLoggerSpy().logger,
+			[],
+		);
+		const result = await hooks.onPreToolUse({
+			toolName: "get_related_tests",
+			toolArgs: { path: "src/file.ts" },
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(result, {
+			permissionDecision: "allow",
+			additionalContext:
+				"Use this to find likely nearby automated tests for a reviewed file before resorting to broader repository search.",
+		});
 	});
 
 	it("returns post-use guidance for recorded finding inspection", async () => {

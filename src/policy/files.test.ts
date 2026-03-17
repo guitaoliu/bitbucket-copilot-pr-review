@@ -126,6 +126,16 @@ describe("repo path access decisions", () => {
 		assert.equal(decision.include, true);
 		assert.deepEqual(decision.normalizedPaths, []);
 	});
+
+	it("rejects wildcard directory scopes with a concrete guidance message", () => {
+		const decision = getRepoDirectoriesAccessDecision(["service-*"]);
+
+		assert.equal(decision.include, false);
+		assert.equal(
+			decision.reason,
+			"directory wildcards are not supported; pass concrete repo-relative directories as a directories array",
+		);
+	});
 });
 
 describe("finalizeFindings", () => {

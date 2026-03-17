@@ -3,7 +3,10 @@ import type {
 	RawBitbucketCodeInsightsReport,
 } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
-import { buildPullRequestComment } from "../insights.ts";
+import {
+	buildInsightAnnotations,
+	buildPullRequestComment,
+} from "../insights.ts";
 import {
 	getInsightReportFindingCount,
 	getInsightReportReviewedCommit,
@@ -14,7 +17,12 @@ import {
 } from "./publication-state.ts";
 import { getReviewRevisionSchema } from "./revision.ts";
 import type { ReviewArtifacts, ReviewBitbucketClient } from "./runner-types.ts";
-import type { ReviewContext, ReviewFinding, ReviewOutcome } from "./types.ts";
+import type {
+	ReviewContext,
+	ReviewFinding,
+	ReviewOutcome,
+	StoredReviewFinding,
+} from "./types.ts";
 
 type StoredComment = Awaited<
 	ReturnType<ReviewBitbucketClient["findPullRequestCommentByTag"]>
@@ -25,6 +33,7 @@ export interface ExistingPublicationStatus {
 	storedAnnotationCount: number;
 	existingAnnotations: InsightAnnotationPayload[];
 	existingComment: StoredComment;
+	commentStoredFindings?: StoredReviewFinding[];
 	reportCommit?: string;
 	existingPublicationComplete: boolean;
 	reportRevision?: string;
@@ -93,11 +102,41 @@ function summarizeReportDetails(
 	);
 }
 
+function buildReviewFindingFromStoredFinding(
+	finding: StoredReviewFinding,
+	index: number,
+	config: ReviewerConfig,
+): ReviewFinding {
+	return {
+		externalId: finding.externalId ?? `reused-finding-${index + 1}`,
+		path: finding.path,
+		line: finding.line ?? 0,
+		severity: finding.severity,
+		type: finding.type,
+		confidence: finding.confidence ?? config.review.minConfidence,
+		title: finding.title,
+		details: finding.details ?? "",
+		...(finding.category ? { category: finding.category } : {}),
+	};
+}
+
 function buildReviewOutcomeFromArtifacts(
 	context: ReviewContext,
 	status: ExistingPublicationStatus,
 	config: ReviewerConfig,
 ): ReviewOutcome {
+	const storedFindings = status.commentStoredFindings;
+	if (storedFindings && storedFindings.length > 0) {
+		return {
+			summary: summarizeReportDetails(status.existingReport),
+			findings: storedFindings.map((finding, index) =>
+				buildReviewFindingFromStoredFinding(finding, index, config),
+			),
+			stale: false,
+			fileSummaries: [],
+		};
+	}
+
 	const findings: ReviewFinding[] = status.existingAnnotations.map(
 		(annotation) => {
 			const parsed = parseAnnotationMessage(annotation);
@@ -149,7 +188,10 @@ function canReuseExistingArtifacts(
 		return false;
 	}
 
-	return status.existingAnnotations.length === expectedAnnotationCount;
+	return (
+		status.existingAnnotations.length === expectedAnnotationCount ||
+		(status.commentStoredFindings?.length ?? 0) === expectedAnnotationCount
+	);
 }
 
 function buildUnusableReasons(
@@ -162,6 +204,7 @@ function buildUnusableReasons(
 		commentRevision?: string;
 		commentReviewedCommit?: string;
 		commentPublishedCommit?: string;
+		storedFindingCount: number;
 		storedAnnotationCount: number;
 		reusableAnnotationCount: number;
 		expectedAnnotationCount?: number;
@@ -215,10 +258,11 @@ function buildUnusableReasons(
 
 	if (
 		status.expectedAnnotationCount !== undefined &&
-		status.reusableAnnotationCount !== status.expectedAnnotationCount
+		Math.max(status.reusableAnnotationCount, status.storedFindingCount) !==
+			status.expectedAnnotationCount
 	) {
 		reasons.push(
-			`reusable annotation count ${status.reusableAnnotationCount} != findings ${status.expectedAnnotationCount}`,
+			`reusable finding count ${Math.max(status.reusableAnnotationCount, status.storedFindingCount)} != findings ${status.expectedAnnotationCount}`,
 		);
 	}
 
@@ -292,10 +336,13 @@ export async function getExistingPublicationStatus(
 		commentMetadata?.revision === context.reviewRevision &&
 		commentMetadata.reviewedCommit === context.headCommit &&
 		commentMetadata.publishedCommit === context.headCommit &&
-		expectedAnnotationCount === storedAnnotationCount;
+		expectedAnnotationCount === storedAnnotationCount &&
+		(commentMetadata?.storedFindings === undefined ||
+			commentMetadata.storedFindings.length === expectedAnnotationCount);
 	const unusableReasons = existingReport
 		? buildUnusableReasons(context, {
 				reportCommit,
+				storedFindingCount: commentMetadata?.storedFindings?.length ?? 0,
 				storedAnnotationCount,
 				reusableAnnotationCount: existingAnnotations.length,
 				...(reportSchema ? { reportSchema } : {}),
@@ -335,6 +382,9 @@ export async function getExistingPublicationStatus(
 		...(commentMetadata?.reviewedCommit
 			? { commentReviewedCommit: commentMetadata.reviewedCommit }
 			: {}),
+		...(commentMetadata?.storedFindings
+			? { commentStoredFindings: commentMetadata.storedFindings }
+			: {}),
 		unusableReasons,
 	};
 }
@@ -361,6 +411,10 @@ export function buildReviewReusePlan(
 			status,
 			config,
 		);
+		const reusedAnnotations =
+			status.existingAnnotations.length > 0
+				? status.existingAnnotations
+				: buildInsightAnnotations(config, reusedReview.findings);
 		const commentBody = status.existingComment
 			? rewritePullRequestCommentMetadata(status.existingComment.text, {
 					tag: config.report.commentTag,
@@ -370,6 +424,11 @@ export function buildReviewReusePlan(
 						status.reportCommit ??
 						context.headCommit,
 					publishedCommit: context.headCommit,
+					...(status.commentStoredFindings
+						? {
+								findingsJson: JSON.stringify(status.commentStoredFindings),
+							}
+						: {}),
 				})
 			: buildPullRequestComment(config, context, reusedReview);
 
@@ -383,7 +442,7 @@ export function buildReviewReusePlan(
 			reusedArtifacts: {
 				report:
 					status.existingReport as RawBitbucketCodeInsightsReport as ReviewArtifacts["report"],
-				annotations: status.existingAnnotations,
+				annotations: reusedAnnotations,
 				commentBody,
 			},
 		};

@@ -142,7 +142,7 @@ NODE_USE_SYSTEM_CA=1 node dist/cli.js --repo-id AAAS/sbp --dry-run --max-paralle
 
 Batch mode keeps a shared bare mirror cache under the temp root and creates one disposable workspace per PR from that cache. Use `--temp-root` to choose the parent directory or `--keep-workdirs` to preserve the per-PR clones for debugging.
 
-The batch JSON output now includes `metrics.mirror` and `metrics.workspaces` so you can inspect mirror refresh timing, lock wait time, workspace provisioning totals, cleanup totals, and whether the run root was retained.
+The batch JSON output now includes `metrics.mirror` and `metrics.workspaces` so you can inspect mirror refresh timing, lock wait time, workspace provisioning totals, cleanup totals, and whether the run root was retained. Single-review JSON output also includes `metrics.toolTelemetry` so you can inspect which Copilot tools were requested, allowed, denied, and completed during the run.
 
 The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and forwards common batch-mode controls such as `MAX_PARALLEL`, `TEMP_ROOT`, `KEEP_WORKDIRS=1`, and `FORCE_REVIEW=1`.
 
@@ -167,7 +167,7 @@ If your Bitbucket Data Center uses an internal or self-signed certificate, prefe
 
 For local helper-script runs, Node system CA loading is enabled by default with `NODE_USE_SYSTEM_CA=1`. Set `NODE_USE_SYSTEM_CA=0` if you need to disable that behavior for troubleshooting or environment-specific differences.
 
-When the target repository contains a root-level `AGENTS.md`, the reviewer reads it and appends its instructions to the Copilot review prompt. Nested `AGENTS.md` files are not used.
+When the target repository contains `AGENTS.md` files in the root or in directories that contain reviewed files, the reviewer reads the matching files from the trusted base commit and appends them to the Copilot review prompt. Root instructions apply repo-wide, and deeper `AGENTS.md` files apply only to reviewed files under that subtree.
 
 When the target repository contains a root-level `copilot-code-review.json`, the reviewer loads it from the trusted base commit and uses it for repo-scoped review configuration such as ignored paths, review limits, and selected Copilot/report overrides. Environment variables and CLI flags still take precedence. The JSON schema is published at `schemas/copilot-code-review.schema.json`.
 

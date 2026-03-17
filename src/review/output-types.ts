@@ -4,6 +4,8 @@ import type {
 } from "../bitbucket/types.ts";
 import type { ReviewOutcome } from "./types.ts";
 
+type ReviewRunOutputReview = Omit<ReviewOutcome, "toolTelemetry">;
+
 export interface ReviewRunOutput {
 	context: {
 		prId: number;
@@ -16,7 +18,10 @@ export interface ReviewRunOutput {
 		reviewedFiles: number;
 		skippedFiles: number;
 	};
-	review: ReviewOutcome;
+	metrics?: {
+		toolTelemetry?: ReviewOutcome["toolTelemetry"];
+	};
+	review: ReviewRunOutputReview;
 	report: InsightReportPayload;
 	annotations: InsightAnnotationPayload[];
 	commentBody?: string;

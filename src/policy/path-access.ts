@@ -169,6 +169,16 @@ export function getRepoDirectoriesAccessDecision(
 			);
 		}
 
+		if (
+			normalizedPath.includes("*") ||
+			normalizedPath.includes("?") ||
+			normalizedPath.includes("[")
+		) {
+			return reject(
+				"directory wildcards are not supported; pass concrete repo-relative directories as a directories array",
+			);
+		}
+
 		const pathReason = getBasePathRejectionReason(normalizedPath);
 		if (pathReason) {
 			return reject(pathReason);

@@ -20,6 +20,7 @@ import type {
 	ReviewContext,
 	ReviewFinding,
 	ReviewOutcome,
+	StoredReviewFinding,
 } from "./review/types.ts";
 import { omitUndefined } from "./shared/object.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS, truncateText } from "./shared/text.ts";
@@ -153,6 +154,31 @@ function buildFindingSummaryLines(findings: ReviewFinding[]): string[] {
 			finding.line > 0 ? `${finding.path}:${finding.line}` : finding.path;
 		return `${index + 1}. [${buildFindingBadge(finding)}] ${location} - ${finding.title}`;
 	});
+}
+
+function buildStoredFindingMetadata(
+	findings: ReviewFinding[],
+): string | undefined {
+	if (findings.length === 0) {
+		return undefined;
+	}
+
+	const storedFindings: StoredReviewFinding[] = findings.map(
+		(finding) =>
+			omitUndefined({
+				path: finding.path,
+				line: finding.line > 0 ? finding.line : undefined,
+				severity: finding.severity,
+				type: finding.type,
+				confidence: finding.confidence,
+				title: finding.title,
+				details: finding.details.length > 0 ? finding.details : undefined,
+				category: finding.category,
+				externalId: finding.externalId,
+			}) satisfies StoredReviewFinding,
+	);
+
+	return JSON.stringify(storedFindings);
 }
 
 function buildCommentFindingSummaryLines(
@@ -462,6 +488,9 @@ export function buildPullRequestComment(
 		revision: context.reviewRevision,
 		reviewedCommit: context.headCommit,
 		publishedCommit: context.headCommit,
+		...omitUndefined({
+			findingsJson: buildStoredFindingMetadata(outcome.findings),
+		}),
 	});
 	const title = `## ${config.report.title}`;
 	const conclusion = buildCommentConclusionSection(outcome);

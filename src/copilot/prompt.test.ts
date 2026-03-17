@@ -105,11 +105,15 @@ describe("buildPrompt", () => {
 
 		assert.match(
 			prompt,
-			/Treat missing or inadequate test coverage for a meaningful behavior change as a reportable issue/,
+			/Missing or inadequate tests are reportable only when the gap materially weakens confidence in a meaningful behavior change/,
 		);
 		assert.match(
 			prompt,
-			/Tests: for every non-trivial behavior change, verify positive, negative, and edge-case coverage at an appropriate level/,
+			/Do not emit a standalone test-coverage finding when a stronger concrete BUG or VULNERABILITY already captures the same root cause/,
+		);
+		assert.match(
+			prompt,
+			/Tests: for every non-trivial behavior change, verify positive, negative, and edge-case coverage at an appropriate level\. If coverage is missing, only flag it when that gap creates a distinct merge-relevant risk/,
 		);
 	});
 
@@ -149,11 +153,63 @@ describe("buildPrompt", () => {
 		);
 		assert.match(
 			prompt,
-			/pass repo-relative directories as a directories array/,
+			/pass concrete repo-relative directories as a directories array; wildcard directory patterns are not supported/,
 		);
 		assert.match(
 			prompt,
 			/Use emit_finding only for concrete validated issues\. If a concern is still a question, investigate more or drop it/,
+		);
+	});
+
+	it("deprioritizes generated artifacts and avoids redundant startup calls", () => {
+		const prompt = buildPrompt(config, context);
+
+		assert.match(
+			prompt,
+			/Deprioritize generated artifacts such as lockfiles, snapshots, and regenerated API specs unless they reveal a concrete contract or publishing problem/,
+		);
+		assert.match(
+			prompt,
+			/Call get_pr_overview first to understand the PR, changed files, file summaries, and CI context/,
+		);
+		assert.match(
+			prompt,
+			/Call list_changed_files only if you need a refreshed file list or skipped-file details beyond the overview/,
+		);
+		assert.match(
+			prompt,
+			/Use get_related_tests before broad repo search when you need likely nearby coverage/,
+		);
+	});
+
+	it("includes trusted nested AGENTS instructions with path scoping", () => {
+		const prompt = buildPrompt(config, {
+			...context,
+			repoAgentsInstructions: [
+				{
+					path: "AGENTS.md",
+					appliesTo: ["."],
+					content: "root instructions",
+				},
+				{
+					path: "ui/AGENTS.md",
+					appliesTo: ["ui/src/page.tsx"],
+					content: "ui instructions",
+				},
+			],
+		});
+
+		assert.match(
+			prompt,
+			/Repository instructions from trusted AGENTS\.md files:/,
+		);
+		assert.match(prompt, /Path: AGENTS\.md/);
+		assert.match(prompt, /Applies to: \./);
+		assert.match(prompt, /Path: ui\/AGENTS\.md/);
+		assert.match(prompt, /Applies to: ui\/src\/page\.tsx/);
+		assert.match(
+			prompt,
+			/More specific nested AGENTS\.md instructions override broader ones for matching paths/,
 		);
 	});
 

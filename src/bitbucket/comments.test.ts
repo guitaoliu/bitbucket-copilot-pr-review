@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { Logger } from "../shared/logger.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
 import { PullRequestCommentsApi } from "./comments.ts";
+import { BitbucketApiError } from "./transport.ts";
 
 type JsonResponder = <T>(pathname: string) => Promise<T>;
 type RequestResponder = (
@@ -19,6 +20,9 @@ const logger: Logger = {
 	trace() {},
 	json() {},
 };
+
+const SUPERSEDED_PULL_REQUEST_COMMENT_TEXT =
+	"_Superseded by a newer automated PR review summary. This thread is preserved because it has replies._";
 
 describe("PullRequestCommentsApi.listPullRequestComments", () => {
 	it("follows pagination and keeps the newest comment version", async () => {
@@ -299,5 +303,106 @@ describe("PullRequestCommentsApi.upsertPullRequestComment", () => {
 		assert.deepEqual(warnMessages, [
 			"Failed to delete superseded pull request summary comment 10 tagged copilot-pr-review: delete failed",
 		]);
+	});
+
+	it("archives a superseded comment when delete is blocked by replies", async () => {
+		const requestCalls: Array<{
+			pathname: string;
+			method: string | undefined;
+			body: string | undefined;
+		}> = [];
+		const warnMessages: string[] = [];
+		const commentsApi = new PullRequestCommentsApi(
+			"PROJ",
+			"repo",
+			123,
+			{
+				...logger,
+				warn(message) {
+					warnMessages.push(message);
+				},
+			},
+			async (pathname, init) => {
+				requestCalls.push({
+					pathname,
+					method: init?.method,
+					body: typeof init?.body === "string" ? init.body : undefined,
+				});
+
+				if (
+					init?.method === "DELETE" &&
+					pathname.endsWith("/comments/10?version=2")
+				) {
+					throw new BitbucketApiError(
+						409,
+						"Conflict",
+						"DELETE",
+						"https://bitbucket.example.com/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
+						JSON.stringify({
+							errors: [
+								{
+									message:
+										"This comment has replies which must be deleted first.",
+									exceptionName:
+										"com.atlassian.bitbucket.comment.CommentDeletionException",
+								},
+							],
+						}),
+					);
+				}
+
+				return "";
+			},
+			async () =>
+				({
+					values: [
+						{
+							action: "COMMENTED",
+							createdDate: 100,
+							comment: {
+								id: 10,
+								text: "<!-- copilot-pr-review -->\nold",
+								version: 2,
+								createdDate: 100,
+								updatedDate: 100,
+							},
+						},
+					],
+					isLastPage: true,
+				}) as never,
+		);
+
+		await commentsApi.upsertPullRequestComment(
+			"copilot-pr-review",
+			"<!-- copilot-pr-review -->\nreplacement",
+			{ strategy: "recreate" },
+		);
+
+		assert.deepEqual(requestCalls, [
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments",
+				method: "POST",
+				body: JSON.stringify({
+					text: "<!-- copilot-pr-review -->\nreplacement",
+				}),
+			},
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
+				method: "DELETE",
+				body: undefined,
+			},
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
+				method: "PUT",
+				body: JSON.stringify({
+					version: 2,
+					text: SUPERSEDED_PULL_REQUEST_COMMENT_TEXT,
+				}),
+			},
+		]);
+		assert.deepEqual(warnMessages, []);
 	});
 });

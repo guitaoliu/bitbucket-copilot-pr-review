@@ -336,6 +336,59 @@ describe("buildReviewReusePlan", () => {
 		);
 	});
 
+	it("reuses stored findings from the tagged comment when annotations are unavailable", () => {
+		const context = createContext();
+		const plan = buildReviewReusePlan(baseConfig, context, {
+			existingReport: createReport(context),
+			storedAnnotationCount: 1,
+			existingAnnotations: [],
+			existingComment: createTaggedComment({
+				reviewedCommit: context.headCommit,
+				publishedCommit: context.headCommit,
+			}),
+			commentStoredFindings: [
+				{
+					path: "src/example.ts",
+					line: 10,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Null handling is broken",
+					details: "The new branch dereferences a possibly null response.",
+					externalId: "finding-1",
+				},
+			],
+			existingPublicationComplete: false,
+			reportCommit: context.headCommit,
+			reportRevision: context.reviewRevision,
+			reportReviewedCommit: context.headCommit,
+			reportSchema: "2",
+			commentRevision: context.reviewRevision,
+			commentPublishedCommit: context.headCommit,
+			commentReviewedCommit: context.headCommit,
+			unusableReasons: [],
+		});
+
+		assert.equal(plan.action, "republish");
+		assert.deepEqual(plan.reusedReview?.findings, [
+			{
+				externalId: "finding-1",
+				path: "src/example.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Null handling is broken",
+				details: "The new branch dereferences a possibly null response.",
+			},
+		]);
+		assert.equal(plan.reusedArtifacts?.annotations.length, 1);
+		assert.match(
+			plan.reusedArtifacts?.commentBody ?? "",
+			/<!-- copilot-pr-review:findings-json:/,
+		);
+	});
+
 	it("forces a fresh review when prior artifacts do not match the revision", () => {
 		const context = createContext();
 		const plan = buildReviewReusePlan(baseConfig, context, {
@@ -353,7 +406,7 @@ describe("buildReviewReusePlan", () => {
 			commentReviewedCommit: context.headCommit,
 			unusableReasons: [
 				"comment revision other-revision != review-rev-123",
-				"reusable annotation count 0 != findings 1",
+				"reusable finding count 0 != findings 1",
 			],
 		});
 
@@ -362,7 +415,7 @@ describe("buildReviewReusePlan", () => {
 		assert.match(plan.repairWarning ?? "", /comment revision other-revision/);
 		assert.match(
 			plan.repairWarning ?? "",
-			/reusable annotation count 0 != findings 1/,
+			/reusable finding count 0 != findings 1/,
 		);
 		assert.match(plan.confirmMessage ?? "", /Existing cached artifacts/);
 	});
@@ -382,7 +435,7 @@ describe("buildReviewReusePlan", () => {
 			commentRevision: context.reviewRevision,
 			commentPublishedCommit: context.headCommit,
 			commentReviewedCommit: context.headCommit,
-			unusableReasons: ["reusable annotation count 0 != findings 1"],
+			unusableReasons: ["reusable finding count 0 != findings 1"],
 		});
 
 		assert.equal(plan.action, "review");
@@ -410,7 +463,7 @@ describe("buildReviewReusePlan", () => {
 			commentReviewedCommit: oldHead,
 			unusableReasons: [
 				`comment reviewed commit ${oldHead} != ${context.headCommit}`,
-				"reusable annotation count 0 != findings 1",
+				"reusable finding count 0 != findings 1",
 			],
 		});
 
@@ -439,7 +492,7 @@ describe("buildReviewReusePlan", () => {
 			unusableReasons: [
 				`report revision ${oldRevision} != ${context.reviewRevision}`,
 				`comment revision ${oldRevision} != ${context.reviewRevision}`,
-				"reusable annotation count 0 != findings 1",
+				"reusable finding count 0 != findings 1",
 			],
 		});
 

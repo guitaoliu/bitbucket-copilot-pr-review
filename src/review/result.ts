@@ -5,6 +5,7 @@ import {
 	buildInsightReport,
 	buildPullRequestComment,
 } from "../insights.ts";
+import { omitUndefined } from "../shared/object.ts";
 import type { ReviewRunOutput } from "./output-types.ts";
 import type { ReviewArtifacts } from "./runner-types.ts";
 import type { ReviewContext, ReviewOutcome } from "./types.ts";
@@ -63,6 +64,8 @@ export function buildReviewRunOutput(
 	artifacts: ReviewArtifacts,
 	published: boolean,
 ): ReviewRunOutput {
+	const { toolTelemetry, ...reviewWithoutTelemetry } = review;
+
 	return {
 		context: {
 			prId: context.pr.id,
@@ -77,7 +80,14 @@ export function buildReviewRunOutput(
 			reviewedFiles: context.reviewedFiles.length,
 			skippedFiles: context.skippedFiles.length,
 		},
-		review,
+		...omitUndefined({
+			metrics: toolTelemetry
+				? {
+						toolTelemetry,
+					}
+				: undefined,
+		}),
+		review: reviewWithoutTelemetry,
 		report: artifacts.report,
 		annotations: artifacts.annotations,
 		commentBody: artifacts.commentBody,

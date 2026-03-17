@@ -8,6 +8,7 @@ import {
 	FINDING_TAXONOMY_PREFERENCE_PROMPT_LINE,
 	FINDING_TAXONOMY_PROMPT_LINES,
 	QUESTION_SHAPED_FINDING_PROMPT_LINE,
+	TEST_COVERAGE_PROMPT_LINES,
 } from "./review-guidance.ts";
 
 export function buildPrompt(
@@ -17,16 +18,22 @@ export function buildPrompt(
 	const perFileSummariesEnabled = shouldCreatePerFileSummaries(
 		context.reviewedFiles.length,
 	);
-	const rootAgentsSection = context.rootAgentsInstructions
-		? [
-				"",
-				"Repository instructions from root AGENTS.md:",
-				"<repo_agents_instructions>",
-				context.rootAgentsInstructions,
-				"</repo_agents_instructions>",
-				"Treat these repository instructions as additional constraints unless they conflict with the review rules below.",
-			]
-		: [];
+	const repoAgentsSection =
+		context.repoAgentsInstructions && context.repoAgentsInstructions.length > 0
+			? [
+					"",
+					"Repository instructions from trusted AGENTS.md files:",
+					"<repo_agents_instructions>",
+					...context.repoAgentsInstructions.flatMap((instructions) => [
+						`Path: ${instructions.path}`,
+						`Applies to: ${instructions.appliesTo.join(", ")}`,
+						instructions.content,
+						"",
+					]),
+					"</repo_agents_instructions>",
+					"Treat these repository instructions as additional constraints unless they conflict with the review rules below. More specific nested AGENTS.md instructions override broader ones for matching paths.",
+				]
+			: [];
 
 	return [
 		"You are an elite code reviewer performing a high-signal review of a Bitbucket Data Center pull request.",
@@ -46,20 +53,21 @@ export function buildPrompt(
 				: `disabled (reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES})`
 		}`,
 		"</pull_request_context>",
-		...rootAgentsSection,
+		...repoAgentsSection,
 		"",
 		"Mission:",
 		"- Find merge-blocking issues introduced by this PR.",
 		"- Focus on correctness, security/authz, data integrity, resource leaks, API contract breaks, and significant performance regressions in important paths.",
-		"- Treat missing or inadequate test coverage for a meaningful behavior change as a reportable issue unless the change is genuinely not testable; then explain the residual risk.",
+		...TEST_COVERAGE_PROMPT_LINES,
 		"- Ignore style, formatting, naming, docs, import order, generic refactors, and preference-only feedback.",
+		"- Deprioritize generated artifacts such as lockfiles, snapshots, and regenerated API specs unless they reveal a concrete contract or publishing problem caused by the source change.",
 		QUESTION_SHAPED_FINDING_PROMPT_LINE,
 		"- Cover the meaningful risk areas in reviewed files and continue after the first valid finding.",
 		"",
 		"Evidence bar:",
 		"- Start from the diff.",
 		"- Read head and base when needed to confirm regressions, removed guards, renamed paths, or contract changes.",
-		"- Use get_related_file_content, get_file_list_by_directory, search_text_in_repo, and search_symbol_name narrowly to validate concrete hypotheses or impacted paths. When scoping by path, pass repo-relative directories as a directories array.",
+		"- Use get_related_file_content, get_related_tests, get_file_list_by_directory, search_text_in_repo, and search_symbol_name narrowly to validate concrete hypotheses or impacted paths. When scoping by path, pass concrete repo-relative directories as a directories array; wildcard directory patterns are not supported.",
 		"- Use get_file_diff_hunk to page large diffs.",
 		"- Treat CI as a clue, not proof. Never assume unverified behavior.",
 		"",
@@ -68,7 +76,7 @@ export function buildPrompt(
 		"- Security and access control: authentication, authorization, secret or PII exposure, injection, path traversal, unsafe deserialization or dynamic execution, widened permissions, and trust-boundary mistakes.",
 		"- Data integrity and concurrency: transactions, retries, idempotency, ordering, cache invalidation, duplicate processing, races, locking, cleanup, and rollback behavior.",
 		"- Reliability and performance: error handling, timeouts, cancellation, resource leaks, unbounded work, hot-path regressions, repeated expensive operations, and blocking behavior in critical paths.",
-		"- Tests: for every non-trivial behavior change, verify positive, negative, and edge-case coverage at an appropriate level. If coverage is missing, flag that gap as an issue.",
+		"- Tests: for every non-trivial behavior change, verify positive, negative, and edge-case coverage at an appropriate level. If coverage is missing, only flag it when that gap creates a distinct merge-relevant risk.",
 		"- Prioritize files touching validation, auth, permissions, transactions, migrations, async flow, serialization, persistence, and public interfaces.",
 		"",
 		"Finding taxonomy:",
@@ -88,11 +96,11 @@ export function buildPrompt(
 		`- Emit as many distinct validated findings as needed, up to ${config.review.maxFindings}, and only if they meet ${config.review.minConfidence} confidence or better.`,
 		"",
 		"Recommended workflow:",
-		"1. Call get_pr_overview to understand the PR, file summaries, and CI context.",
-		"2. Call list_changed_files to choose the highest-risk reviewed files and cover each meaningful risk cluster.",
+		"1. Call get_pr_overview first to understand the PR, changed files, file summaries, and CI context.",
+		"2. Call list_changed_files only if you need a refreshed file list or skipped-file details beyond the overview.",
 		"3. Use get_file_diff on a suspicious file; if the diff is truncated, page with get_file_diff_hunk.",
 		"4. Use get_file_content on head and base as needed to verify the exact behavioral change.",
-		"5. Use related-file and search tools narrowly to validate cross-file assumptions.",
+		"5. Use get_related_tests before broad repo search when you need likely nearby coverage, and otherwise use related-file and search tools narrowly to validate cross-file assumptions.",
 		perFileSummariesEnabled
 			? "6. As you confirm intent, call record_pr_summary once and record_file_summary for each reviewed file."
 			: `6. As you confirm intent, call record_pr_summary once. Do not record per-file summaries when reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES}.`,

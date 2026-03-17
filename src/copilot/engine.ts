@@ -17,6 +17,8 @@ import type {
 	ReviewContext,
 	ReviewOutcome,
 	ReviewSummaryDrafts,
+	ReviewToolTelemetry,
+	ReviewToolTelemetryCounter,
 } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
@@ -26,6 +28,7 @@ import { buildPrompt } from "./prompt.ts";
 import {
 	FINDING_TAXONOMY_HINT,
 	QUESTION_SHAPED_FINDING_HINT,
+	TEST_COVERAGE_HINT,
 } from "./review-guidance.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
 import { wireReasoningTrace } from "./trace.ts";
@@ -59,6 +62,7 @@ export interface CopilotSessionLike {
 type ReviewProgressState = {
 	reviewedFileCount: number;
 	summaryDrafts: ReviewSummaryDrafts;
+	toolTelemetry?: ReviewToolTelemetry;
 };
 
 export interface RunCopilotReviewDependencies {
@@ -89,7 +93,7 @@ function buildSessionHint(
 	return [
 		"Review all material issues introduced by this pull request.",
 		"Inspect diff plus relevant head/base code before emitting any finding.",
-		"Flag any meaningful behavior change that lacks appropriate automated test coverage unless it is genuinely not testable.",
+		TEST_COVERAGE_HINT,
 		"Ignore style, naming, formatting, and preference-only feedback.",
 		FINDING_TAXONOMY_HINT,
 		QUESTION_SHAPED_FINDING_HINT,
@@ -112,9 +116,9 @@ function buildPreToolHint(
 
 	switch (toolName) {
 		case "get_pr_overview":
-			return "Use the overview to scope the review, find the highest-risk files, and cover each meaningful risk area.";
+			return "Use the overview to scope the review, find the highest-risk files, and avoid redundant file-list or CI calls unless you need more detail.";
 		case "list_changed_files":
-			return "Start with the riskiest reviewed files, but continue until the meaningful reviewed changes are covered; skipped files are not valid targets.";
+			return "Use this only when you need a refreshed file list or skipped-file details beyond get_pr_overview; then start with the riskiest reviewed files and continue until meaningful reviewed changes are covered.";
 		case "get_file_diff":
 			return "Study the exact changed lines and look for removed guards, altered control flow, or contract shifts.";
 		case "get_file_diff_hunk":
@@ -125,9 +129,11 @@ function buildPreToolHint(
 			return "Use directory listing to orient around nearby code, but keep the review anchored to PR-introduced behavior.";
 		case "get_related_file_content":
 			return "Read nearby files to confirm concrete hypotheses about impact, invariants, call paths, or additional affected paths.";
+		case "get_related_tests":
+			return "Use this to find likely nearby automated tests for a reviewed file before resorting to broader repository search.";
 		case "search_text_in_repo":
 		case "search_symbol_name":
-			return "Search narrowly to validate suspected code paths or impacted call sites. Avoid broad repo fishing expeditions.";
+			return "Search narrowly to validate suspected code paths, impacted call sites, or nearby tests. Avoid broad repo fishing expeditions and wildcard-like directory guesses.";
 		case "get_ci_summary":
 			return "Treat CI output as a prioritization hint, not proof of a reportable issue.";
 		case "record_pr_summary":
@@ -162,7 +168,7 @@ function buildPostToolHint(
 
 	switch (toolName) {
 		case "get_pr_overview":
-			return "Choose the most suspicious files, inspect their diffs, then continue until the major reviewed risk areas are covered.";
+			return "Choose the most suspicious files from the overview, inspect their diffs, and only call list_changed_files or get_ci_summary if the overview left a concrete gap.";
 		case "list_changed_files":
 			return "Prioritize files touching validation, auth, persistence, async flow, serialization, and public interfaces; do not stop after one risky file.";
 		case "get_file_diff":
@@ -173,9 +179,10 @@ function buildPostToolHint(
 			return "Do not emit a finding unless the inspected code shows a concrete, material issue introduced by the PR, and keep checking for other distinct issues after confirming one.";
 		case "get_file_list_by_directory":
 		case "get_related_file_content":
+		case "get_related_tests":
 		case "search_text_in_repo":
 		case "search_symbol_name":
-			return "Use this context to confirm or reject a specific hypothesis, then move to the next uncovered risky path and stay focused on PR-introduced risk.";
+			return "Use this context to confirm or reject a specific hypothesis, then move to the next uncovered risky path. If repeated searches are not sharpening the hypothesis, stop searching and decide based on the evidence you have.";
 		case "get_ci_summary":
 			return "CI may explain where to look next, but you still need code-level evidence before reporting anything.";
 		case "record_pr_summary":
@@ -255,6 +262,20 @@ function getToolArgsRecord(toolArgs: unknown): Record<string, unknown> {
 	}
 
 	return toolArgs as Record<string, unknown>;
+}
+
+function getToolResultRecord(
+	toolResult: ToolResultObject,
+): Record<string, unknown> {
+	if (
+		!toolResult ||
+		typeof toolResult !== "object" ||
+		Array.isArray(toolResult)
+	) {
+		return {};
+	}
+
+	return toolResult as Record<string, unknown>;
 }
 
 function describeLoggedDirectories(value: unknown): string | undefined {
@@ -354,6 +375,65 @@ function buildToolLogFields(toolName: string, toolArgs: unknown): string[] {
 	}
 }
 
+function buildToolResultLogFields(
+	toolName: string,
+	toolResult: ToolResultObject,
+): string[] {
+	const record = getToolResultRecord(toolResult);
+	const field = (key: string, value: unknown): string | undefined => {
+		const formatted = formatToolLogValue(value);
+		return formatted ? `${key}=${formatted}` : undefined;
+	};
+
+	switch (toolName) {
+		case "get_file_content":
+		case "get_related_file_content":
+			return [
+				field("lines", record.returnedEndLine),
+				field("status", record.status),
+			].filter((entry): entry is string => entry !== undefined);
+		case "get_file_diff":
+		case "get_file_diff_hunk":
+			return [
+				field("truncated", record.truncated),
+				field("patch_chars", record.returnedPatchChars),
+				field("total_hunks", record.totalHunks),
+			].filter((entry): entry is string => entry !== undefined);
+		case "search_text_in_repo":
+		case "search_symbol_name":
+			return [
+				field("matches", record.totalMatches),
+				field("filtered", record.filteredMatchCount),
+				field("truncated", record.truncated),
+			].filter((entry): entry is string => entry !== undefined);
+		case "get_file_list_by_directory":
+			return [
+				field("files", record.totalFiles),
+				field("filtered", record.filteredFileCount),
+				field("truncated", record.truncated),
+			].filter((entry): entry is string => entry !== undefined);
+		case "list_changed_files":
+		case "get_pr_overview": {
+			const reviewedFiles = Array.isArray(record.reviewedFiles)
+				? record.reviewedFiles.length
+				: undefined;
+			const skippedFiles = Array.isArray(record.skippedFiles)
+				? record.skippedFiles.length
+				: undefined;
+			return [
+				field("reviewed_files", reviewedFiles),
+				field("skipped_files", skippedFiles),
+			].filter((entry): entry is string => entry !== undefined);
+		}
+		case "get_ci_summary":
+			return [field("status", record.status)].filter(
+				(entry): entry is string => entry !== undefined,
+			);
+		default:
+			return [];
+	}
+}
+
 function buildProgressFields(
 	config: ReviewerConfig,
 	drafts: FindingDraft[],
@@ -370,6 +450,42 @@ function buildProgressFields(
 		fileSummaryProgress,
 		`pr_summary=${progressState.summaryDrafts.prSummary ? "recorded" : "missing"}`,
 	];
+}
+
+export { createEmptyReviewToolTelemetry };
+
+function createEmptyToolTelemetryCounter(): ReviewToolTelemetryCounter {
+	return {
+		requested: 0,
+		allowed: 0,
+		denied: 0,
+		completed: 0,
+		resultCounts: {},
+	};
+}
+
+function createEmptyReviewToolTelemetry(): ReviewToolTelemetry {
+	return {
+		totalRequested: 0,
+		totalAllowed: 0,
+		totalDenied: 0,
+		totalCompleted: 0,
+		byTool: {},
+	};
+}
+
+function getToolTelemetryCounter(
+	toolTelemetry: ReviewToolTelemetry,
+	toolName: string,
+): ReviewToolTelemetryCounter {
+	const existing = toolTelemetry.byTool[toolName];
+	if (existing) {
+		return existing;
+	}
+
+	const created = createEmptyToolTelemetryCounter();
+	toolTelemetry.byTool[toolName] = created;
+	return created;
 }
 
 function buildPreToolLogMessage(input: PreToolUseInput): string {
@@ -394,6 +510,7 @@ function buildPostToolLogMessage(
 			? `error=${formatToolLogValue(input.toolResult.error)}`
 			: undefined,
 		...buildToolLogFields(input.toolName, input.toolArgs),
+		...buildToolResultLogFields(input.toolName, input.toolResult),
 		...buildProgressFields(config, drafts, progressState),
 	]
 		.filter((entry): entry is string => entry !== undefined)
@@ -407,6 +524,7 @@ export function createReviewSessionHooks(
 	progressState: ReviewProgressState = {
 		reviewedFileCount: 0,
 		summaryDrafts: { fileSummaries: [] },
+		toolTelemetry: createEmptyReviewToolTelemetry(),
 	},
 ) {
 	return {
@@ -417,13 +535,24 @@ export function createReviewSessionHooks(
 			),
 		}),
 		onPreToolUse: async (input: PreToolUseInput) => {
+			const toolTelemetry =
+				progressState.toolTelemetry ?? createEmptyReviewToolTelemetry();
+			progressState.toolTelemetry = toolTelemetry;
+			toolTelemetry.totalRequested += 1;
+			getToolTelemetryCounter(toolTelemetry, input.toolName).requested += 1;
+
 			logger.info(buildPreToolLogMessage(input));
 			if (!isReviewToolName(input.toolName)) {
+				toolTelemetry.totalDenied += 1;
+				getToolTelemetryCounter(toolTelemetry, input.toolName).denied += 1;
 				return {
 					permissionDecision: "deny" as const,
 					permissionDecisionReason: `Tool ${input.toolName} is not allowed in CI review mode.`,
 				};
 			}
+
+			toolTelemetry.totalAllowed += 1;
+			getToolTelemetryCounter(toolTelemetry, input.toolName).allowed += 1;
 
 			return {
 				permissionDecision: "allow" as const,
@@ -434,6 +563,16 @@ export function createReviewSessionHooks(
 			};
 		},
 		onPostToolUse: async (input: PostToolUseInput) => {
+			const toolTelemetry =
+				progressState.toolTelemetry ?? createEmptyReviewToolTelemetry();
+			progressState.toolTelemetry = toolTelemetry;
+			toolTelemetry.totalCompleted += 1;
+			const counter = getToolTelemetryCounter(toolTelemetry, input.toolName);
+			counter.completed += 1;
+			const resultType = input.toolResult.resultType;
+			counter.resultCounts[resultType] =
+				(counter.resultCounts[resultType] ?? 0) + 1;
+
 			logger.info(
 				buildPostToolLogMessage(input, config, drafts, progressState),
 			);
@@ -504,6 +643,7 @@ export async function runCopilotReview(
 
 	const drafts: FindingDraft[] = [];
 	const summaryDrafts: ReviewSummaryDrafts = { fileSummaries: [] };
+	const toolTelemetry = createEmptyReviewToolTelemetry();
 	const clientOptions = buildCopilotClientOptions(
 		config,
 		dependencies.resolveCliPath,
@@ -533,6 +673,7 @@ export async function runCopilotReview(
 			hooks: createReviewSessionHooks(config, logger, drafts, {
 				reviewedFileCount: context.reviewedFiles.length,
 				summaryDrafts,
+				toolTelemetry,
 			}),
 			workingDirectory: config.repoRoot,
 			infiniteSessions: { enabled: false },
@@ -560,6 +701,7 @@ export async function runCopilotReview(
 			assistantMessage,
 			prSummary: reviewSummary.prSummary,
 			fileSummaries: reviewSummary.fileSummaries,
+			toolTelemetry,
 			stale: false,
 		}) satisfies ReviewOutcome;
 	} finally {

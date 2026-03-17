@@ -14,6 +14,7 @@ import { createGetFileDiffHunkTool } from "./get-file-diff-hunk.ts";
 import { createGetFileListByDirectoryTool } from "./get-file-list-by-directory.ts";
 import { createGetPrOverviewTool } from "./get-pr-overview.ts";
 import { createGetRelatedFileContentTool } from "./get-related-file-content.ts";
+import { createGetRelatedTestsTool } from "./get-related-tests.ts";
 import { createListChangedFilesTool } from "./list-changed-files.ts";
 import { createListRecordedFindingsTool } from "./list-recorded-findings.ts";
 import { createRecordFileSummaryTool } from "./record-file-summary.ts";
@@ -31,6 +32,7 @@ export const REVIEW_TOOL_NAMES = [
 	"get_file_content",
 	"get_file_list_by_directory",
 	"get_related_file_content",
+	"get_related_tests",
 	"search_text_in_repo",
 	"search_symbol_name",
 	"get_ci_summary",
@@ -65,6 +67,7 @@ export function createReviewTools(
 		createGetFileContentTool(toolContext),
 		createGetFileListByDirectoryTool(toolContext),
 		createGetRelatedFileContentTool(toolContext),
+		createGetRelatedTestsTool(toolContext),
 		createSearchTextInRepoTool(toolContext),
 		createSearchSymbolNameTool(toolContext),
 		createGetCiSummaryTool(toolContext),

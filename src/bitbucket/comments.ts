@@ -2,6 +2,7 @@ import type { PullRequestCommentStrategy } from "../config/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
+import { BitbucketApiError } from "./transport.ts";
 import type {
 	PullRequestComment,
 	RawBitbucketCommentActivity,
@@ -42,6 +43,27 @@ function comparePullRequestComments(
 	}
 
 	return right.id - left.id;
+}
+
+const SUPERSEDED_PULL_REQUEST_COMMENT_TEXT =
+	"_Superseded by a newer automated PR review summary. This thread is preserved because it has replies._";
+
+function getErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function isCommentDeletionBlockedByReplies(
+	error: unknown,
+): error is BitbucketApiError {
+	if (!(error instanceof BitbucketApiError) || error.statusCode !== 409) {
+		return false;
+	}
+
+	const detail = `${error.responseBody}\n${error.message}`;
+	return (
+		detail.includes("CommentDeletionException") ||
+		/replies which must be deleted first/i.test(detail)
+	);
 }
 
 export class PullRequestCommentsApi {
@@ -200,10 +222,27 @@ export class PullRequestCommentsApi {
 					);
 					await this.deletePullRequestComment(comment.id, comment.version);
 				} catch (error) {
-					const message =
-						error instanceof Error ? error.message : String(error);
+					if (isCommentDeletionBlockedByReplies(error)) {
+						try {
+							this.logger.info(
+								`Superseded pull request summary comment ${comment.id} tagged ${tag} has replies; archiving it instead of deleting`,
+							);
+							await this.updatePullRequestComment(
+								comment.id,
+								comment.version,
+								SUPERSEDED_PULL_REQUEST_COMMENT_TEXT,
+							);
+							continue;
+						} catch (archiveError) {
+							this.logger.warn(
+								`Failed to archive superseded pull request summary comment ${comment.id} tagged ${tag} after delete was blocked by replies: ${getErrorMessage(archiveError)}`,
+							);
+							continue;
+						}
+					}
+
 					this.logger.warn(
-						`Failed to delete superseded pull request summary comment ${comment.id} tagged ${tag}: ${message}`,
+						`Failed to delete superseded pull request summary comment ${comment.id} tagged ${tag}: ${getErrorMessage(error)}`,
 					);
 				}
 			}

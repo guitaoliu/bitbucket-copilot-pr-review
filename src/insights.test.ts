@@ -428,6 +428,7 @@ describe("buildPullRequestComment", () => {
 		assert.ok(comment.length <= BITBUCKET_PR_COMMENT_MAX_CHARS);
 		assert.match(comment, /<!-- copilot-pr-review -->/);
 		assert.match(comment, /<!-- copilot-pr-review:revision:review-rev-123 -->/);
+		assert.match(comment, /<!-- copilot-pr-review:findings-json:/);
 		assert.match(comment, /### Conclusion/);
 		assert.match(comment, /### What Changed/);
 		assert.match(comment, /### Review Scope/);
