@@ -14,8 +14,8 @@ importers:
   .:
     dependencies:
       '@github/copilot':
-        specifier: ^1.0.5
-        version: 1.0.5
+        specifier: ^1.0.7
+        version: 1.0.7
       pino:
         specifier: ^10.3.1
         version: 10.3.1
@@ -36,8 +36,8 @@ importers:
         specifier: ^24.12.0
         version: 24.12.0
       tsdown:
-        specifier: ^0.21.3
-        version: 0.21.3(typescript@5.9.3)
+        specifier: ^0.21.4
+        version: 0.21.4(typescript@5.9.3)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -48,8 +48,8 @@ packages:
     resolution: {integrity: sha512-oCQ1IKPwkzCeJzAPb7Fv8rQ9k5+1sG8mf2uoHiMInPYvkRfrDJxbTIbH51U+jstlkghus0vAi3EBvkfvEsYNLQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
 
-  '@babel/helper-string-parser@8.0.0-rc.2':
-    resolution: {integrity: sha512-noLx87RwlBEMrTzncWd/FvTxoJ9+ycHNg0n8yyYydIoDsLZuxknKgWRJUqcrVkNrJ74uGyhWQzQaS3q8xfGAhQ==}
+  '@babel/helper-string-parser@8.0.0-rc.3':
+    resolution: {integrity: sha512-AmwWFx1m8G/a5cXkxLxTiWl+YEoWuoFLUCwqMlNuWO1tqAYITQAbCRPUkyBHv1VOFgfjVOqEj6L3u15J5ZCzTA==}
     engines: {node: ^20.19.0 || >=22.12.0}
 
   '@babel/helper-validator-identifier@8.0.0-rc.2':
@@ -131,26 +131,26 @@ packages:
   '@emnapi/wasi-threads@1.2.0':
     resolution: {integrity: sha512-N10dEJNSsUx41Z6pZsXU8FjPjpBEplgH24sfkmITrBED1/U2Esum9F3lfLrMjKHHjmi557zQn7kR9R+XWXu5Rg==}
 
-  '@github/copilot-darwin-arm64@1.0.5':
-    resolution: {integrity: sha512-XBwo8t5higPXzCvXVYkADImixt9k8P2XsflWup2b86x9KtcssYTcfEWWIg42AOCe8J/OJRJN2MMTQuWt5aeK9w==}
+  '@github/copilot-darwin-arm64@1.0.7':
+    resolution: {integrity: sha512-yQITowpkQYamww59CwcG5JTWV9ahj7nMH6oqObMJaeqXnG7j7dqE/YhLkujQZ3XR8VXAoIa1rZ3TahdMu94gOA==}
     cpu: [arm64]
     os: [darwin]
     hasBin: true
 
-  '@github/copilot-darwin-x64@1.0.5':
-    resolution: {integrity: sha512-zUlMEKct5oPk/ImnYKz+fUjI9xfIwRE2/WI8BrpuDDe16aFDW2Co/6WFFr5rgYcXoGX2Jm8HT563UUxaFbnnOA==}
+  '@github/copilot-darwin-x64@1.0.7':
+    resolution: {integrity: sha512-23vP5bHaFA030nB3tr+dUUdRm2SqmQbs2fZUQ4F7JeYy59jp9hi8lBdaZp/TeQnjEirAUU9H2HZxsGRIIUWp7g==}
     cpu: [x64]
     os: [darwin]
     hasBin: true
 
-  '@github/copilot-linux-arm64@1.0.5':
-    resolution: {integrity: sha512-Rp5Key6IBcm00K3+yc8rga3IXaJKN7mwYtP/mpkCKaJJp7izpJK7Z7Dr1slb63Z3yCAyPwMeYlE+adFCwlnYUA==}
+  '@github/copilot-linux-arm64@1.0.7':
+    resolution: {integrity: sha512-g0mB98oyXKcpd4sMNBc5n1h3UhLy9AGRlT//VL8BXPSzvlTH/dJP3fdx74pbLSgvz105to/YUMmEAFfv25VNaw==}
     cpu: [arm64]
     os: [linux]
     hasBin: true
 
-  '@github/copilot-linux-x64@1.0.5':
-    resolution: {integrity: sha512-ZEKOi57SUo3Ds2ZeYkIkHJ9MJA0Im1i04i0vdAPKH5Xibb2AC6I2EHO2dU/MWwqIeXoK5QDRh0r0Gs+BkHA/dg==}
+  '@github/copilot-linux-x64@1.0.7':
+    resolution: {integrity: sha512-TRxzvTo9I4ehYJLFHTCJSJYQ4QnO/V9zebqwszxHpJRxuBd7FV4cxLmfOBqZcUpEpZgBH+VJ4OG98BPW7YEtJQ==}
     cpu: [x64]
     os: [linux]
     hasBin: true
@@ -159,20 +159,20 @@ packages:
     resolution: {integrity: sha512-mPWM0fw1Gqc/SW8nl45K8abrFH+92fO7y6tRtRl5imjS5hGapLf/dkX5WDrgPtlsflD0c41lFXVUri5NVJwtoA==}
     engines: {node: '>=20.0.0'}
 
-  '@github/copilot-win32-arm64@1.0.5':
-    resolution: {integrity: sha512-pkhuKJZ1AcRAkVS2OO4BEBfMovGSuGWem4isBq+cgRDtuXRfRiZuc88Z9WcrtDCCwpdLx9rSYPVSWQG5fvupPQ==}
+  '@github/copilot-win32-arm64@1.0.7':
+    resolution: {integrity: sha512-4yFgW1K0MlKBrK5BwMIj4nMu5KSFfytNXrs8iOpVgp7erEvKVyN7VXb6SWkoU3M9TfeNlqP6Uje2rxDvgR1u5w==}
     cpu: [arm64]
     os: [win32]
     hasBin: true
 
-  '@github/copilot-win32-x64@1.0.5':
-    resolution: {integrity: sha512-x6PWG80uCuCI+IgCLD1fnBJtfuf9nMBzJwOcMlFwjRtHduV/V9OOW3c89ooGwh/lRhCatAP5GxZGTyC7AJR3kQ==}
+  '@github/copilot-win32-x64@1.0.7':
+    resolution: {integrity: sha512-RDZlvPf/q6B54wLXJRmI39fc9+pwfcAjSwUqw0FeQruCTQgoUl8eo9NqeVWDFlr3RdzgVSMUiJHc3aiifVG6lA==}
     cpu: [x64]
     os: [win32]
     hasBin: true
 
-  '@github/copilot@1.0.5':
-    resolution: {integrity: sha512-lQGN1/qw7gJRT+lSW1U79Ltrf9rkF6UP8FcEb0hGEf9hq0K8/MaulzK+iDtH/gwXYweFXID29E3QlwSqbdsHqQ==}
+  '@github/copilot@1.0.7':
+    resolution: {integrity: sha512-KHBaJ1kbc19pqUMnB9LubPtwWVOaDCzWbzwsJss+DvHyCpr8wP8jR3GEZUnhq3rsuXI96ZKEeEozXM0NqxCAiw==}
     hasBin: true
 
   '@jridgewell/gen-mapping@0.3.13':
@@ -510,14 +510,14 @@ packages:
     resolution: {integrity: sha512-L0Orpi8qGpRG//Nd+H90vFB+3iHnue1zSSGmNOOCh1GLJ7rUKVwV2HvijphGQS2UmhUZewS9VgvxYIdgr+fG1A==}
     hasBin: true
 
-  tsdown@0.21.3:
-    resolution: {integrity: sha512-oKKeMC8+IgNsB+81hvF5VBsqhqL/nr0g9vse+ujbK40vv0i3ReFI6gUts7hQH7J53ylQNjMgf2Vu6n0+P/uddA==}
+  tsdown@0.21.4:
+    resolution: {integrity: sha512-Q/kBi8SXkr4X6JI/NAZKZY1UuiEcbuXtIskL4tZCsgpDiEPM/2W6lC+OonNA31S+V3KsWedFvbFDBs23hvt+Aw==}
     engines: {node: '>=20.19.0'}
     hasBin: true
     peerDependencies:
       '@arethetypeswrong/core': ^0.18.1
-      '@tsdown/css': 0.21.3
-      '@tsdown/exe': 0.21.3
+      '@tsdown/css': 0.21.4
+      '@tsdown/exe': 0.21.4
       '@vitejs/devtools': '*'
       publint: ^0.3.0
       typescript: ^5.0.0
@@ -583,7 +583,7 @@ snapshots:
       '@types/jsesc': 2.5.1
       jsesc: 3.1.0
 
-  '@babel/helper-string-parser@8.0.0-rc.2': {}
+  '@babel/helper-string-parser@8.0.0-rc.3': {}
 
   '@babel/helper-validator-identifier@8.0.0-rc.2': {}
 
@@ -593,7 +593,7 @@ snapshots:
 
   '@babel/types@8.0.0-rc.2':
     dependencies:
-      '@babel/helper-string-parser': 8.0.0-rc.2
+      '@babel/helper-string-parser': 8.0.0-rc.3
       '@babel/helper-validator-identifier': 8.0.0-rc.2
 
   '@biomejs/biome@2.4.7':
@@ -647,38 +647,38 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@github/copilot-darwin-arm64@1.0.5':
+  '@github/copilot-darwin-arm64@1.0.7':
     optional: true
 
-  '@github/copilot-darwin-x64@1.0.5':
+  '@github/copilot-darwin-x64@1.0.7':
     optional: true
 
-  '@github/copilot-linux-arm64@1.0.5':
+  '@github/copilot-linux-arm64@1.0.7':
     optional: true
 
-  '@github/copilot-linux-x64@1.0.5':
+  '@github/copilot-linux-x64@1.0.7':
     optional: true
 
   '@github/copilot-sdk@0.1.32(patch_hash=fda37620d052aa4a96436b0f7fd4964ce7d4826142f09352daf1a2e59226e6e3)':
     dependencies:
-      '@github/copilot': 1.0.5
+      '@github/copilot': 1.0.7
       vscode-jsonrpc: 8.2.1
       zod: 4.3.6
 
-  '@github/copilot-win32-arm64@1.0.5':
+  '@github/copilot-win32-arm64@1.0.7':
     optional: true
 
-  '@github/copilot-win32-x64@1.0.5':
+  '@github/copilot-win32-x64@1.0.7':
     optional: true
 
-  '@github/copilot@1.0.5':
+  '@github/copilot@1.0.7':
     optionalDependencies:
-      '@github/copilot-darwin-arm64': 1.0.5
-      '@github/copilot-darwin-x64': 1.0.5
-      '@github/copilot-linux-arm64': 1.0.5
-      '@github/copilot-linux-x64': 1.0.5
-      '@github/copilot-win32-arm64': 1.0.5
-      '@github/copilot-win32-x64': 1.0.5
+      '@github/copilot-darwin-arm64': 1.0.7
+      '@github/copilot-darwin-x64': 1.0.7
+      '@github/copilot-linux-arm64': 1.0.7
+      '@github/copilot-linux-x64': 1.0.7
+      '@github/copilot-win32-arm64': 1.0.7
+      '@github/copilot-win32-x64': 1.0.7
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -955,7 +955,7 @@ snapshots:
 
   tree-kill@1.2.2: {}
 
-  tsdown@0.21.3(typescript@5.9.3):
+  tsdown@0.21.4(typescript@5.9.3):
     dependencies:
       ansis: 4.2.0
       cac: 7.0.0
