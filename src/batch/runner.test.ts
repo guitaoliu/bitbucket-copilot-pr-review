@@ -17,6 +17,7 @@ const logger: Logger = {
 
 const baseConfig: BatchReviewConfig = {
 	repoId: "AAAS/sbp",
+	repositoryUrl: "https://bitbucket.example.com/projects/AAAS/repos/sbp",
 	tempRoot: "/tmp/batch",
 	maxParallel: 2,
 	keepWorkdirs: false,

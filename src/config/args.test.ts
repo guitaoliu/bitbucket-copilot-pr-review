@@ -1,26 +1,42 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { getHelpText, parseCliArgs } from "./args.ts";
+import {
+	getHelpText,
+	isBatchCliOptions,
+	isReviewCliOptions,
+	parseCliArgs,
+} from "./args.ts";
 
 describe("parseCliArgs", () => {
-	it("accepts CLI aliases from shared metadata", () => {
-		const parsed = parseCliArgs(["--no-publish", "--force-review"]);
+	it("parses review command options", () => {
+		const parsed = parseCliArgs([
+			"review",
+			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
+			"--dry-run",
+			"--force-review",
+			"--repo-root",
+			"/tmp/repo",
+		]);
+
+		assert.equal(isReviewCliOptions(parsed), true);
+		if (!isReviewCliOptions(parsed)) {
+			throw new Error("Expected review options.");
+		}
 
 		assert.equal(parsed.dryRun, true);
 		assert.equal(parsed.forceReview, true);
-	});
-
-	it("parses valued options", () => {
-		const parsed = parseCliArgs(["--repo-root", "/tmp/repo"]);
-
+		assert.equal(
+			parsed.pullRequestUrl,
+			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
+		);
 		assert.equal(parsed.repoRoot, "/tmp/repo");
 	});
 
-	it("parses batch review options", () => {
+	it("parses batch command options", () => {
 		const parsed = parseCliArgs([
-			"--repo-id",
-			"AAAS/sbp",
+			"batch",
+			"https://bitbucket.example.com/projects/AAAS/repos/sbp",
 			"--temp-root",
 			"/tmp/batch",
 			"--max-parallel",
@@ -28,22 +44,55 @@ describe("parseCliArgs", () => {
 			"--keep-workdirs",
 		]);
 
-		assert.equal(parsed.repoId, "AAAS/sbp");
+		assert.equal(isBatchCliOptions(parsed), true);
+		if (!isBatchCliOptions(parsed)) {
+			throw new Error("Expected batch options.");
+		}
+
+		assert.equal(
+			parsed.repositoryUrl,
+			"https://bitbucket.example.com/projects/AAAS/repos/sbp",
+		);
 		assert.equal(parsed.tempRoot, "/tmp/batch");
 		assert.equal(parsed.maxParallel, 3);
 		assert.equal(parsed.keepWorkdirs, true);
 	});
+
+	it("returns help for top-level help", () => {
+		const parsed = parseCliArgs(["--help"]);
+
+		assert.deepEqual(parsed, { help: true });
+	});
+
+	it("returns help for command help", () => {
+		const parsed = parseCliArgs(["review", "--help"]);
+
+		assert.deepEqual(parsed, { help: true });
+	});
 });
 
 describe("getHelpText", () => {
-	it("renders help lines from shared CLI metadata", () => {
+	it("renders subcommand-oriented help text", () => {
 		const helpText = getHelpText();
 
-		assert.match(helpText, /Usage: bitbucket-copilot-pr-review \[options\]/);
-		assert.match(helpText, /--dry-run, --no-publish/);
+		assert.match(
+			helpText,
+			/Usage: bitbucket-copilot-pr-review <command> \[options\]/,
+		);
+		assert.match(helpText, /Commands:/);
+		assert.match(
+			helpText,
+			/bitbucket-copilot-pr-review review <pull-request-url> \[options\]/,
+		);
+		assert.match(
+			helpText,
+			/bitbucket-copilot-pr-review batch <repository-url> \[options\]/,
+		);
+		assert.match(helpText, /REVIEW/);
+		assert.match(helpText, /BATCH/);
+		assert.match(helpText, /Argument: <pull-request-url>/);
+		assert.match(helpText, /Argument: <repository-url>/);
 		assert.match(helpText, /--repo-root <path>/);
-		assert.match(helpText, /--repo-id <project\/repo>/);
 		assert.match(helpText, /--keep-workdirs/);
-		assert.match(helpText, /-h, --help/);
 	});
 });

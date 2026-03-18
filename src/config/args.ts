@@ -1,16 +1,39 @@
-import { CLI_OPTION_METADATA } from "./metadata.ts";
+import {
+	BATCH_CLI_OPTION_METADATA,
+	CLI_COMMAND_METADATA,
+	type CliCommandMetadata,
+	type CliOptionMetadata,
+	REVIEW_CLI_OPTION_METADATA,
+} from "./metadata.ts";
 
-export interface CliOptions {
+export interface CommonCliOptions {
 	dryRun: boolean;
 	forceReview: boolean;
-	confirmRerun: boolean;
-	repoRoot?: string;
-	repoId?: string;
-	tempRoot?: string;
-	maxParallel?: number;
-	keepWorkdirs?: boolean;
 	help: boolean;
 }
+
+export interface ReviewCliOptions extends CommonCliOptions {
+	command: "review";
+	pullRequestUrl: string;
+	confirmRerun: boolean;
+	repoRoot?: string;
+}
+
+export interface BatchCliOptions extends CommonCliOptions {
+	command: "batch";
+	repositoryUrl: string;
+	tempRoot?: string;
+	maxParallel?: number;
+	keepWorkdirs: boolean;
+}
+
+export type CliOptions = ReviewCliOptions | BatchCliOptions;
+
+export interface HelpCliResult {
+	help: true;
+}
+
+export type ParsedCliArgs = CliOptions | HelpCliResult;
 
 function parsePositiveIntegerOption(flag: string, value: string): number {
 	if (!/^\d+$/.test(value)) {
@@ -25,107 +48,247 @@ function parsePositiveIntegerOption(flag: string, value: string): number {
 	return parsed;
 }
 
-export function parseCliArgs(argv: string[]): CliOptions {
-	const options: CliOptions = {
+function parseFlagOnlyOption(arg: string, option: CliOptionMetadata): boolean {
+	return option.flags.includes(arg);
+}
+
+function parseValueOption(options: {
+	argv: string[];
+	index: number;
+	flag: string;
+}): { value: string; nextIndex: number } {
+	const next = options.argv[options.index + 1];
+	if (!next) {
+		throw new Error(`${options.flag} requires a value.`);
+	}
+
+	return {
+		value: next,
+		nextIndex: options.index + 1,
+	};
+}
+
+function parseReviewCommandArgs(argv: string[]): ReviewCliOptions {
+	const options: ReviewCliOptions = {
+		command: "review",
+		pullRequestUrl: "",
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
+		help: false,
+	};
+
+	for (let index = 0; index < argv.length; index += 1) {
+		const arg = argv[index];
+		if (arg === undefined || arg === "--") {
+			continue;
+		}
+
+		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.dryRun)) {
+			options.dryRun = true;
+			continue;
+		}
+
+		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.forceReview)) {
+			options.forceReview = true;
+			continue;
+		}
+
+		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.confirmRerun)) {
+			options.confirmRerun = true;
+			continue;
+		}
+
+		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.repoRoot)) {
+			const parsed = parseValueOption({
+				argv,
+				index,
+				flag: "--repo-root",
+			});
+			options.repoRoot = parsed.value;
+			index = parsed.nextIndex;
+			continue;
+		}
+
+		if (!arg.startsWith("-") && options.pullRequestUrl.length === 0) {
+			options.pullRequestUrl = arg;
+			continue;
+		}
+
+		throw new Error(`Unknown argument for review: ${arg}`);
+	}
+
+	if (options.pullRequestUrl.length === 0) {
+		throw new Error("review requires <pull-request-url>.");
+	}
+
+	return options;
+}
+
+function parseBatchCommandArgs(argv: string[]): BatchCliOptions {
+	const options: BatchCliOptions = {
+		command: "batch",
+		repositoryUrl: "",
+		dryRun: false,
+		forceReview: false,
 		keepWorkdirs: false,
 		help: false,
 	};
 
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
-		if (arg === undefined) {
+		if (arg === undefined || arg === "--") {
 			continue;
 		}
 
-		if (arg === "--") {
-			continue;
-		}
-
-		if (CLI_OPTION_METADATA.dryRun.flags.includes(arg)) {
+		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.dryRun)) {
 			options.dryRun = true;
 			continue;
 		}
 
-		if (CLI_OPTION_METADATA.forceReview.flags.includes(arg)) {
+		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.forceReview)) {
 			options.forceReview = true;
 			continue;
 		}
 
-		if (CLI_OPTION_METADATA.confirmRerun.flags.includes(arg)) {
-			options.confirmRerun = true;
+		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.tempRoot)) {
+			const parsed = parseValueOption({
+				argv,
+				index,
+				flag: "--temp-root",
+			});
+			options.tempRoot = parsed.value;
+			index = parsed.nextIndex;
 			continue;
 		}
 
-		if (CLI_OPTION_METADATA.repoRoot.flags.includes(arg)) {
-			const next = argv[index + 1];
-			if (!next) {
-				throw new Error("--repo-root requires a value.");
-			}
-			options.repoRoot = next;
-			index += 1;
+		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.maxParallel)) {
+			const parsed = parseValueOption({
+				argv,
+				index,
+				flag: "--max-parallel",
+			});
+			options.maxParallel = parsePositiveIntegerOption(arg, parsed.value);
+			index = parsed.nextIndex;
 			continue;
 		}
 
-		if (CLI_OPTION_METADATA.repoId.flags.includes(arg)) {
-			const next = argv[index + 1];
-			if (!next) {
-				throw new Error("--repo-id requires a value.");
-			}
-			options.repoId = next;
-			index += 1;
-			continue;
-		}
-
-		if (CLI_OPTION_METADATA.tempRoot.flags.includes(arg)) {
-			const next = argv[index + 1];
-			if (!next) {
-				throw new Error("--temp-root requires a value.");
-			}
-			options.tempRoot = next;
-			index += 1;
-			continue;
-		}
-
-		if (CLI_OPTION_METADATA.maxParallel.flags.includes(arg)) {
-			const next = argv[index + 1];
-			if (!next) {
-				throw new Error("--max-parallel requires a value.");
-			}
-			options.maxParallel = parsePositiveIntegerOption(arg, next);
-			index += 1;
-			continue;
-		}
-
-		if (CLI_OPTION_METADATA.keepWorkdirs.flags.includes(arg)) {
+		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.keepWorkdirs)) {
 			options.keepWorkdirs = true;
 			continue;
 		}
 
-		if (CLI_OPTION_METADATA.help.flags.includes(arg)) {
-			options.help = true;
+		if (!arg.startsWith("-") && options.repositoryUrl.length === 0) {
+			options.repositoryUrl = arg;
 			continue;
 		}
 
-		throw new Error(`Unknown argument: ${arg}`);
+		throw new Error(`Unknown argument for batch: ${arg}`);
+	}
+
+	if (options.repositoryUrl.length === 0) {
+		throw new Error("batch requires <repository-url>.");
 	}
 
 	return options;
 }
 
-export function getHelpText(): string {
-	const optionLines = Object.values(CLI_OPTION_METADATA).map((option) => {
+function isTopLevelHelp(argv: string[]): boolean {
+	return (
+		argv.length === 1 &&
+		REVIEW_CLI_OPTION_METADATA.help.flags.includes(argv[0] ?? "")
+	);
+}
+
+function isCommandHelp(argv: string[]): boolean {
+	return isTopLevelHelp(argv);
+}
+
+function buildOptionLines(options: readonly CliOptionMetadata[]): string[] {
+	return options.map((option) => {
 		const flagText = option.flags.join(", ");
 		const left = `${flagText}${option.valueLabel ? ` ${option.valueLabel}` : ""}`;
-		return `  ${left.padEnd(16)} ${option.description}`;
+		return `  ${left.padEnd(24)} ${option.description}`;
 	});
+}
 
+function buildCommandSummaryLines(): string[] {
+	return Object.entries(CLI_COMMAND_METADATA).map(([_commandName, command]) => {
+		const commandUsage = command.usage;
+		return `  ${commandUsage.padEnd(34)} ${command.description}`;
+	});
+}
+
+function buildCommandHelp(options: {
+	commandName: keyof typeof CLI_COMMAND_METADATA;
+	optionMetadata: readonly CliOptionMetadata[];
+}): string[] {
+	const command = CLI_COMMAND_METADATA[
+		options.commandName
+	] as CliCommandMetadata;
 	return [
-		"Usage: bitbucket-copilot-pr-review [options]",
+		`${options.commandName.toUpperCase()}`,
+		`  ${command.description}`,
+		`  Usage: bitbucket-copilot-pr-review ${command.usage}`,
+		...(command.argumentDescription
+			? [
+					`  Argument: ${command.argumentLabel}`,
+					`    ${command.argumentDescription}`,
+				]
+			: []),
+		"  Options:",
+		...buildOptionLines(options.optionMetadata),
+	];
+}
+
+export function parseCliArgs(argv: string[]): ParsedCliArgs {
+	if (argv.length === 0 || isTopLevelHelp(argv)) {
+		return { help: true };
+	}
+
+	const [command, ...rest] = argv;
+	if (isCommandHelp(rest)) {
+		return { help: true };
+	}
+
+	if (command === "review") {
+		return parseReviewCommandArgs(rest);
+	}
+
+	if (command === "batch") {
+		return parseBatchCommandArgs(rest);
+	}
+
+	throw new Error(`Unknown command: ${command}. Expected 'review' or 'batch'.`);
+}
+
+export function isReviewCliOptions(
+	options: ParsedCliArgs,
+): options is ReviewCliOptions {
+	return "command" in options && options.command === "review";
+}
+
+export function isBatchCliOptions(
+	options: ParsedCliArgs,
+): options is BatchCliOptions {
+	return "command" in options && options.command === "batch";
+}
+
+export function getHelpText(): string {
+	return [
+		"Usage: bitbucket-copilot-pr-review <command> [options]",
 		"",
-		"Options:",
-		...optionLines,
+		"Commands:",
+		...buildCommandSummaryLines(),
+		"",
+		...buildCommandHelp({
+			commandName: "review",
+			optionMetadata: Object.values(REVIEW_CLI_OPTION_METADATA),
+		}),
+		"",
+		...buildCommandHelp({
+			commandName: "batch",
+			optionMetadata: Object.values(BATCH_CLI_OPTION_METADATA),
+		}),
 	].join("\n");
 }

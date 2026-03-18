@@ -21,10 +21,6 @@ import type { ReviewerConfigRepoOverrides } from "./types.ts";
 const MAX_REPORT_KEY_LENGTH = 50;
 const REPORT_KEY_SAFE_CHAR_PATTERN = /[^A-Za-z0-9._-]+/g;
 
-function normalizeBaseUrl(baseUrl: string): string {
-	return baseUrl.replace(/\/+$/, "");
-}
-
 function normalizeOptionalEnvString(value: unknown): string | undefined {
 	if (typeof value !== "string") {
 		return undefined;
@@ -63,14 +59,10 @@ function toPositiveInteger(
 	return parsed;
 }
 
-function buildEnvString(_name: string, normalize?: "baseUrl") {
+function buildEnvString(_name: string) {
 	return optionalEnvString().transform((value): string | undefined => {
 		if (value === undefined) {
 			return undefined;
-		}
-
-		if (normalize === "baseUrl") {
-			return normalizeBaseUrl(value);
 		}
 
 		return value;
@@ -171,7 +163,7 @@ type EnvSchemaShape<TMetadata extends Record<string, ConfigFieldMetadata>> = {
 function buildEnvValueSchema(field: EnvConfigFieldMetadata): z.ZodType {
 	switch (field.envParser.kind) {
 		case "string":
-			return buildEnvString(field.env, field.envParser.normalize);
+			return buildEnvString(field.env);
 		case "enum":
 			return buildEnvEnum(field.env, field.envParser.values);
 		case "positiveInteger":

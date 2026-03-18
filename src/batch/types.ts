@@ -18,6 +18,7 @@ export interface BatchReviewBitbucketConfig {
 
 export interface BatchReviewConfig {
 	repoId: string;
+	repositoryUrl: string;
 	tempRoot: string;
 	maxParallel: number;
 	keepWorkdirs: boolean;

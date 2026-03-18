@@ -133,7 +133,7 @@ export class BitbucketTransport {
 			errorCode === "EHOSTUNREACH"
 		) {
 			lines.push(
-				"Hint: verify BITBUCKET_BASE_URL, VPN connectivity, and whether the Bitbucket host is reachable from this machine.",
+				"Hint: verify the Bitbucket URL you passed to the CLI, VPN connectivity, and whether the Bitbucket host is reachable from this machine.",
 			);
 		}
 

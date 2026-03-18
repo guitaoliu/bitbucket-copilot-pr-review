@@ -3,6 +3,7 @@ import process from "node:process";
 
 import { BitbucketRepositoryClient } from "../bitbucket/client.ts";
 import type { PullRequestInfo } from "../bitbucket/types.ts";
+import { buildBitbucketPullRequestUrl } from "../config/bitbucket-resolver.ts";
 import { GitRepository } from "../git/repo.ts";
 import { getPullRequestSkipReason } from "../policy/pull-requests.ts";
 import type { ReviewRunOutput } from "../review/output-types.ts";
@@ -93,16 +94,11 @@ function formatPullRequestLabel(pr: PullRequestInfo): string {
 
 function buildWorkerEnvironment(
 	config: BatchReviewConfig,
-	pr: PullRequestInfo,
 	workspaceRoot: string,
 ): NodeJS.ProcessEnv {
 	return {
 		...process.env,
 		REPO_ROOT: workspaceRoot,
-		BITBUCKET_BASE_URL: config.bitbucket.baseUrl,
-		BITBUCKET_PROJECT_KEY: config.bitbucket.projectKey,
-		BITBUCKET_REPO_SLUG: config.bitbucket.repoSlug,
-		BITBUCKET_PR_ID: String(pr.id),
 		GIT_REMOTE_NAME: config.gitRemoteName,
 		LOG_LEVEL: config.logLevel,
 		REVIEW_FORCE: config.review.forceReview ? "1" : "0",
@@ -155,11 +151,13 @@ async function runWorkerForPullRequest(
 		options.logger,
 		`[${options.config.repoId}#${options.pr.id}]`,
 	);
-	const env = buildWorkerEnvironment(
-		options.config,
-		options.pr,
-		options.workspaceRoot,
-	);
+	const env = buildWorkerEnvironment(options.config, options.workspaceRoot);
+	const pullRequestUrl = buildBitbucketPullRequestUrl({
+		baseUrl: options.config.bitbucket.baseUrl,
+		projectKey: options.config.bitbucket.projectKey,
+		repoSlug: options.config.bitbucket.repoSlug,
+		prId: options.pr.id,
+	});
 	if (options.config.bitbucket.auth.type === "bearer") {
 		env.BITBUCKET_AUTH_TYPE = "bearer";
 		env.BITBUCKET_TOKEN = options.config.bitbucket.auth.token;
@@ -189,7 +187,12 @@ async function runWorkerForPullRequest(
 	const output = await new Promise<ReviewRunOutput>((resolve, reject) => {
 		const child = spawn(
 			process.execPath,
-			[cliEntrypoint, ...(options.config.review.dryRun ? ["--dry-run"] : [])],
+			[
+				cliEntrypoint,
+				"review",
+				pullRequestUrl,
+				...(options.config.review.dryRun ? ["--dry-run"] : []),
+			],
 			{
 				cwd: process.cwd(),
 				env,

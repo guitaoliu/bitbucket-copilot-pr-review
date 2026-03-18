@@ -4,14 +4,13 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/run-local-batch-review.sh <project/repo>
+  scripts/run-local-batch-review.sh <repository-url>
 
 Examples:
-  export BITBUCKET_BASE_URL="https://bitbucket.example.com"
-  scripts/run-local-batch-review.sh AAAS/sbp
+  scripts/run-local-batch-review.sh \
+    https://bitbucket.example.com/projects/AAAS/repos/sbp
 
 Required environment:
-  BITBUCKET_BASE_URL      Bitbucket Data Center base URL
   BITBUCKET_TOKEN         Bitbucket token
 
 Alternative Bitbucket auth:
@@ -40,7 +39,7 @@ Optional environment:
 
 Notes:
   - Batch mode clones the target repo automatically; no local checkout is required.
-  - Batch mode does not support CONFIRM_RERUN/--confirm-rerun.
+  - Batch mode uses the `batch` subcommand and does not support rerun confirmation.
 EOF
 }
 
@@ -66,15 +65,13 @@ require_command pnpm
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REVIEWER_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 
-REPO_ID_RAW="$1"
-REPO_ID="${REPO_ID_RAW%/}"
+REPO_URL_RAW="$1"
+REPO_URL="${REPO_URL_RAW%%\?*}"
+REPO_URL="${REPO_URL%%#*}"
+REPO_URL="${REPO_URL%/}"
 
-if [[ ! "$REPO_ID" =~ ^[^/[:space:]]+/[^/[:space:]]+$ ]]; then
-  die "Repository id must look like PROJECT/repo, got: $REPO_ID_RAW"
-fi
-
-if [[ -z "${BITBUCKET_BASE_URL:-}" ]]; then
-  die "Set BITBUCKET_BASE_URL before running this script"
+if [[ ! "$REPO_URL" =~ ^https?://.+/projects/[^/]+/repos/[^/]+$ ]]; then
+  die "Repository URL must look like https://bitbucket.example.com/projects/AAAS/repos/sbp"
 fi
 
 if [[ -z "${BITBUCKET_TOKEN:-}" && ( -z "${BITBUCKET_USERNAME:-}" || -z "${BITBUCKET_PASSWORD:-}" ) ]]; then
@@ -82,7 +79,7 @@ if [[ -z "${BITBUCKET_TOKEN:-}" && ( -z "${BITBUCKET_USERNAME:-}" || -z "${BITBU
 fi
 
 if [[ "${CONFIRM_RERUN:-0}" == "1" ]]; then
-  die "Batch mode does not support CONFIRM_RERUN or --confirm-rerun"
+  die "Batch mode does not support CONFIRM_RERUN"
 fi
 
 if [[ -n "${MAX_PARALLEL:-}" ]]; then
@@ -91,14 +88,13 @@ if [[ -n "${MAX_PARALLEL:-}" ]]; then
   fi
 fi
 
-export BITBUCKET_BASE_URL="${BITBUCKET_BASE_URL%/}"
 export COPILOT_MODEL="${COPILOT_MODEL:-gpt-5.4}"
 export COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 export LOG_LEVEL="${LOG_LEVEL:-debug}"
 export REPORT_KEY="${REPORT_KEY:-copilot-local-${USER:-local}}"
 export NODE_USE_SYSTEM_CA="${NODE_USE_SYSTEM_CA:-1}"
 
-declare -a REVIEW_ARGS=(--repo-id "$REPO_ID")
+declare -a REVIEW_ARGS=(batch "$REPO_URL")
 
 if [[ "${PUBLISH:-0}" == "1" ]]; then
   export REPORT_TITLE="${REPORT_TITLE:-Copilot PR Review (local batch)}"
@@ -126,8 +122,7 @@ if [[ -n "${TEMP_ROOT:-}" ]]; then
 fi
 
 printf 'Reviewer root: %s\n' "$REVIEWER_ROOT"
-printf 'Bitbucket base URL: %s\n' "$BITBUCKET_BASE_URL"
-printf 'Repository: %s\n' "$REPO_ID"
+printf 'Repository URL: %s\n' "$REPO_URL"
 printf 'Model: %s\n' "$COPILOT_MODEL"
 printf 'Reasoning effort: %s\n' "$COPILOT_REASONING_EFFORT"
 printf 'Node system CA: %s\n' "$( [[ "$NODE_USE_SYSTEM_CA" == "1" ]] && printf 'enabled' || printf 'disabled' )"

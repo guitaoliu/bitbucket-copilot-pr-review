@@ -6,7 +6,7 @@ export async function confirmRerun(options: {
 }): Promise<boolean> {
 	if (!process.stdin.isTTY || !process.stdout.isTTY) {
 		throw new Error(
-			"--confirm-rerun requires an interactive terminal (TTY) so you can answer the prompt.",
+			"review --confirm-rerun requires an interactive terminal (TTY) so you can answer the prompt.",
 		);
 	}
 

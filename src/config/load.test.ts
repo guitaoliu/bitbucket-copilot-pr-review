@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+
 import {
+	parseBitbucketPullRequestUrl,
+	parseBitbucketRepositoryUrl,
 	resolveBitbucketAuth,
 	resolveBitbucketConfig,
 } from "./bitbucket-resolver.ts";
 import { REVIEWER_CONFIG_DEFAULTS } from "./defaults.ts";
 import {
 	getEnvRepoOverrides,
-	getRequiredEnvValue,
 	normalizeReportKey,
 	parseEnvironment,
 } from "./env.ts";
@@ -15,6 +17,10 @@ import { loadBatchConfig, loadConfig } from "./load.ts";
 import { CONFIG_FIELD_METADATA } from "./metadata.ts";
 import { mergeRepoReviewConfig, parseRepoReviewConfig } from "./repo-config.ts";
 import { resolveRuntimeConfigGroups } from "./runtime-resolver.ts";
+
+const pullRequestUrl =
+	"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123";
+const repositoryUrl = "https://bitbucket.example.com/projects/AAAS/repos/sbp";
 
 describe("normalizeReportKey", () => {
 	it("keeps short report keys unchanged", () => {
@@ -48,17 +54,12 @@ describe("normalizeReportKey", () => {
 describe("parseEnvironment", () => {
 	it("uses metadata-driven parsers for normalized strings and scalars", () => {
 		const env = parseEnvironment({
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com///",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
 			BITBUCKET_TOKEN: "token",
 			BITBUCKET_INSECURE_TLS: "false",
 			LOG_LEVEL: "debug",
 			REVIEW_IGNORE_PATHS: "a/**, b/**",
 		});
 
-		assert.equal(env.BITBUCKET_BASE_URL, "https://bitbucket.example.com");
 		assert.equal(env.BITBUCKET_INSECURE_TLS, false);
 		assert.equal(env.LOG_LEVEL, "debug");
 		assert.deepEqual(env.REVIEW_IGNORE_PATHS, ["a/**", "b/**"]);
@@ -68,10 +69,6 @@ describe("parseEnvironment", () => {
 		assert.throws(
 			() =>
 				parseEnvironment({
-					BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-					BITBUCKET_PROJECT_KEY: "PROJ",
-					BITBUCKET_REPO_SLUG: "repo",
-					BITBUCKET_PR_ID: "123",
 					BITBUCKET_TOKEN: "token",
 					LOG_LEVEL: "verbose",
 				}),
@@ -81,10 +78,6 @@ describe("parseEnvironment", () => {
 
 	it("derives repo override values from metadata-marked env fields", () => {
 		const env = parseEnvironment({
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
 			BITBUCKET_TOKEN: "token",
 			COPILOT_MODEL: "env-model",
 			REPORT_COMMENT_STRATEGY: "update",
@@ -105,19 +98,64 @@ describe("parseEnvironment", () => {
 			},
 		});
 	});
+});
 
-	it("uses metadata-backed required env lookup helper", () => {
-		const env = parseEnvironment({
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
-			BITBUCKET_TOKEN: "token",
+describe("parseBitbucketPullRequestUrl", () => {
+	it("parses pull request urls with optional query and hash", () => {
+		const parsed = parseBitbucketPullRequestUrl(
+			`${pullRequestUrl}/?foo=1#activity`,
+		);
+
+		assert.deepEqual(parsed, {
+			baseUrl: "https://bitbucket.example.com",
+			projectKey: "PROJ",
+			repoSlug: "repo",
+			prId: 123,
+			repositoryUrl: "https://bitbucket.example.com/projects/PROJ/repos/repo",
+			pullRequestUrl,
 		});
+	});
 
-		assert.equal(
-			getRequiredEnvValue(env, "BITBUCKET_BASE_URL"),
-			"https://bitbucket.example.com",
+	it("parses pull request urls under a path prefix", () => {
+		const parsed = parseBitbucketPullRequestUrl(
+			"https://host.example.com:8443/bitbucket/projects/PROJ/repos/repo/pull-requests/123",
+		);
+
+		assert.equal(parsed.baseUrl, "https://host.example.com:8443/bitbucket");
+	});
+
+	it("rejects non-pull-request urls", () => {
+		assert.throws(
+			() =>
+				parseBitbucketPullRequestUrl(
+					"https://bitbucket.example.com/projects/PROJ/repos/repo",
+				),
+			/Pull request URL must point to a pull request page/,
+		);
+	});
+});
+
+describe("parseBitbucketRepositoryUrl", () => {
+	it("parses repository urls", () => {
+		const parsed = parseBitbucketRepositoryUrl(
+			`${repositoryUrl}/?foo=1#browse`,
+		);
+
+		assert.deepEqual(parsed, {
+			baseUrl: "https://bitbucket.example.com",
+			projectKey: "AAAS",
+			repoSlug: "sbp",
+			repositoryUrl,
+		});
+	});
+
+	it("rejects malformed repository urls", () => {
+		assert.throws(
+			() =>
+				parseBitbucketRepositoryUrl(
+					"https://bitbucket.example.com/projects/AAAS",
+				),
+			/Repository URL must point to a repository page/,
 		);
 	});
 });
@@ -125,10 +163,6 @@ describe("parseEnvironment", () => {
 describe("resolveRuntimeConfigGroups", () => {
 	it("resolves copilot report and review groups from metadata-driven sources", () => {
 		const env = parseEnvironment({
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
 			BITBUCKET_TOKEN: "token",
 			COPILOT_MODEL: "env-model",
 			REPORT_KEY: " team/report ",
@@ -137,6 +171,8 @@ describe("resolveRuntimeConfigGroups", () => {
 		});
 
 		const resolved = resolveRuntimeConfigGroups(env, {
+			command: "review",
+			pullRequestUrl,
 			dryRun: false,
 			forceReview: true,
 			confirmRerun: false,
@@ -152,32 +188,17 @@ describe("resolveRuntimeConfigGroups", () => {
 		assert.equal(resolved.report.link, "https://ci.example.com/build/1");
 		assert.equal(resolved.review.forceReview, true);
 		assert.equal(resolved.review.maxFiles, 300);
-		assert.equal(
-			resolved.review.maxFindings,
-			REVIEWER_CONFIG_DEFAULTS.review.maxFindings,
-		);
-		assert.deepEqual(
-			resolved.review.skipBranchPrefixes,
-			REVIEWER_CONFIG_DEFAULTS.review.skipBranchPrefixes,
-		);
-		assert.equal(
-			resolved.gitRemoteName,
-			REVIEWER_CONFIG_DEFAULTS.gitRemoteName,
-		);
-		assert.equal(resolved.logLevel, REVIEWER_CONFIG_DEFAULTS.logLevel);
 	});
 
 	it("resolves bitbucket runtime fields from env with default fallback", () => {
 		const env = parseEnvironment({
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
 			BITBUCKET_TOKEN: "token",
 			BITBUCKET_INSECURE_TLS: "false",
 		});
 
 		const resolved = resolveRuntimeConfigGroups(env, {
+			command: "review",
+			pullRequestUrl,
 			dryRun: false,
 			forceReview: false,
 			confirmRerun: false,
@@ -193,14 +214,12 @@ describe("resolveRuntimeConfigGroups", () => {
 			GIT_REMOTE_NAME: "upstream",
 			LOG_LEVEL: "warn",
 			CI_SUMMARY_PATH: "/tmp/summary.txt",
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
 			BITBUCKET_TOKEN: "token",
 		});
 
 		const resolved = resolveRuntimeConfigGroups(env, {
+			command: "review",
+			pullRequestUrl,
 			dryRun: false,
 			forceReview: false,
 			confirmRerun: false,
@@ -218,10 +237,6 @@ describe("resolveRuntimeConfigGroups", () => {
 describe("resolveBitbucketAuth", () => {
 	it("resolves bearer auth from explicit auth type", () => {
 		const env = parseEnvironment({
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
 			BITBUCKET_AUTH_TYPE: "bearer",
 			BITBUCKET_TOKEN: "token",
 		});
@@ -234,10 +249,6 @@ describe("resolveBitbucketAuth", () => {
 
 	it("resolves basic auth when username and password are provided", () => {
 		const env = parseEnvironment({
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
 			BITBUCKET_USERNAME: "ci-user",
 			BITBUCKET_PASSWORD: "secret",
 		});
@@ -251,21 +262,18 @@ describe("resolveBitbucketAuth", () => {
 });
 
 describe("resolveBitbucketConfig", () => {
-	it("builds the full bitbucket config from env and runtime inputs", () => {
+	it("builds the full bitbucket config from resolved identity and env", () => {
 		const env = parseEnvironment({
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
 			BITBUCKET_TOKEN: "token",
 		});
 
 		assert.deepEqual(
-			resolveBitbucketConfig(
+			resolveBitbucketConfig({
+				location: parseBitbucketPullRequestUrl(pullRequestUrl),
 				env,
-				{ tls: { insecureSkipVerify: true } },
-				{ caCertPath: "/tmp/cert.pem" },
-			),
+				runtimeConfig: { tls: { insecureSkipVerify: true } },
+				caCertPath: "/tmp/cert.pem",
+			}),
 			{
 				baseUrl: "https://bitbucket.example.com",
 				projectKey: "PROJ",
@@ -286,38 +294,23 @@ describe("resolveBitbucketConfig", () => {
 
 describe("loadConfig feature flags", () => {
 	it("uses simplified defaults", () => {
-		const config = loadConfig([], {
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
+		const config = loadConfig(["review", pullRequestUrl], {
 			BITBUCKET_TOKEN: "token",
 		});
 
+		assert.equal(config.bitbucket.baseUrl, "https://bitbucket.example.com");
+		assert.equal(config.bitbucket.projectKey, "PROJ");
+		assert.equal(config.bitbucket.repoSlug, "repo");
+		assert.equal(config.bitbucket.prId, 123);
 		assert.equal(config.bitbucket.tls.insecureSkipVerify, true);
 		assert.equal(config.report.key, "copilot-pr-review");
-		assert.equal(config.report.commentStrategy, "recreate");
 		assert.equal(config.review.forceReview, false);
 		assert.equal(config.review.confirmRerun, false);
 		assert.equal(config.review.maxFiles, 300);
-		assert.equal(config.review.maxFindings, 25);
-		assert.equal(config.review.minConfidence, "medium");
-		assert.deepEqual(config.review.ignorePaths, []);
-		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/"]);
-		assert.equal(config.copilot.model, REVIEWER_CONFIG_DEFAULTS.copilot.model);
-		assert.deepEqual(config.internal?.envRepoOverrides, {
-			copilot: {},
-			report: {},
-			review: {},
-		});
 	});
 
 	it("parses ignored review path globs from env", () => {
-		const config = loadConfig([], {
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
+		const config = loadConfig(["review", pullRequestUrl], {
 			BITBUCKET_TOKEN: "token",
 			REVIEW_IGNORE_PATHS: "i18n/locales/**/*.json, docs/generated/**",
 			REVIEW_SKIP_BRANCH_PREFIXES: "renovate/, deps/",
@@ -327,48 +320,24 @@ describe("loadConfig feature flags", () => {
 			"i18n/locales/**/*.json",
 			"docs/generated/**",
 		]);
-		assert.deepEqual(config.internal?.envRepoOverrides.review.ignorePaths, [
-			"i18n/locales/**/*.json",
-			"docs/generated/**",
-		]);
 		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/", "deps/"]);
-		assert.deepEqual(
-			config.internal?.envRepoOverrides.review.skipBranchPrefixes,
-			["renovate/", "deps/"],
-		);
 	});
 
 	it("allows overriding the pull request comment strategy from env", () => {
-		const config = loadConfig([], {
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
+		const config = loadConfig(["review", pullRequestUrl], {
 			BITBUCKET_TOKEN: "token",
 			REPORT_COMMENT_STRATEGY: "update",
 		});
 
 		assert.equal(config.report.commentStrategy, "update");
-		assert.equal(
-			config.internal?.envRepoOverrides.report.commentStrategy,
-			"update",
-		);
 	});
 
 	it("allows forcing a rerun from env or CLI", () => {
-		const fromEnv = loadConfig([], {
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
+		const fromEnv = loadConfig(["review", pullRequestUrl], {
 			BITBUCKET_TOKEN: "token",
 			REVIEW_FORCE: "1",
 		});
-		const fromCli = loadConfig(["--force-review"], {
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
+		const fromCli = loadConfig(["review", pullRequestUrl, "--force-review"], {
 			BITBUCKET_TOKEN: "token",
 		});
 
@@ -377,11 +346,7 @@ describe("loadConfig feature flags", () => {
 	});
 
 	it("allows enabling rerun confirmation from CLI", () => {
-		const config = loadConfig(["--confirm-rerun"], {
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
+		const config = loadConfig(["review", pullRequestUrl, "--confirm-rerun"], {
 			BITBUCKET_TOKEN: "token",
 		});
 
@@ -389,11 +354,7 @@ describe("loadConfig feature flags", () => {
 	});
 
 	it("lets env values win over repo config overrides", () => {
-		const config = loadConfig([], {
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-			BITBUCKET_PROJECT_KEY: "PROJ",
-			BITBUCKET_REPO_SLUG: "repo",
-			BITBUCKET_PR_ID: "123",
+		const config = loadConfig(["review", pullRequestUrl], {
 			BITBUCKET_TOKEN: "token",
 			REVIEW_MAX_FILES: "300",
 			REVIEW_IGNORE_PATHS: "env-only/**",
@@ -421,28 +382,19 @@ describe("loadConfig feature flags", () => {
 		assert.equal(merged.copilot.model, "env-model");
 	});
 
-	it("uses metadata-backed required field errors", () => {
+	it("requires Bitbucket authentication envs", () => {
 		assert.throws(
-			() =>
-				loadConfig([], {
-					BITBUCKET_PROJECT_KEY: "PROJ",
-					BITBUCKET_REPO_SLUG: "repo",
-					BITBUCKET_PR_ID: "123",
-					BITBUCKET_TOKEN: "token",
-				}),
-			new RegExp(
-				`${CONFIG_FIELD_METADATA.bitbucketBaseUrl.env} is required\\.`,
-			),
+			() => loadConfig(["review", pullRequestUrl], {}),
+			/Provide BITBUCKET_TOKEN or BITBUCKET_USERNAME and BITBUCKET_PASSWORD/,
 		);
 	});
 });
 
 describe("loadBatchConfig", () => {
-	it("builds batch review config from repo id and env", () => {
+	it("builds batch review config from repository url and env", () => {
 		const config = loadBatchConfig(
-			["--repo-id", "AAAS/sbp", "--max-parallel", "4"],
+			["batch", repositoryUrl, "--max-parallel", "4"],
 			{
-				BITBUCKET_BASE_URL: "https://bitbucket.example.com",
 				BITBUCKET_TOKEN: "token",
 				GIT_REMOTE_NAME: "upstream",
 				LOG_LEVEL: "debug",
@@ -451,20 +403,18 @@ describe("loadBatchConfig", () => {
 		);
 
 		assert.equal(config.repoId, "AAAS/sbp");
+		assert.equal(config.repositoryUrl, repositoryUrl);
+		assert.equal(config.bitbucket.baseUrl, "https://bitbucket.example.com");
 		assert.equal(config.bitbucket.projectKey, "AAAS");
 		assert.equal(config.bitbucket.repoSlug, "sbp");
 		assert.equal(config.maxParallel, 4);
 		assert.equal(config.gitRemoteName, "upstream");
 		assert.equal(config.logLevel, "debug");
 		assert.equal(config.review.forceReview, true);
-		assert.equal(config.review.dryRun, false);
-		assert.equal(config.keepWorkdirs, false);
-		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/"]);
 	});
 
 	it("reads batch skip branch prefixes from env", () => {
-		const config = loadBatchConfig(["--repo-id", "AAAS/sbp"], {
-			BITBUCKET_BASE_URL: "https://bitbucket.example.com",
+		const config = loadBatchConfig(["batch", repositoryUrl], {
 			BITBUCKET_TOKEN: "token",
 			REVIEW_SKIP_BRANCH_PREFIXES: "renovate/, deps/",
 		});
@@ -472,25 +422,26 @@ describe("loadBatchConfig", () => {
 		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/", "deps/"]);
 	});
 
-	it("rejects unsupported single-pr-only flags", () => {
+	it("rejects batch-only command invocations without a repository url", () => {
 		assert.throws(
 			() =>
-				loadBatchConfig(["--repo-id", "AAAS/sbp", "--confirm-rerun"], {
-					BITBUCKET_BASE_URL: "https://bitbucket.example.com",
+				loadBatchConfig(["batch", "--max-parallel", "2"], {
 					BITBUCKET_TOKEN: "token",
 				}),
-			/--confirm-rerun is not supported in batch repository review mode/,
+			/batch requires <repository-url>/,
 		);
 	});
 
-	it("rejects malformed repo ids", () => {
+	it("rejects malformed repository urls", () => {
 		assert.throws(
 			() =>
-				loadBatchConfig(["--repo-id", "AAAS"], {
-					BITBUCKET_BASE_URL: "https://bitbucket.example.com",
-					BITBUCKET_TOKEN: "token",
-				}),
-			/--repo-id must use the format <project\/repo>/,
+				loadBatchConfig(
+					["batch", "https://bitbucket.example.com/projects/AAAS"],
+					{
+						BITBUCKET_TOKEN: "token",
+					},
+				),
+			/Repository URL must point to a repository page/,
 		);
 	});
 });

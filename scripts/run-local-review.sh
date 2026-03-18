@@ -73,18 +73,14 @@ if [[ -z "${BITBUCKET_TOKEN:-}" && ( -z "${BITBUCKET_USERNAME:-}" || -z "${BITBU
 fi
 
 PR_URL="${PR_URL_RAW%%\?*}"
+PR_URL="${PR_URL%%#*}"
 PR_URL="${PR_URL%/}"
 
-if [[ ! "$PR_URL" =~ ^(https?://[^/]+)/projects/([^/]+)/repos/([^/]+)/pull-requests/([0-9]+)$ ]]; then
+if [[ ! "$PR_URL" =~ ^https?://.+/projects/[^/]+/repos/[^/]+/pull-requests/[0-9]+$ ]]; then
   die "Bitbucket PR URL must look like https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123"
 fi
 
 export REPO_ROOT="$TARGET_REPO_ROOT"
-export BITBUCKET_BASE_URL="${BASH_REMATCH[1]}"
-export BITBUCKET_PROJECT_KEY="${BASH_REMATCH[2]}"
-export BITBUCKET_REPO_SLUG="${BASH_REMATCH[3]}"
-export BITBUCKET_PR_ID="${BASH_REMATCH[4]}"
-
 export COPILOT_MODEL="${COPILOT_MODEL:-gpt-5.4}"
 export COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 export LOG_LEVEL="${LOG_LEVEL:-debug}"
@@ -92,7 +88,7 @@ export REPORT_KEY="${REPORT_KEY:-copilot-local-${USER:-local}}"
 export REPORT_LINK="${REPORT_LINK:-$PR_URL}"
 export NODE_USE_SYSTEM_CA="${NODE_USE_SYSTEM_CA:-1}"
 
-declare -a REVIEW_ARGS=()
+declare -a REVIEW_ARGS=(review "$PR_URL")
 
 if [[ "${PUBLISH:-0}" == "1" ]]; then
   export REPORT_TITLE="${REPORT_TITLE:-Copilot PR Review (local)}"
@@ -100,7 +96,7 @@ if [[ "${PUBLISH:-0}" == "1" ]]; then
 else
   export REPORT_TITLE="${REPORT_TITLE:-Copilot PR Review (local dry run)}"
   export REPORTER_NAME="${REPORTER_NAME:-GitHub Copilot Local Dry Run}"
-  REVIEW_ARGS=(--dry-run)
+  REVIEW_ARGS+=(--dry-run)
 fi
 
 if [[ "${FORCE_REVIEW:-0}" == "1" ]]; then

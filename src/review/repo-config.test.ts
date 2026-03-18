@@ -66,6 +66,7 @@ const baseConfig: ReviewerConfig = {
 
 const baseBatchConfig: BatchReviewConfig = {
 	repoId: "PROJ/repo",
+	repositoryUrl: "https://bitbucket.example.com/projects/PROJ/repos/repo",
 	tempRoot: "/tmp/repo",
 	maxParallel: 2,
 	keepWorkdirs: false,

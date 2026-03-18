@@ -14,14 +14,15 @@ describe("run-local-batch-review.sh", () => {
 		await access(scriptPath, fsConstants.X_OK);
 	});
 
-	it("contains the repo-id batch entrypoint", async () => {
+	it("contains the batch subcommand entrypoint", async () => {
 		const scriptPath = path.resolve(
 			process.cwd(),
 			"scripts/run-local-batch-review.sh",
 		);
 		const scriptText = await readFile(scriptPath, "utf8");
 
-		assert.match(scriptText, /--repo-id/);
+		assert.match(scriptText, /declare -a REVIEW_ARGS=\(batch "\$REPO_URL"\)/);
+		assert.match(scriptText, /node "\$REVIEWER_ROOT\/src\/cli\.ts"/);
 		assert.match(scriptText, /MAX_PARALLEL/);
 		assert.match(scriptText, /KEEP_WORKDIRS/);
 	});

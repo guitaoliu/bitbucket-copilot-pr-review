@@ -25,64 +25,78 @@ Copilot authentication is resolved by the GitHub Copilot SDK. You can rely on an
 If your Bitbucket environment requires basic auth instead of bearer tokens, provide `BITBUCKET_USERNAME` and `BITBUCKET_PASSWORD` and set `BITBUCKET_AUTH_TYPE=basic`.
 
 <!-- GENERATED_CONFIG_REFERENCE:START -->
-
 ## Configuration Reference
 
-### CLI options
+### Review command
 
-| Option                      | Description                                                                                         |
-| --------------------------- | --------------------------------------------------------------------------------------------------- |
-| `--dry-run`, `--no-publish` | Run the review but skip Bitbucket publishing                                                        |
-| `--force-review`            | Run even if the current PR revision already has a fully published result                            |
-| `--confirm-rerun`           | Prompt only when rerunning unusable cached artifacts for the current unchanged PR head and revision |
-| `--repo-root <path>`        | Path to the repository under review                                                                 |
-| `--repo-id <project/repo>`  | Review all open PRs for the given Bitbucket project/repo                                            |
-| `--temp-root <path>`        | Parent directory for temporary batch review clones                                                  |
-| `--max-parallel <count>`    | Maximum concurrent PR review subprocesses in batch mode                                             |
-| `--keep-workdirs`           | Keep temporary batch review clones after the run completes                                          |
-| `-h`, `--help`              | Show this help text                                                                                 |
+Review one pull request from an explicit Bitbucket URL
+
+Usage: `bitbucket-copilot-pr-review review <pull-request-url> [options]`
+
+| Option | Description |
+| --- | --- |
+| `--dry-run` | Run without publishing results to Bitbucket |
+| `--force-review` | Re-run even if the current PR revision already has published results |
+| `--confirm-rerun` | Ask before rerunning unusable cached artifacts for an unchanged PR revision |
+| `--repo-root <path>` | Use a different local checkout as the repository root |
+| `-h`, `--help` | Show this help text |
+
+Argument: `<pull-request-url>`
+
+Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pull-requests/123.
+
+### Batch command
+
+Review all open pull requests for one Bitbucket repository URL
+
+Usage: `bitbucket-copilot-pr-review batch <repository-url> [options]`
+
+| Option | Description |
+| --- | --- |
+| `--dry-run` | Run without publishing results to Bitbucket |
+| `--force-review` | Re-run even if the current PR revision already has published results |
+| `--temp-root <path>` | Parent directory for mirror and workspace clones |
+| `--max-parallel <count>` | Maximum concurrent review workers |
+| `--keep-workdirs` | Keep per-PR workdirs after the run completes |
+| `-h`, `--help` | Show this help text |
+
+Argument: `<repository-url>`
+
+Bitbucket repository URL, for example https://host/projects/AAAS/repos/sbp.
 
 ### Environment variables
 
-| Variable                          | Default                                           | Description                                                    |
-| --------------------------------- | ------------------------------------------------- | -------------------------------------------------------------- |
-| `BITBUCKET_BASE_URL`              | required                                          | Bitbucket Data Center base URL.                                |
-| `BITBUCKET_PROJECT_KEY`           | required                                          | Bitbucket project key.                                         |
-| `BITBUCKET_REPO_SLUG`             | required                                          | Bitbucket repository slug.                                     |
-| `BITBUCKET_PR_ID`                 | required                                          | Pull request ID.                                               |
-| `BITBUCKET_TOKEN`                 | required unless basic auth vars are used          | Bitbucket bearer token.                                        |
-| `BITBUCKET_USERNAME`              | required with `BITBUCKET_PASSWORD` for basic auth | Bitbucket basic auth username.                                 |
-| `BITBUCKET_PASSWORD`              | required with `BITBUCKET_USERNAME` for basic auth | Bitbucket basic auth password.                                 |
-| `REPO_ROOT`                       | current working directory                         | Path to the repository under review.                           |
-| `GIT_REMOTE_NAME`                 | `origin`                                          | Git remote name used to fetch PR commits.                      |
-| `LOG_LEVEL`                       | `info`                                            | Logger verbosity.                                              |
-| `BITBUCKET_AUTH_TYPE`             | auto-detected from provided credentials           | Bitbucket authentication strategy.                             |
-| `BITBUCKET_CA_CERT_PATH`          | -                                                 | PEM CA bundle path for Bitbucket TLS.                          |
-| `BITBUCKET_INSECURE_TLS`          | `true`                                            | Skip strict TLS verification for Bitbucket.                    |
-| `COPILOT_MODEL`                   | `gpt-5.4`                                         | Copilot model override.                                        |
-| `COPILOT_REASONING_EFFORT`        | `xhigh`                                           | Copilot reasoning effort.                                      |
-| `COPILOT_TIMEOUT_MS`              | `1800000`                                         | Copilot timeout in milliseconds.                               |
-| `CI_SUMMARY_PATH`                 | -                                                 | Path to a CI summary file included in review context.          |
-| `REPORT_KEY`                      | `copilot-pr-review`                               | Code Insights report key.                                      |
-| `REPORT_TITLE`                    | `Copilot PR Review`                               | Code Insights report title.                                    |
-| `REPORTER_NAME`                   | `GitHub Copilot via Jenkins`                      | Displayed report publisher name.                               |
-| `REPORT_COMMENT_TAG`              | `copilot-pr-review`                               | Tag used to locate the PR summary comment.                     |
-| `REPORT_COMMENT_STRATEGY`         | `recreate`                                        | How the tagged PR summary comment is updated.                  |
-| `REPORT_LINK`                     | falls back to `BUILD_URL` when present            | Code Insights report link.                                     |
-| `BUILD_URL`                       | used when `REPORT_LINK` is unset                  | Fallback report link from CI build URL.                        |
-| `REVIEW_FORCE`                    | `false`                                           | Force review even when the revision was already published.     |
-| `REVIEW_MAX_FILES`                | `300`                                             | Maximum number of changed files to review.                     |
-| `REVIEW_MAX_FINDINGS`             | `25`                                              | Maximum number of findings to publish.                         |
-| `REVIEW_MIN_CONFIDENCE`           | `medium`                                          | Minimum confidence threshold for findings.                     |
-| `REVIEW_MAX_PATCH_CHARS`          | `12000`                                           | Maximum diff size sent to Copilot per file.                    |
-| `REVIEW_DEFAULT_FILE_SLICE_LINES` | `250`                                             | Default line window when reading file slices.                  |
-| `REVIEW_MAX_FILE_SLICE_LINES`     | `400`                                             | Maximum line window for file slices.                           |
-| `REVIEW_IGNORE_PATHS`             | []                                                | Comma-separated repo-relative glob patterns to skip.           |
-| `REVIEW_SKIP_BRANCH_PREFIXES`     | `renovate/`                                       | Comma-separated source branch prefixes that should be skipped. |
-
-### Batch review mode
-
-Use `--repo-id <project/repo>` to clone the repository into a temp working area, list open PRs, and fan out one subprocess review per PR.
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BITBUCKET_TOKEN` | required unless basic auth vars are used | Bitbucket bearer token. |
+| `BITBUCKET_USERNAME` | required with `BITBUCKET_PASSWORD` for basic auth | Bitbucket basic auth username. |
+| `BITBUCKET_PASSWORD` | required with `BITBUCKET_USERNAME` for basic auth | Bitbucket basic auth password. |
+| `REPO_ROOT` | current working directory | Path to the repository under review. |
+| `GIT_REMOTE_NAME` | `origin` | Git remote name used to fetch PR commits. |
+| `LOG_LEVEL` | `info` | Logger verbosity. |
+| `BITBUCKET_AUTH_TYPE` | auto-detected from provided credentials | Bitbucket authentication strategy. |
+| `BITBUCKET_CA_CERT_PATH` | - | PEM CA bundle path for Bitbucket TLS. |
+| `BITBUCKET_INSECURE_TLS` | `true` | Skip strict TLS verification for Bitbucket. |
+| `COPILOT_MODEL` | `gpt-5.4` | Copilot model override. |
+| `COPILOT_REASONING_EFFORT` | `xhigh` | Copilot reasoning effort. |
+| `COPILOT_TIMEOUT_MS` | `1800000` | Copilot timeout in milliseconds. |
+| `CI_SUMMARY_PATH` | - | Path to a CI summary file included in review context. |
+| `REPORT_KEY` | `copilot-pr-review` | Code Insights report key. |
+| `REPORT_TITLE` | `Copilot PR Review` | Code Insights report title. |
+| `REPORTER_NAME` | `GitHub Copilot via Jenkins` | Displayed report publisher name. |
+| `REPORT_COMMENT_TAG` | `copilot-pr-review` | Tag used to locate the PR summary comment. |
+| `REPORT_COMMENT_STRATEGY` | `recreate` | How the tagged PR summary comment is updated. |
+| `REPORT_LINK` | falls back to `BUILD_URL` when present | Code Insights report link. |
+| `BUILD_URL` | used when `REPORT_LINK` is unset | Fallback report link from CI build URL. |
+| `REVIEW_FORCE` | `false` | Force review even when the revision was already published. |
+| `REVIEW_MAX_FILES` | `300` | Maximum number of changed files to review. |
+| `REVIEW_MAX_FINDINGS` | `25` | Maximum number of findings to publish. |
+| `REVIEW_MIN_CONFIDENCE` | `medium` | Minimum confidence threshold for findings. |
+| `REVIEW_MAX_PATCH_CHARS` | `12000` | Maximum diff size sent to Copilot per file. |
+| `REVIEW_DEFAULT_FILE_SLICE_LINES` | `250` | Default line window when reading file slices. |
+| `REVIEW_MAX_FILE_SLICE_LINES` | `400` | Maximum line window for file slices. |
+| `REVIEW_IGNORE_PATHS` | [] | Comma-separated repo-relative glob patterns to skip. |
+| `REVIEW_SKIP_BRANCH_PREFIXES` | `renovate/` | Comma-separated source branch prefixes that should be skipped. |
 
 <!-- GENERATED_CONFIG_REFERENCE:END -->
 
@@ -103,13 +117,13 @@ The project now builds a distributable CLI with `tsdown` into `dist/cli.js`.
 
 ```bash
 pnpm build
-node dist/cli.js --help
+node dist/cli.js review --help
 ```
 
 After publishing, the package can be invoked with `npx`:
 
 ```bash
-NODE_USE_SYSTEM_CA=1 npx bitbucket-copilot-pr-review --help
+NODE_USE_SYSTEM_CA=1 npx bitbucket-copilot-pr-review review --help
 ```
 
 When invoking the published CLI directly with `npx`, pass `NODE_USE_SYSTEM_CA=1` yourself if you want Node to trust your system CA store.
@@ -118,7 +132,7 @@ When invoking the published CLI directly with `npx`, pass `NODE_USE_SYSTEM_CA=1`
 
 ```bash
 pnpm typecheck
-pnpm review:dry-run
+pnpm review:dry-run -- https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
 ## Review all open PRs in a repo
@@ -128,16 +142,16 @@ Use batch mode when you want the tool to clone a Bitbucket repository into a tem
 Quickest option:
 
 ```bash
-scripts/run-local-batch-review.sh AAAS/sbp
+scripts/run-local-batch-review.sh \
+  https://bitbucket.example.com/projects/AAAS/repos/sbp
 ```
 
 Or run the CLI directly:
 
 ```bash
-export BITBUCKET_BASE_URL="https://bitbucket.example.com"
 export BITBUCKET_TOKEN="<bitbucket token>"
 
-NODE_USE_SYSTEM_CA=1 node dist/cli.js --repo-id AAAS/sbp --dry-run --max-parallel 2
+NODE_USE_SYSTEM_CA=1 node dist/cli.js batch https://bitbucket.example.com/projects/AAAS/repos/sbp --dry-run --max-parallel 2
 ```
 
 Batch mode keeps a shared bare mirror cache under the temp root and creates one disposable workspace per PR from that cache. Use `--temp-root` to choose the parent directory or `--keep-workdirs` to preserve the per-PR clones for debugging.
@@ -229,13 +243,6 @@ Example PR URL:
 https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
-That maps to:
-
-- `BITBUCKET_BASE_URL=https://bitbucket.example.com`
-- `BITBUCKET_PROJECT_KEY=PROJ`
-- `BITBUCKET_REPO_SLUG=my-repo`
-- `BITBUCKET_PR_ID=123`
-
 Recommended local test flow:
 
 1. clone this reviewer repo and run `pnpm install && pnpm typecheck`
@@ -245,11 +252,6 @@ Recommended local test flow:
 
 ```bash
 export REPO_ROOT="/path/to/local/my-repo"
-export BITBUCKET_BASE_URL="https://bitbucket.example.com"
-export BITBUCKET_PROJECT_KEY="PROJ"
-export BITBUCKET_REPO_SLUG="my-repo"
-export BITBUCKET_PR_ID="123"
-
 export BITBUCKET_TOKEN="<bitbucket token>"
 export COPILOT_MODEL="gpt-5.4"
 export COPILOT_REASONING_EFFORT="xhigh"
@@ -258,7 +260,7 @@ export BITBUCKET_CA_CERT_PATH="/path/to/corporate-root-ca.pem"
 export LOG_LEVEL="debug"
 export REPORT_TITLE="Copilot PR Review (local dry run)"
 
-pnpm review:dry-run
+pnpm review:dry-run -- https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
 Copilot reasoning is always written through the logger to `stderr`, while the final review payload is always printed as JSON on `stdout`.
@@ -268,17 +270,17 @@ If you want to include local CI context in the review:
 ```bash
 printf 'Unit tests passed\nLint passed\n' > /tmp/ci-summary.txt
 export CI_SUMMARY_PATH="/tmp/ci-summary.txt"
-pnpm review:dry-run
+pnpm review:dry-run -- https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
-If you want the local run to publish to the Bitbucket PR page, remove `--dry-run` and use a unique report key so you do not overwrite the Jenkins report. Bitbucket Data Center limits report keys to 50 characters, and the reviewer still sanitizes and shortens overrides when needed:
+If you want the local run to publish to the Bitbucket PR page, drop the trailing `--dry-run` and use a unique report key so you do not overwrite the Jenkins report. Bitbucket Data Center limits report keys to 50 characters, and the reviewer still sanitizes and shortens overrides when needed:
 
 ```bash
 export REPORT_KEY="copilot-local-$USER"
 export REPORT_TITLE="Copilot PR Review (local)"
 export REPORTER_NAME="GitHub Copilot Local Test"
 
-pnpm review
+pnpm review -- https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
 What to expect:
@@ -289,7 +291,7 @@ What to expect:
 
 Common local test issues:
 
-- the repo in `REPO_ROOT` is not the same repo as `BITBUCKET_PROJECT_KEY` and `BITBUCKET_REPO_SLUG`
+- the repo in `REPO_ROOT` is not the same repo referenced by the PR URL
 - the local checkout cannot fetch the source or target commit referenced by the PR
 - the bundled `@github/copilot` runtime is missing or the Copilot SDK cannot resolve auth from your existing login or token setup
 - Node.js does not trust the Bitbucket TLS certificate chain; use `BITBUCKET_CA_CERT_PATH`, or keep the default `BITBUCKET_INSECURE_TLS=1` until trust is configured
@@ -307,7 +309,7 @@ Suggested pipeline flow:
 
 1. run your normal checkout, lint, test, and build stages first
 2. write a compact CI summary to `CI_SUMMARY_PATH`
-3. invoke `node dist/cli.js` in the PR workspace, or `pnpm review`
+3. invoke `node dist/cli.js review <pull-request-url>` in the PR workspace, or `pnpm review -- <pull-request-url>`
 
 Important Jenkins assumptions:
 

@@ -95,3 +95,14 @@ export interface ReviewerConfig {
 }
 
 export type { Confidence, LogLevel };
+
+export interface BitbucketRepositoryIdentity {
+	baseUrl: string;
+	projectKey: string;
+	repoSlug: string;
+}
+
+export interface BitbucketPullRequestIdentity
+	extends BitbucketRepositoryIdentity {
+	prId: number;
+}

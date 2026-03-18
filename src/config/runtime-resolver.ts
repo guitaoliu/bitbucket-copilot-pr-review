@@ -1,7 +1,7 @@
 import { accessSync, constants as fsConstants } from "node:fs";
 import path from "node:path";
 
-import type { CliOptions } from "./args.ts";
+import type { ReviewCliOptions } from "./args.ts";
 import { REVIEWER_CONFIG_DEFAULTS } from "./defaults.ts";
 import type { ParsedEnvironment } from "./env.ts";
 import { normalizeReportKey } from "./env.ts";
@@ -51,7 +51,7 @@ interface RuntimeFieldResolver {
 type RuntimeTopLevelResolvers = {
 	[K in RuntimeTopLevelKey]: (
 		parsedEnv: ParsedEnvironment,
-		cliOptions: CliOptions,
+		cliOptions: ReviewCliOptions,
 	) => ReviewerConfig[K];
 };
 
@@ -208,7 +208,7 @@ function getEnvValue(
 
 function getSourceValue(
 	parsedEnv: ParsedEnvironment,
-	cliOptions: CliOptions,
+	cliOptions: ReviewCliOptions,
 	resolver: RuntimeFieldResolver,
 	source: RuntimeValueSource,
 ): unknown {
@@ -319,7 +319,7 @@ function resolveRepoRoot(
 
 function resolveTopLevelConfig(
 	parsedEnv: ParsedEnvironment,
-	cliOptions: CliOptions,
+	cliOptions: ReviewCliOptions,
 ): Pick<
 	ReviewerConfig,
 	"repoRoot" | "gitRemoteName" | "logLevel" | "ciSummaryPath"
@@ -345,7 +345,7 @@ function resolveTopLevelConfig(
 
 export function resolveRuntimeConfigGroups(
 	parsedEnv: ParsedEnvironment,
-	cliOptions: CliOptions,
+	cliOptions: ReviewCliOptions,
 ): Pick<ReviewerConfig, "bitbucket" | "copilot" | "report" | "review"> &
 	Pick<
 		ReviewerConfig,

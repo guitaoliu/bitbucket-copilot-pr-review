@@ -1,9 +1,15 @@
 import { REVIEWER_CONFIG_DEFAULTS } from "./defaults.ts";
-import type { CliOptionMetadata, ConfigFieldMetadata } from "./metadata.ts";
+import type {
+	CliCommandMetadata,
+	CliOptionMetadata,
+	ConfigFieldMetadata,
+} from "./metadata.ts";
 import {
-	CLI_OPTION_METADATA,
+	BATCH_CLI_OPTION_METADATA,
+	CLI_COMMAND_METADATA,
 	CONFIG_FIELD_METADATA,
 	isEnvConfigField,
+	REVIEW_CLI_OPTION_METADATA,
 } from "./metadata.ts";
 import { getConfigPathValue } from "./path.ts";
 
@@ -61,8 +67,8 @@ function buildEnvRows(): string[] {
 	});
 }
 
-function buildCliRows(): string[] {
-	return Object.values(CLI_OPTION_METADATA).map((option: CliOptionMetadata) => {
+function buildCliRows(options: readonly CliOptionMetadata[]): string[] {
+	return options.map((option: CliOptionMetadata) => {
 		const flags = option.flags
 			.map((flag: string) =>
 				option.valueLabel && flag === option.flags[0]
@@ -74,11 +80,29 @@ function buildCliRows(): string[] {
 	});
 }
 
-function buildAdditionalUsageRows(): string[] {
+function buildCommandSection(options: {
+	heading: string;
+	command: CliCommandMetadata;
+	cliOptions: readonly CliOptionMetadata[];
+}): string[] {
 	return [
-		"### Batch review mode",
+		options.heading,
 		"",
-		"Use `--repo-id <project/repo>` to clone the repository into a temp working area, list open PRs, and fan out one subprocess review per PR.",
+		options.command.description,
+		"",
+		`Usage: \`bitbucket-copilot-pr-review ${options.command.usage}\``,
+		"",
+		"| Option | Description |",
+		"| --- | --- |",
+		...buildCliRows(options.cliOptions),
+		...(options.command.argumentDescription
+			? [
+					"",
+					`Argument: \`${options.command.argumentLabel}\``,
+					"",
+					options.command.argumentDescription,
+				]
+			: []),
 	];
 }
 
@@ -86,11 +110,17 @@ export function buildConfigReferenceMarkdown(): string {
 	return [
 		"## Configuration Reference",
 		"",
-		"### CLI options",
+		...buildCommandSection({
+			heading: "### Review command",
+			command: CLI_COMMAND_METADATA.review,
+			cliOptions: Object.values(REVIEW_CLI_OPTION_METADATA),
+		}),
 		"",
-		"| Option | Description |",
-		"| --- | --- |",
-		...buildCliRows(),
+		...buildCommandSection({
+			heading: "### Batch command",
+			command: CLI_COMMAND_METADATA.batch,
+			cliOptions: Object.values(BATCH_CLI_OPTION_METADATA),
+		}),
 		"",
 		"### Environment variables",
 		"",
@@ -98,6 +128,5 @@ export function buildConfigReferenceMarkdown(): string {
 		"| --- | --- | --- |",
 		...buildEnvRows(),
 		"",
-		...buildAdditionalUsageRows(),
 	].join("\n");
 }

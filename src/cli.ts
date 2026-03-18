@@ -1,7 +1,12 @@
 import process from "node:process";
 
 import { runBatchReview } from "./batch/runner.ts";
-import { getHelpText, parseCliArgs } from "./config/args.ts";
+import {
+	getHelpText,
+	isBatchCliOptions,
+	isReviewCliOptions,
+	parseCliArgs,
+} from "./config/args.ts";
 import { loadBatchConfig, loadConfig } from "./config/load.ts";
 import { runReview } from "./review/runner.ts";
 import { createLogger } from "./shared/logger.ts";
@@ -9,12 +14,12 @@ import { createLogger } from "./shared/logger.ts";
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
 	const cliOptions = parseCliArgs(argv);
-	if (cliOptions.help) {
+	if ("help" in cliOptions && cliOptions.help) {
 		console.log(getHelpText());
 		return;
 	}
 
-	if (cliOptions.repoId) {
+	if (isBatchCliOptions(cliOptions)) {
 		const config = loadBatchConfig(argv, process.env, cliOptions);
 		const logger = createLogger(config.logLevel);
 		const output = await runBatchReview(config, logger);
@@ -23,6 +28,10 @@ async function main(): Promise<void> {
 		}
 		logger.json(`${JSON.stringify(output, null, 2)}\n`);
 		return;
+	}
+
+	if (!isReviewCliOptions(cliOptions)) {
+		throw new Error("Unable to resolve CLI command.");
 	}
 
 	const config = loadConfig(argv, process.env, cliOptions);

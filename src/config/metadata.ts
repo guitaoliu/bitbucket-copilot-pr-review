@@ -35,7 +35,6 @@ export const REPORT_COMMENT_STRATEGY_VALUES = [
 export interface ConfigFieldMetadata {
 	path: string;
 	env?: string;
-	cli?: string;
 	description: string;
 	envParser?: ConfigFieldEnvParser;
 	repoOverride?: true;
@@ -49,7 +48,6 @@ export interface ConfigFieldMetadata {
 export type ConfigFieldEnvParser =
 	| {
 			kind: "string";
-			normalize?: "baseUrl";
 	  }
 	| {
 			kind: "enum";
@@ -102,12 +100,24 @@ export interface CliOptionMetadata {
 	valueLabel?: string;
 }
 
-export interface CliOptionMetadataMap {
+export interface CliCommandMetadata {
+	usage: string;
+	description: string;
+	argumentLabel?: string;
+	argumentDescription?: string;
+}
+
+export interface ReviewCliOptionMetadataMap {
 	dryRun: CliOptionMetadata;
 	forceReview: CliOptionMetadata;
 	confirmRerun: CliOptionMetadata;
 	repoRoot: CliOptionMetadata;
-	repoId: CliOptionMetadata;
+	help: CliOptionMetadata;
+}
+
+export interface BatchCliOptionMetadataMap {
+	dryRun: CliOptionMetadata;
+	forceReview: CliOptionMetadata;
 	tempRoot: CliOptionMetadata;
 	maxParallel: CliOptionMetadata;
 	keepWorkdirs: CliOptionMetadata;
@@ -163,7 +173,6 @@ export const CONFIG_FIELD_METADATA = {
 	repoRoot: {
 		path: "repoRoot",
 		env: "REPO_ROOT",
-		cli: "--repo-root",
 		description: "Path to the repository under review.",
 		...envParser({ kind: "string" }),
 		...envDoc(9, { defaultText: "current working directory" }),
@@ -181,34 +190,6 @@ export const CONFIG_FIELD_METADATA = {
 		description: "Logger verbosity.",
 		...envParser({ kind: "enum", values: LOG_LEVEL_VALUES }),
 		...envDoc(11, { defaultValuePath: ["logLevel"] }),
-	},
-	bitbucketBaseUrl: {
-		path: "bitbucket.baseUrl",
-		env: "BITBUCKET_BASE_URL",
-		description: "Bitbucket Data Center base URL.",
-		...envParser({ kind: "string", normalize: "baseUrl" }),
-		...envDoc(1, { defaultText: "required" }),
-	},
-	bitbucketProjectKey: {
-		path: "bitbucket.projectKey",
-		env: "BITBUCKET_PROJECT_KEY",
-		description: "Bitbucket project key.",
-		...envParser({ kind: "string" }),
-		...envDoc(2, { defaultText: "required" }),
-	},
-	bitbucketRepoSlug: {
-		path: "bitbucket.repoSlug",
-		env: "BITBUCKET_REPO_SLUG",
-		description: "Bitbucket repository slug.",
-		...envParser({ kind: "string" }),
-		...envDoc(3, { defaultText: "required" }),
-	},
-	bitbucketPrId: {
-		path: "bitbucket.prId",
-		env: "BITBUCKET_PR_ID",
-		description: "Pull request ID.",
-		...envParser({ kind: "positiveInteger" }),
-		...envDoc(4, { defaultText: "required" }),
 	},
 	bitbucketAuthType: {
 		path: "bitbucket.auth.type",
@@ -335,20 +316,17 @@ export const CONFIG_FIELD_METADATA = {
 	},
 	reviewDryRun: {
 		path: "review.dryRun",
-		cli: "--dry-run",
 		description: "Run without publishing results to Bitbucket.",
 	},
 	reviewForce: {
 		path: "review.forceReview",
 		env: "REVIEW_FORCE",
-		cli: "--force-review",
 		description: "Force review even when the revision was already published.",
 		...envParser({ kind: "boolean" }),
 		...envDoc(25, { defaultValuePath: ["review", "forceReview"] }),
 	},
 	reviewConfirmRerun: {
 		path: "review.confirmRerun",
-		cli: "--confirm-rerun",
 		description: "Prompt before rerunning unusable cached artifacts.",
 	},
 	reviewMaxFiles: {
@@ -425,47 +403,75 @@ export const CONFIG_FIELD_METADATA = {
 	},
 } as const satisfies Record<string, ConfigFieldMetadata>;
 
-export const CLI_OPTION_METADATA: CliOptionMetadataMap = {
+const HELP_CLI_OPTION_METADATA = {
+	flags: ["-h", "--help"],
+	description: "Show this help text",
+} as const satisfies CliOptionMetadata;
+
+export const CLI_COMMAND_METADATA = {
+	review: {
+		usage: "review <pull-request-url> [options]",
+		description: "Review one pull request from an explicit Bitbucket URL",
+		argumentLabel: "<pull-request-url>",
+		argumentDescription:
+			"Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pull-requests/123.",
+	},
+	batch: {
+		usage: "batch <repository-url> [options]",
+		description:
+			"Review all open pull requests for one Bitbucket repository URL",
+		argumentLabel: "<repository-url>",
+		argumentDescription:
+			"Bitbucket repository URL, for example https://host/projects/AAAS/repos/sbp.",
+	},
+} as const satisfies Record<string, CliCommandMetadata>;
+
+export const REVIEW_CLI_OPTION_METADATA: ReviewCliOptionMetadataMap = {
 	dryRun: {
-		flags: ["--dry-run", "--no-publish"],
-		description: "Run the review but skip Bitbucket publishing",
+		flags: ["--dry-run"],
+		description: "Run without publishing results to Bitbucket",
 	},
 	forceReview: {
 		flags: ["--force-review"],
 		description:
-			"Run even if the current PR revision already has a fully published result",
+			"Re-run even if the current PR revision already has published results",
 	},
 	confirmRerun: {
 		flags: ["--confirm-rerun"],
 		description:
-			"Prompt only when rerunning unusable cached artifacts for the current unchanged PR head and revision",
+			"Ask before rerunning unusable cached artifacts for an unchanged PR revision",
 	},
 	repoRoot: {
 		flags: ["--repo-root"],
-		description: "Path to the repository under review",
+		description: "Use a different local checkout as the repository root",
 		valueLabel: "<path>",
 	},
-	repoId: {
-		flags: ["--repo-id"],
-		description: "Review all open PRs for the given Bitbucket project/repo",
-		valueLabel: "<project/repo>",
+	help: HELP_CLI_OPTION_METADATA,
+};
+
+export const BATCH_CLI_OPTION_METADATA: BatchCliOptionMetadataMap = {
+	dryRun: {
+		flags: ["--dry-run"],
+		description: "Run without publishing results to Bitbucket",
+	},
+	forceReview: {
+		flags: ["--force-review"],
+		description:
+			"Re-run even if the current PR revision already has published results",
 	},
 	tempRoot: {
 		flags: ["--temp-root"],
-		description: "Parent directory for temporary batch review clones",
+		description: "Parent directory for mirror and workspace clones",
 		valueLabel: "<path>",
 	},
 	maxParallel: {
 		flags: ["--max-parallel"],
-		description: "Maximum concurrent PR review subprocesses in batch mode",
+		description: "Maximum concurrent review workers",
 		valueLabel: "<count>",
 	},
 	keepWorkdirs: {
 		flags: ["--keep-workdirs"],
-		description: "Keep temporary batch review clones after the run completes",
+		description: "Keep per-PR workdirs after the run completes",
 	},
-	help: {
-		flags: ["-h", "--help"],
-		description: "Show this help text",
-	},
+	help: HELP_CLI_OPTION_METADATA,
 };
