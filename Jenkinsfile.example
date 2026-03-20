@@ -1,6 +1,14 @@
 pipeline {
   agent { label "DK_UBCOMMON2404" }
 
+  environment {
+    BITBUCKET_BASE_URL = "https://bitbucket.example.com"
+    BITBUCKET_PROJECT_KEY = "PROJ"
+    BITBUCKET_REPO_SLUG = "my-service"
+    REPO_ROOT = "${WORKSPACE}"
+    REPORT_LINK = "${BUILD_URL}"
+  }
+
   options {
     timestamps()
     disableConcurrentBuilds(abortPrevious: true)
@@ -31,14 +39,10 @@ pipeline {
           string(credentialsId: "github-copilot-token", variable: "COPILOT_GITHUB_TOKEN"),
           string(credentialsId: "bitbucket-review-token", variable: "BITBUCKET_TOKEN")
         ]) {
-          withEnv([
-            "BITBUCKET_BASE_URL=https://bitbucket.example.com",
-            "BITBUCKET_PROJECT_KEY=PROJ",
-            "BITBUCKET_REPO_SLUG=my-service",
-            "BITBUCKET_PR_ID=${env.CHANGE_ID}"
-          ]) {
-            sh "pnpm review"
-          }
+          sh '''
+            PR_URL="${BITBUCKET_BASE_URL}/projects/${BITBUCKET_PROJECT_KEY}/repos/${BITBUCKET_REPO_SLUG}/pull-requests/${CHANGE_ID}"
+            pnpm review -- "$PR_URL"
+          '''
         }
       }
     }

@@ -63,6 +63,7 @@ type ReviewProgressState = {
 	reviewedFileCount: number;
 	summaryDrafts: ReviewSummaryDrafts;
 	toolTelemetry?: ReviewToolTelemetry;
+	toolStartedAtMsByName?: Map<string, number[]>;
 };
 
 export interface RunCopilotReviewDependencies {
@@ -452,6 +453,74 @@ function buildProgressFields(
 	];
 }
 
+function estimateSerializedSize(value: unknown): number {
+	if (typeof value === "string") {
+		return value.length;
+	}
+
+	try {
+		const serialized = JSON.stringify(value);
+		return serialized?.length ?? 0;
+	} catch {
+		return 0;
+	}
+}
+
+function getToolResultDurationMs(
+	toolResult: ToolResultObject,
+): number | undefined {
+	const record = getToolResultRecord(toolResult);
+	const telemetry = record.toolTelemetry;
+	if (
+		telemetry &&
+		typeof telemetry === "object" &&
+		!Array.isArray(telemetry) &&
+		typeof (telemetry as { durationMs?: unknown }).durationMs === "number"
+	) {
+		return (telemetry as { durationMs: number }).durationMs;
+	}
+
+	return undefined;
+}
+
+function getFilteredResultCount(toolResult: ToolResultObject): number {
+	const record = getToolResultRecord(toolResult);
+	for (const key of [
+		"filteredMatchCount",
+		"filteredFileCount",
+		"filteredCount",
+	]) {
+		const value = record[key];
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return value;
+		}
+	}
+
+	return 0;
+}
+
+function getTruncatedResult(toolResult: ToolResultObject): boolean {
+	const record = getToolResultRecord(toolResult);
+	return record.truncated === true;
+}
+
+function shiftToolStartTime(
+	progressState: ReviewProgressState,
+	toolName: string,
+): number | undefined {
+	const pendingStarts = progressState.toolStartedAtMsByName?.get(toolName);
+	if (!pendingStarts || pendingStarts.length === 0) {
+		return undefined;
+	}
+
+	const startedAt = pendingStarts.shift();
+	if (pendingStarts.length === 0) {
+		progressState.toolStartedAtMsByName?.delete(toolName);
+	}
+
+	return startedAt;
+}
+
 export { createEmptyReviewToolTelemetry };
 
 function createEmptyToolTelemetryCounter(): ReviewToolTelemetryCounter {
@@ -461,6 +530,12 @@ function createEmptyToolTelemetryCounter(): ReviewToolTelemetryCounter {
 		denied: 0,
 		completed: 0,
 		resultCounts: {},
+		totalDurationMs: 0,
+		maxDurationMs: 0,
+		totalInputChars: 0,
+		totalOutputChars: 0,
+		truncatedResponses: 0,
+		filteredResultCount: 0,
 	};
 }
 
@@ -470,6 +545,10 @@ function createEmptyReviewToolTelemetry(): ReviewToolTelemetry {
 		totalAllowed: 0,
 		totalDenied: 0,
 		totalCompleted: 0,
+		totalDurationMs: 0,
+		sessionDurationMs: 0,
+		errorCount: 0,
+		assistantMessageChars: 0,
 		byTool: {},
 	};
 }
@@ -506,6 +585,9 @@ function buildPostToolLogMessage(
 		"Copilot completed tool",
 		input.toolName,
 		`result=${input.toolResult.resultType}`,
+		formatToolLogValue(getToolResultDurationMs(input.toolResult))
+			? `duration_ms=${formatToolLogValue(getToolResultDurationMs(input.toolResult))}`
+			: undefined,
 		formatToolLogValue(input.toolResult.error)
 			? `error=${formatToolLogValue(input.toolResult.error)}`
 			: undefined,
@@ -525,6 +607,7 @@ export function createReviewSessionHooks(
 		reviewedFileCount: 0,
 		summaryDrafts: { fileSummaries: [] },
 		toolTelemetry: createEmptyReviewToolTelemetry(),
+		toolStartedAtMsByName: new Map(),
 	},
 ) {
 	return {
@@ -552,7 +635,16 @@ export function createReviewSessionHooks(
 			}
 
 			toolTelemetry.totalAllowed += 1;
-			getToolTelemetryCounter(toolTelemetry, input.toolName).allowed += 1;
+			const counter = getToolTelemetryCounter(toolTelemetry, input.toolName);
+			counter.allowed += 1;
+			counter.totalInputChars += estimateSerializedSize(input.toolArgs);
+			const pendingStarts =
+				progressState.toolStartedAtMsByName ?? new Map<string, number[]>();
+			progressState.toolStartedAtMsByName = pendingStarts;
+			pendingStarts.set(input.toolName, [
+				...(pendingStarts.get(input.toolName) ?? []),
+				Date.now(),
+			]);
 
 			return {
 				permissionDecision: "allow" as const,
@@ -569,6 +661,20 @@ export function createReviewSessionHooks(
 			toolTelemetry.totalCompleted += 1;
 			const counter = getToolTelemetryCounter(toolTelemetry, input.toolName);
 			counter.completed += 1;
+			counter.totalOutputChars += estimateSerializedSize(input.toolResult);
+			const durationMs =
+				getToolResultDurationMs(input.toolResult) ??
+				(() => {
+					const startedAt = shiftToolStartTime(progressState, input.toolName);
+					return startedAt !== undefined ? Date.now() - startedAt : 0;
+				})();
+			counter.totalDurationMs += durationMs;
+			counter.maxDurationMs = Math.max(counter.maxDurationMs, durationMs);
+			toolTelemetry.totalDurationMs += durationMs;
+			if (getTruncatedResult(input.toolResult)) {
+				counter.truncatedResponses += 1;
+			}
+			counter.filteredResultCount += getFilteredResultCount(input.toolResult);
 			const resultType = input.toolResult.resultType;
 			counter.resultCounts[resultType] =
 				(counter.resultCounts[resultType] ?? 0) + 1;
@@ -596,6 +702,10 @@ export function createReviewSessionHooks(
 			errorContext: string;
 			error: unknown;
 		}) => {
+			const toolTelemetry =
+				progressState.toolTelemetry ?? createEmptyReviewToolTelemetry();
+			progressState.toolTelemetry = toolTelemetry;
+			toolTelemetry.errorCount += 1;
 			logger.warn(
 				`Copilot session reported an error in ${input.errorContext}`,
 				input.error,
@@ -644,6 +754,7 @@ export async function runCopilotReview(
 	const drafts: FindingDraft[] = [];
 	const summaryDrafts: ReviewSummaryDrafts = { fileSummaries: [] };
 	const toolTelemetry = createEmptyReviewToolTelemetry();
+	const reviewStartedAt = Date.now();
 	const clientOptions = buildCopilotClientOptions(
 		config,
 		dependencies.resolveCliPath,
@@ -694,6 +805,8 @@ export async function runCopilotReview(
 		);
 		const reviewSummary = finalizeReviewSummary(context, summaryDrafts);
 		const assistantMessage = response?.data.content;
+		toolTelemetry.sessionDurationMs = Date.now() - reviewStartedAt;
+		toolTelemetry.assistantMessageChars = assistantMessage?.length ?? 0;
 
 		return omitUndefined({
 			summary: summarizeOutcome(context, assistantMessage, findings.length),
@@ -707,6 +820,7 @@ export async function runCopilotReview(
 	} finally {
 		await session.disconnect();
 		const errors = await client.stop();
+		toolTelemetry.errorCount += errors.length;
 		for (const error of errors) {
 			logger.warn("Copilot client cleanup reported an error", error);
 		}

@@ -317,31 +317,49 @@ describe("createReviewSessionHooks", () => {
 		await hooks.onPostToolUse({
 			toolName: "get_pr_overview",
 			toolArgs: {},
-			toolResult: { textResultForLlm: "ok", resultType: "success" },
+			toolResult: {
+				textResultForLlm: "ok",
+				resultType: "success",
+				toolTelemetry: { durationMs: 12 },
+			},
 			cwd: "/tmp/repo",
 		});
 
-		assert.deepEqual(telemetry, {
-			totalRequested: 2,
-			totalAllowed: 1,
-			totalDenied: 1,
-			totalCompleted: 1,
-			byTool: {
-				get_pr_overview: {
-					requested: 1,
-					allowed: 1,
-					denied: 0,
-					completed: 1,
-					resultCounts: { success: 1 },
-				},
-				bash: {
-					requested: 1,
-					allowed: 0,
-					denied: 1,
-					completed: 0,
-					resultCounts: {},
-				},
-			},
+		assert.equal(telemetry.totalRequested, 2);
+		assert.equal(telemetry.totalAllowed, 1);
+		assert.equal(telemetry.totalDenied, 1);
+		assert.equal(telemetry.totalCompleted, 1);
+		assert.equal(telemetry.totalDurationMs, 12);
+		assert.equal(telemetry.errorCount, 0);
+		assert.equal(telemetry.assistantMessageChars, 0);
+		assert.equal(telemetry.byTool.get_pr_overview?.requested, 1);
+		assert.equal(telemetry.byTool.get_pr_overview?.allowed, 1);
+		assert.equal(telemetry.byTool.get_pr_overview?.denied, 0);
+		assert.equal(telemetry.byTool.get_pr_overview?.completed, 1);
+		assert.deepEqual(telemetry.byTool.get_pr_overview?.resultCounts, {
+			success: 1,
+		});
+		assert.equal(telemetry.byTool.get_pr_overview?.totalDurationMs, 12);
+		assert.equal(telemetry.byTool.get_pr_overview?.maxDurationMs, 12);
+		assert.equal(telemetry.byTool.get_pr_overview?.totalInputChars, 2);
+		assert.equal(
+			(telemetry.byTool.get_pr_overview?.totalOutputChars ?? 0) > 0,
+			true,
+		);
+		assert.equal(telemetry.byTool.get_pr_overview?.truncatedResponses, 0);
+		assert.equal(telemetry.byTool.get_pr_overview?.filteredResultCount, 0);
+		assert.deepEqual(telemetry.byTool.bash, {
+			requested: 1,
+			allowed: 0,
+			denied: 1,
+			completed: 0,
+			resultCounts: {},
+			totalDurationMs: 0,
+			maxDurationMs: 0,
+			totalInputChars: 0,
+			totalOutputChars: 0,
+			truncatedResponses: 0,
+			filteredResultCount: 0,
 		});
 	});
 
@@ -579,7 +597,7 @@ describe("createReviewSessionHooks", () => {
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool get_file_content result=success path=src/file.ts version=head findings=0/3 file_summaries=0/4 pr_summary=recorded",
+					"Copilot completed tool get_file_content result=success duration_ms=25 path=src/file.ts version=head findings=0/3 file_summaries=0/4 pr_summary=recorded",
 				details: [],
 			},
 		]);

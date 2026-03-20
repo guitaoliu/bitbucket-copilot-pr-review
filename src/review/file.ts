@@ -1,11 +1,21 @@
 import type { ChangedFile } from "../git/types.ts";
 import type { FindingDraft } from "./types.ts";
 
+function canUseOldPathForReviewedFileLookup(
+	file: Pick<ChangedFile, "status" | "oldPath">,
+): file is Pick<ChangedFile, "status" | "oldPath"> & { oldPath: string } {
+	return file.status === "renamed" && file.oldPath !== undefined;
+}
+
 export function getReviewedFilePathForVersion(
-	file: Pick<ChangedFile, "path" | "oldPath">,
+	file: Pick<ChangedFile, "path" | "oldPath" | "status">,
 	version: "head" | "base",
 ): string {
-	return version === "head" ? file.path : (file.oldPath ?? file.path);
+	if (version === "head") {
+		return file.path;
+	}
+
+	return canUseOldPathForReviewedFileLookup(file) ? file.oldPath : file.path;
 }
 
 export function createReviewedFileLookup(
@@ -16,7 +26,7 @@ export function createReviewedFileLookup(
 
 	for (const file of reviewedFiles) {
 		lookup.set(file.path, file);
-		if (file.oldPath) {
+		if (canUseOldPathForReviewedFileLookup(file)) {
 			oldPathCounts.set(
 				file.oldPath,
 				(oldPathCounts.get(file.oldPath) ?? 0) + 1,
@@ -25,7 +35,10 @@ export function createReviewedFileLookup(
 	}
 
 	for (const file of reviewedFiles) {
-		if (file.oldPath && oldPathCounts.get(file.oldPath) === 1) {
+		if (
+			canUseOldPathForReviewedFileLookup(file) &&
+			oldPathCounts.get(file.oldPath) === 1
+		) {
 			lookup.set(file.oldPath, file);
 		}
 	}

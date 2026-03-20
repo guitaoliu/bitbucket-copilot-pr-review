@@ -1,6 +1,7 @@
 import { omitUndefined } from "../shared/object.ts";
 import type { ParsedEnvironment } from "./env.ts";
 import { getRequiredEnvValueWithMessage } from "./env.ts";
+import { CliUserError } from "./errors.ts";
 import { CONFIG_FIELD_METADATA } from "./metadata.ts";
 import type { BitbucketAuthConfig, ReviewerConfig } from "./types.ts";
 
@@ -32,7 +33,7 @@ export interface ParsedBitbucketPullRequestLocation
 function getEnvFieldName(fieldKey: BitbucketMetadataKey): string {
 	const field = CONFIG_FIELD_METADATA[fieldKey];
 	if (!("env" in field) || field.env === undefined) {
-		throw new Error(
+		throw new CliUserError(
 			`Metadata field ${String(fieldKey)} does not define an env key.`,
 		);
 	}
@@ -44,7 +45,7 @@ function parseUrlOrThrow(rawUrl: string, label: string): URL {
 	try {
 		return new URL(rawUrl.trim());
 	} catch {
-		throw new Error(`${label} must be a valid absolute http(s) URL.`);
+		throw new CliUserError(`${label} must be a valid absolute http(s) URL.`);
 	}
 }
 
@@ -55,12 +56,12 @@ function normalizePathname(pathname: string): string {
 
 function parsePositiveInteger(rawValue: string, label: string): number {
 	if (!/^\d+$/.test(rawValue)) {
-		throw new Error(`${label} must end with a numeric pull request id.`);
+		throw new CliUserError(`${label} must end with a numeric pull request id.`);
 	}
 
 	const parsed = Number.parseInt(rawValue, 10);
 	if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-		throw new Error(`${label} must end with a numeric pull request id.`);
+		throw new CliUserError(`${label} must end with a numeric pull request id.`);
 	}
 
 	return parsed;
@@ -87,7 +88,7 @@ function parseRepositoryPathSegments(options: {
 		.filter((segment) => segment.length > 0);
 	const projectsIndex = segments.indexOf("projects");
 	if (projectsIndex < 0) {
-		throw new Error(
+		throw new CliUserError(
 			options.requirePullRequestId
 				? `${options.label} must point to a pull request page like https://host/projects/PROJ/repos/repo/pull-requests/123.`
 				: `${options.label} must point to a repository page like https://host/projects/PROJ/repos/repo.`,
@@ -102,7 +103,7 @@ function parseRepositoryPathSegments(options: {
 		reposSegment !== "repos" ||
 		repoSlug === undefined
 	) {
-		throw new Error(
+		throw new CliUserError(
 			options.requirePullRequestId
 				? `${options.label} must point to a pull request page like https://host/projects/PROJ/repos/repo/pull-requests/123.`
 				: `${options.label} must point to a repository page like https://host/projects/PROJ/repos/repo.`,
@@ -112,7 +113,7 @@ function parseRepositoryPathSegments(options: {
 	const prefixSegments = segments.slice(0, projectsIndex);
 	if (!options.requirePullRequestId) {
 		if (segments.length !== projectsIndex + 4) {
-			throw new Error(
+			throw new CliUserError(
 				`${options.label} must point to a repository page like https://host/projects/PROJ/repos/repo.`,
 			);
 		}
@@ -131,7 +132,7 @@ function parseRepositoryPathSegments(options: {
 		prIdSegment === undefined ||
 		segments.length !== projectsIndex + 6
 	) {
-		throw new Error(
+		throw new CliUserError(
 			`${options.label} must point to a pull request page like https://host/projects/PROJ/repos/repo/pull-requests/123.`,
 		);
 	}
@@ -149,7 +150,7 @@ export function parseBitbucketRepositoryUrl(
 ): ParsedBitbucketRepositoryLocation {
 	const url = parseUrlOrThrow(repositoryUrl, "Repository URL");
 	if (url.protocol !== "http:" && url.protocol !== "https:") {
-		throw new Error("Repository URL must use http or https.");
+		throw new CliUserError("Repository URL must use http or https.");
 	}
 
 	const parsedPath = parseRepositoryPathSegments({
@@ -173,7 +174,7 @@ export function parseBitbucketPullRequestUrl(
 ): ParsedBitbucketPullRequestLocation {
 	const url = parseUrlOrThrow(pullRequestUrl, "Pull request URL");
 	if (url.protocol !== "http:" && url.protocol !== "https:") {
-		throw new Error("Pull request URL must use http or https.");
+		throw new CliUserError("Pull request URL must use http or https.");
 	}
 
 	const parsedPath = parseRepositoryPathSegments({
@@ -182,7 +183,9 @@ export function parseBitbucketPullRequestUrl(
 		requirePullRequestId: true,
 	});
 	if (parsedPath.prId === undefined) {
-		throw new Error("Pull request URL must include a numeric pull request id.");
+		throw new CliUserError(
+			"Pull request URL must include a numeric pull request id.",
+		);
 	}
 
 	const baseUrl = normalizeBaseUrl(url, parsedPath.prefixSegments);
@@ -262,7 +265,7 @@ export function resolveBitbucketAuth(
 		};
 	}
 
-	throw new Error(
+	throw new CliUserError(
 		`Provide ${getEnvFieldName("bitbucketToken")} or ${getEnvFieldName("bitbucketUsername")} and ${getEnvFieldName("bitbucketPassword")} for Bitbucket authentication.`,
 	);
 }

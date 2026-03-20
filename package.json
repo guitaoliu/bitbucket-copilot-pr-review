@@ -23,6 +23,8 @@
 		"check": "biome check",
 		"check:fix": "biome check --fix",
 		"generate:config-docs": "node scripts/generate-config-docs.mjs",
+		"release:check": "node scripts/release-check.mjs",
+		"verify": "pnpm release:check",
 		"review": "pnpm build && node dist/cli.js review",
 		"review:dry-run": "pnpm build && node dist/cli.js review --dry-run",
 		"review:src": "node src/cli.ts review",

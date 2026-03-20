@@ -151,11 +151,16 @@ export async function runReview(
 		artifacts,
 		logger,
 	);
+	const reviewWithTelemetry = {
+		...publishResult.review,
+		gitTelemetry: git.getTelemetrySnapshot(),
+	};
 
 	return buildReviewRunOutput(
 		context,
-		publishResult.review,
+		reviewWithTelemetry,
 		artifacts,
 		publishResult.published,
+		publishResult.publication,
 	);
 }

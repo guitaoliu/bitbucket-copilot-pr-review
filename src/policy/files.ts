@@ -13,6 +13,34 @@ function matchesIgnoredPath(
 	);
 }
 
+function getReviewablePathDecision(
+	filePath: string,
+	ignorePaths: string[],
+	label?: string,
+): { include: true } | { include: false; reason: string } {
+	const pathDecision = getRepoFileAccessDecision(filePath);
+	if (!pathDecision.include) {
+		return {
+			include: false,
+			reason: label
+				? `${label} rejected: ${pathDecision.reason}`
+				: pathDecision.reason,
+		};
+	}
+
+	const ignoredPattern = matchesIgnoredPath(filePath, ignorePaths);
+	if (ignoredPattern) {
+		return {
+			include: false,
+			reason: label
+				? `${label} rejected: ignored path pattern (${ignoredPattern})`
+				: `ignored path pattern (${ignoredPattern})`,
+		};
+	}
+
+	return { include: true };
+}
+
 export function shouldReviewFile(
 	file: ChangedFile,
 	ignorePaths: string[] = [],
@@ -25,17 +53,20 @@ export function shouldReviewFile(
 		return { include: false, reason: "binary diff" };
 	}
 
-	const pathDecision = getRepoFileAccessDecision(file.path);
+	const pathDecision = getReviewablePathDecision(file.path, ignorePaths);
 	if (!pathDecision.include) {
 		return { include: false, reason: pathDecision.reason };
 	}
 
-	const ignoredPattern = matchesIgnoredPath(file.path, ignorePaths);
-	if (ignoredPattern) {
-		return {
-			include: false,
-			reason: `ignored path pattern (${ignoredPattern})`,
-		};
+	if (file.oldPath) {
+		const oldPathDecision = getReviewablePathDecision(
+			file.oldPath,
+			ignorePaths,
+			"source path",
+		);
+		if (!oldPathDecision.include) {
+			return { include: false, reason: oldPathDecision.reason };
+		}
 	}
 
 	if (file.patch.trim().length === 0) {

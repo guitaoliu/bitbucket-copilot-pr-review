@@ -22,7 +22,7 @@ const logger: Logger = {
 };
 
 const SUPERSEDED_PULL_REQUEST_COMMENT_TEXT =
-	"_Superseded by a newer automated PR review summary. This thread is preserved because it has replies._";
+	"_Superseded by a newer automated PR review summary. This thread is preserved because Bitbucket will not delete it._";
 
 describe("PullRequestCommentsApi.listPullRequestComments", () => {
 	it("follows pagination and keeps the newest comment version", async () => {
@@ -404,5 +404,116 @@ describe("PullRequestCommentsApi.upsertPullRequestComment", () => {
 			},
 		]);
 		assert.deepEqual(warnMessages, []);
+	});
+
+	it("does not warn when a resolved-thread comment cannot be deleted", async () => {
+		const requestCalls: Array<{
+			pathname: string;
+			method: string | undefined;
+			body: string | undefined;
+		}> = [];
+		const warnMessages: string[] = [];
+		const debugMessages: string[] = [];
+		const commentsApi = new PullRequestCommentsApi(
+			"PROJ",
+			"repo",
+			123,
+			{
+				...logger,
+				warn(message) {
+					warnMessages.push(message);
+				},
+				debug(message) {
+					debugMessages.push(message);
+				},
+			},
+			async (pathname, init) => {
+				requestCalls.push({
+					pathname,
+					method: init?.method,
+					body: typeof init?.body === "string" ? init.body : undefined,
+				});
+
+				if (
+					init?.method === "DELETE" &&
+					pathname.endsWith("/comments/10?version=2")
+				) {
+					throw new BitbucketApiError(
+						400,
+						"Bad Request",
+						"DELETE",
+						"https://bitbucket.example.com/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
+						JSON.stringify({
+							errors: [
+								{
+									message: "Comment cannot be deleted from resolved thread.",
+									exceptionName:
+										"com.atlassian.bitbucket.validation.ArgumentValidationException",
+								},
+							],
+						}),
+					);
+				}
+
+				if (init?.method === "PUT" && pathname.endsWith("/comments/10")) {
+					throw new Error("archive failed");
+				}
+
+				return "";
+			},
+			async () =>
+				({
+					values: [
+						{
+							action: "COMMENTED",
+							createdDate: 100,
+							comment: {
+								id: 10,
+								text: "<!-- copilot-pr-review -->\nold",
+								version: 2,
+								createdDate: 100,
+								updatedDate: 100,
+							},
+						},
+					],
+					isLastPage: true,
+				}) as never,
+		);
+
+		await commentsApi.upsertPullRequestComment(
+			"copilot-pr-review",
+			"<!-- copilot-pr-review -->\nreplacement",
+			{ strategy: "recreate" },
+		);
+
+		assert.deepEqual(requestCalls, [
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments",
+				method: "POST",
+				body: JSON.stringify({
+					text: "<!-- copilot-pr-review -->\nreplacement",
+				}),
+			},
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
+				method: "DELETE",
+				body: undefined,
+			},
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
+				method: "PUT",
+				body: JSON.stringify({
+					version: 2,
+					text: SUPERSEDED_PULL_REQUEST_COMMENT_TEXT,
+				}),
+			},
+		]);
+		assert.deepEqual(warnMessages, []);
+		assert.deepEqual(debugMessages, [
+			"Superseded pull request summary comment 10 tagged copilot-pr-review is in a resolved thread and could not be archived after delete was blocked; leaving it in place: archive failed",
+		]);
 	});
 });

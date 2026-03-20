@@ -1,7 +1,8 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 import type { PullRequestInfo } from "../bitbucket/types.ts";
+import type { ReviewGitTelemetry } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import type { GitTextSearchMatch, GitTextSearchResult } from "./search.ts";
 import { parseGitGrepLine } from "./search.ts";
@@ -35,14 +36,60 @@ export class GitRepository {
 	private readonly repoRoot: string;
 	private readonly logger: Logger;
 	private readonly remoteName: string;
+	private readonly telemetry: ReviewGitTelemetry;
 
 	constructor(repoRoot: string, logger: Logger, remoteName: string) {
 		this.repoRoot = repoRoot;
 		this.logger = logger;
 		this.remoteName = remoteName;
+		this.telemetry = {
+			byOperation: {},
+		};
+	}
+
+	private describeGitOperation(args: string[]): string {
+		if (args[0] === "remote" && args[1] === "get-url") {
+			return "remote.get-url";
+		}
+
+		if (args[0] === "cat-file" && args[1] === "-e") {
+			return "cat-file.exists";
+		}
+
+		if (args[0] === "cat-file" && args[1] === "-t") {
+			return "cat-file.type";
+		}
+
+		return args[0] ?? "unknown";
+	}
+
+	private recordGitOperationDuration(
+		operation: string,
+		durationMs: number,
+	): void {
+		const existing = this.telemetry.byOperation[operation] ?? {
+			count: 0,
+			durationMsTotal: 0,
+		};
+		this.telemetry.byOperation[operation] = {
+			count: existing.count + 1,
+			durationMsTotal: existing.durationMsTotal + durationMs,
+		};
+	}
+
+	getTelemetrySnapshot(): ReviewGitTelemetry {
+		return {
+			byOperation: Object.fromEntries(
+				Object.entries(this.telemetry.byOperation).map(([operation, entry]) => [
+					operation,
+					{ ...entry },
+				]),
+			),
+		};
 	}
 
 	private async runGitDetailed(args: string[]): Promise<GitCommandResult> {
+		const startedAt = Date.now();
 		try {
 			const { stdout, stderr } = await execFileAsync(
 				"git",
@@ -69,7 +116,150 @@ export class GitRepository {
 			}
 
 			throw error;
+		} finally {
+			this.recordGitOperationDuration(
+				this.describeGitOperation(args),
+				Date.now() - startedAt,
+			);
 		}
+	}
+
+	private async runGitTextSearch(
+		args: string[],
+		limit?: number,
+	): Promise<GitTextSearchResult> {
+		const boundedLimit =
+			limit !== undefined && Number.isSafeInteger(limit) && limit > 0
+				? limit
+				: undefined;
+		const stopAfterUniqueMatches =
+			boundedLimit !== undefined ? boundedLimit + 1 : undefined;
+		const startedAt = Date.now();
+
+		return new Promise<GitTextSearchResult>((resolve, reject) => {
+			const child = spawn("git", [...GIT_BASE_ARGS, ...args], {
+				cwd: this.repoRoot,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			const matchesByKey = new Map<string, GitTextSearchMatch>();
+			let stdoutBuffer = "";
+			let stderr = "";
+			let terminatedForLimit = false;
+			let recordedDuration = false;
+			let settled = false;
+
+			const recordDuration = () => {
+				if (recordedDuration) {
+					return;
+				}
+
+				recordedDuration = true;
+				this.recordGitOperationDuration(
+					this.describeGitOperation(args),
+					Date.now() - startedAt,
+				);
+			};
+
+			const finalize = (result: GitTextSearchResult) => {
+				if (settled) {
+					return;
+				}
+
+				settled = true;
+				resolve(result);
+			};
+
+			const fail = (error: Error) => {
+				if (settled) {
+					return;
+				}
+
+				settled = true;
+				reject(error);
+			};
+
+			const noteMatch = (line: string) => {
+				const parsed = parseGitGrepLine(line);
+				if (!parsed) {
+					return;
+				}
+
+				const key = `${parsed.path}:${parsed.line}:${parsed.text}`;
+				if (matchesByKey.has(key)) {
+					return;
+				}
+
+				matchesByKey.set(key, parsed);
+				if (
+					stopAfterUniqueMatches !== undefined &&
+					matchesByKey.size >= stopAfterUniqueMatches &&
+					!terminatedForLimit
+				) {
+					terminatedForLimit = true;
+					child.kill("SIGTERM");
+				}
+			};
+
+			const flushBufferedLines = (flushRemainder: boolean) => {
+				let newlineIndex = stdoutBuffer.indexOf("\n");
+				while (newlineIndex >= 0) {
+					const line = stdoutBuffer.slice(0, newlineIndex).replace(/\r$/, "");
+					stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+					noteMatch(line);
+					newlineIndex = stdoutBuffer.indexOf("\n");
+				}
+
+				if (flushRemainder && stdoutBuffer.trim().length > 0) {
+					noteMatch(stdoutBuffer.replace(/\r$/, ""));
+					stdoutBuffer = "";
+				}
+			};
+
+			child.stdout.setEncoding("utf8");
+			child.stdout.on("data", (chunk: string) => {
+				stdoutBuffer += chunk;
+				flushBufferedLines(false);
+			});
+
+			child.stderr.setEncoding("utf8");
+			child.stderr.on("data", (chunk: string) => {
+				stderr += chunk;
+			});
+
+			child.on("error", (error) => {
+				recordDuration();
+				fail(error instanceof Error ? error : new Error(String(error)));
+			});
+
+			child.on("close", (exitCode) => {
+				recordDuration();
+				flushBufferedLines(true);
+				const matches = [...matchesByKey.values()];
+				if (terminatedForLimit && boundedLimit !== undefined) {
+					finalize({
+						matches: matches.slice(0, boundedLimit),
+						truncated: true,
+						totalMatches: matches.length,
+					});
+					return;
+				}
+
+				if (exitCode !== 0 && exitCode !== 1) {
+					fail(
+						new Error(
+							`Git search failed: git ${args.join(" ")}\n${stderr || `exit code ${exitCode}`}`,
+						),
+					);
+					return;
+				}
+
+				finalize({
+					matches,
+					truncated: false,
+					totalMatches: matches.length,
+				});
+			});
+		});
 	}
 
 	private async runGit(
@@ -279,35 +469,7 @@ export class GitRepository {
 			args.push("--", ...pathspecs);
 		}
 
-		const result = await this.runGitDetailed(args);
-		if (result.exitCode !== 0 && result.exitCode !== 1) {
-			throw new Error(
-				`Git search failed: git ${args.join(" ")}\n${result.stderr || `exit code ${result.exitCode}`}`,
-			);
-		}
-
-		const lines =
-			result.stdout.trim().length > 0
-				? result.stdout.trimEnd().split(/\r?\n/)
-				: [];
-		const matches = lines.flatMap<GitTextSearchMatch>((line) => {
-			const parsed = parseGitGrepLine(line);
-			return parsed ? [parsed] : [];
-		});
-		const uniqueMatches = [
-			...new Map(
-				matches.map((match) => [
-					`${match.path}:${match.line}:${match.text}`,
-					match,
-				]),
-			).values(),
-		];
-
-		return {
-			matches: uniqueMatches,
-			truncated: false,
-			totalMatches: uniqueMatches.length,
-		};
+		return this.runGitTextSearch(args, options?.limit);
 	}
 
 	async readTextFileAtCommit(

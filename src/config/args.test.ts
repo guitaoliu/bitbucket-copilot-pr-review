@@ -67,7 +67,34 @@ describe("parseCliArgs", () => {
 	it("returns help for command help", () => {
 		const parsed = parseCliArgs(["review", "--help"]);
 
-		assert.deepEqual(parsed, { help: true });
+		assert.deepEqual(parsed, { help: true, commandName: "review" });
+	});
+
+	it("rejects option values that are actually another flag", () => {
+		assert.throws(
+			() => parseCliArgs(["review", "--repo-root", "--dry-run"]),
+			/--repo-root requires a value/,
+		);
+	});
+
+	it("rejects unknown commands with an actionable message", () => {
+		assert.throws(
+			() => parseCliArgs(["scan"]),
+			/Unknown command: scan\. Expected 'review' or 'batch'\./,
+		);
+	});
+
+	it("rejects invalid max-parallel values", () => {
+		assert.throws(
+			() =>
+				parseCliArgs([
+					"batch",
+					"https://bitbucket.example.com/projects/AAAS/repos/sbp",
+					"--max-parallel",
+					"zero",
+				]),
+			/--max-parallel must be a positive integer/,
+		);
 	});
 });
 
@@ -94,5 +121,17 @@ describe("getHelpText", () => {
 		assert.match(helpText, /Argument: <repository-url>/);
 		assert.match(helpText, /--repo-root <path>/);
 		assert.match(helpText, /--keep-workdirs/);
+	});
+
+	it("renders command-specific help for the review subcommand", () => {
+		const helpText = getHelpText("review");
+
+		assert.match(
+			helpText,
+			/Usage: bitbucket-copilot-pr-review review <pull-request-url> \[options\]/,
+		);
+		assert.doesNotMatch(helpText, /<repository-url>/);
+		assert.match(helpText, /--repo-root <path>/);
+		assert.match(helpText, /--confirm-rerun/);
 	});
 });

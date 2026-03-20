@@ -8,7 +8,11 @@ import {
 import { omitUndefined } from "../shared/object.ts";
 import type { ReviewRunOutput } from "./output-types.ts";
 import type { ReviewArtifacts } from "./runner-types.ts";
-import type { ReviewContext, ReviewOutcome } from "./types.ts";
+import type {
+	ReviewContext,
+	ReviewOutcome,
+	ReviewPublication,
+} from "./types.ts";
 
 export function buildSkippedReviewOutput(
 	config: ReviewerConfig,
@@ -63,8 +67,12 @@ export function buildReviewRunOutput(
 	review: ReviewOutcome,
 	artifacts: ReviewArtifacts,
 	published: boolean,
+	publication?: ReviewPublication,
 ): ReviewRunOutput {
-	const { toolTelemetry, ...reviewWithoutTelemetry } = review;
+	const { gitTelemetry, toolTelemetry, ...reviewWithoutTelemetry } = review;
+	const hasGitTelemetry =
+		gitTelemetry !== undefined &&
+		Object.keys(gitTelemetry.byOperation).length > 0;
 
 	return {
 		context: {
@@ -81,17 +89,25 @@ export function buildReviewRunOutput(
 			skippedFiles: context.skippedFiles.length,
 		},
 		...omitUndefined({
-			metrics: toolTelemetry
-				? {
-						toolTelemetry,
-					}
-				: undefined,
+			metrics:
+				hasGitTelemetry || toolTelemetry
+					? {
+							...(hasGitTelemetry && gitTelemetry ? { gitTelemetry } : {}),
+							...(toolTelemetry ? { toolTelemetry } : {}),
+						}
+					: undefined,
 		}),
 		review: reviewWithoutTelemetry,
 		report: artifacts.report,
 		annotations: artifacts.annotations,
 		commentBody: artifacts.commentBody,
 		published,
+		...(publication
+			? {
+					publication,
+					publicationStatus: publication.status,
+				}
+			: {}),
 		skipped: false,
 	};
 }

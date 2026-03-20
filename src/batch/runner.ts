@@ -129,6 +129,14 @@ function parseWorkerOutput(stdout: string, prId: number): ReviewRunOutput {
 	}
 }
 
+function isFailedReviewOutput(output: ReviewRunOutput): boolean {
+	return (
+		output.skipped === false &&
+		(output.publicationStatus === "partial" ||
+			output.publicationStatus === "failed")
+	);
+}
+
 function createWorkspaceLifecycleMetrics(
 	tempRoot: string,
 ): BatchWorkspaceLifecycleMetrics {
@@ -219,20 +227,25 @@ async function runWorkerForPullRequest(
 			reject(error);
 		});
 		child.on("close", (code) => {
-			if (code !== 0) {
-				reject(
-					new Error(
-						`Review worker for PR #${options.pr.id} exited with code ${code}. ${truncateText(stderr || stdout, 4000)}`,
-					),
-				);
-				return;
-			}
-
 			try {
 				const parsedOutput = parseWorkerOutput(stdout, options.pr.id);
+				if (code !== 0) {
+					workerLogger.warn(
+						`Review worker exited with code ${code} but returned structured JSON output.`,
+					);
+				}
 				workerLogger.info("Review worker completed successfully");
 				resolve(parsedOutput);
 			} catch (error) {
+				if (code !== 0) {
+					reject(
+						new Error(
+							`Review worker for PR #${options.pr.id} exited with code ${code}. ${truncateText(stderr || stdout, 4000)}`,
+						),
+					);
+					return;
+				}
+
 				reject(error);
 			}
 		});
@@ -333,13 +346,24 @@ async function executePullRequestReview(options: {
 		return {
 			prId: options.pr.id,
 			title: options.pr.title,
-			status: output.skipped ? "skipped" : "reviewed",
+			status: output.skipped
+				? "skipped"
+				: isFailedReviewOutput(output)
+					? "failed"
+					: "reviewed",
 			durationMs: Date.now() - startedAt,
 			workdir: effectiveConfig.keepWorkdirs
 				? provisioned.workspaceRoot
 				: undefined,
 			workspace: provisioned.metrics,
 			output,
+			...(isFailedReviewOutput(output)
+				? {
+						error:
+							output.publication?.error?.message ??
+							`Review returned publication status ${output.publicationStatus}`,
+					}
+				: {}),
 		};
 	} catch (error) {
 		prLogger.error(

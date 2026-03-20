@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 import type { ChangedFile } from "../git/types.ts";
-import { getReviewedFilePathForVersion } from "../review/file.ts";
+import {
+	createReviewedFileLookup,
+	getReviewedFilePathForVersion,
+} from "../review/file.ts";
 import type {
 	Confidence,
 	FindingDraft,
@@ -82,14 +85,7 @@ export function finalizeFindings(
 	maxFindings: number,
 	minConfidence: Confidence,
 ): ReviewFinding[] {
-	const fileMap = new Map<string, ChangedFile>(
-		reviewedFiles.map((file) => [file.path, file]),
-	);
-	for (const file of reviewedFiles) {
-		if (file.oldPath) {
-			fileMap.set(file.oldPath, file);
-		}
-	}
+	const fileMap = createReviewedFileLookup(reviewedFiles);
 	const seen = new Set<string>();
 	const accepted: ReviewFinding[] = [];
 

@@ -19,6 +19,12 @@ export interface ReviewToolTelemetryCounter {
 	denied: number;
 	completed: number;
 	resultCounts: Record<string, number>;
+	totalDurationMs: number;
+	maxDurationMs: number;
+	totalInputChars: number;
+	totalOutputChars: number;
+	truncatedResponses: number;
+	filteredResultCount: number;
 }
 
 export interface ReviewToolTelemetry {
@@ -26,7 +32,44 @@ export interface ReviewToolTelemetry {
 	totalAllowed: number;
 	totalDenied: number;
 	totalCompleted: number;
+	totalDurationMs: number;
+	sessionDurationMs: number;
+	errorCount: number;
+	assistantMessageChars: number;
 	byTool: Record<string, ReviewToolTelemetryCounter>;
+}
+
+export interface ReviewGitOperationTelemetry {
+	count: number;
+	durationMsTotal: number;
+}
+
+export interface ReviewGitTelemetry {
+	byOperation: Record<string, ReviewGitOperationTelemetry>;
+}
+
+export type ReviewPublicationStatus =
+	| "dry_run"
+	| "stale"
+	| "published"
+	| "partial"
+	| "failed";
+
+export type ReviewPublicationFailureStage =
+	| "code_insights"
+	| "pull_request_comment";
+
+export interface ReviewPublicationError {
+	stage: ReviewPublicationFailureStage;
+	message: string;
+}
+
+export interface ReviewPublication {
+	status: ReviewPublicationStatus;
+	attempted: boolean;
+	codeInsightsPublished: boolean;
+	pullRequestCommentUpdated: boolean;
+	error?: ReviewPublicationError;
 }
 
 export interface ReviewContext {
@@ -87,6 +130,7 @@ export interface ReviewOutcome {
 	assistantMessage?: string;
 	prSummary?: string;
 	fileSummaries?: FileChangeSummary[];
+	gitTelemetry?: ReviewGitTelemetry;
 	toolTelemetry?: ReviewToolTelemetry;
 	stale: boolean;
 }

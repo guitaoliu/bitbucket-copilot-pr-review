@@ -1,3 +1,4 @@
+import { CliUserError } from "./errors.ts";
 import {
 	BATCH_CLI_OPTION_METADATA,
 	CLI_COMMAND_METADATA,
@@ -31,18 +32,19 @@ export type CliOptions = ReviewCliOptions | BatchCliOptions;
 
 export interface HelpCliResult {
 	help: true;
+	commandName?: keyof typeof CLI_COMMAND_METADATA;
 }
 
 export type ParsedCliArgs = CliOptions | HelpCliResult;
 
 function parsePositiveIntegerOption(flag: string, value: string): number {
 	if (!/^\d+$/.test(value)) {
-		throw new Error(`${flag} must be a positive integer.`);
+		throw new CliUserError(`${flag} must be a positive integer.`);
 	}
 
 	const parsed = Number.parseInt(value, 10);
 	if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-		throw new Error(`${flag} must be a positive integer.`);
+		throw new CliUserError(`${flag} must be a positive integer.`);
 	}
 
 	return parsed;
@@ -58,8 +60,8 @@ function parseValueOption(options: {
 	flag: string;
 }): { value: string; nextIndex: number } {
 	const next = options.argv[options.index + 1];
-	if (!next) {
-		throw new Error(`${options.flag} requires a value.`);
+	if (!next || next.startsWith("-")) {
+		throw new CliUserError(`${options.flag} requires a value.`);
 	}
 
 	return {
@@ -115,11 +117,11 @@ function parseReviewCommandArgs(argv: string[]): ReviewCliOptions {
 			continue;
 		}
 
-		throw new Error(`Unknown argument for review: ${arg}`);
+		throw new CliUserError(`Unknown argument for review: ${arg}`);
 	}
 
 	if (options.pullRequestUrl.length === 0) {
-		throw new Error("review requires <pull-request-url>.");
+		throw new CliUserError("review requires <pull-request-url>.");
 	}
 
 	return options;
@@ -183,11 +185,11 @@ function parseBatchCommandArgs(argv: string[]): BatchCliOptions {
 			continue;
 		}
 
-		throw new Error(`Unknown argument for batch: ${arg}`);
+		throw new CliUserError(`Unknown argument for batch: ${arg}`);
 	}
 
 	if (options.repositoryUrl.length === 0) {
-		throw new Error("batch requires <repository-url>.");
+		throw new CliUserError("batch requires <repository-url>.");
 	}
 
 	return options;
@@ -247,8 +249,12 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
 	}
 
 	const [command, ...rest] = argv;
-	if (isCommandHelp(rest)) {
-		return { help: true };
+	if (command === "review" && isCommandHelp(rest)) {
+		return { help: true, commandName: "review" };
+	}
+
+	if (command === "batch" && isCommandHelp(rest)) {
+		return { help: true, commandName: "batch" };
 	}
 
 	if (command === "review") {
@@ -259,7 +265,9 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
 		return parseBatchCommandArgs(rest);
 	}
 
-	throw new Error(`Unknown command: ${command}. Expected 'review' or 'batch'.`);
+	throw new CliUserError(
+		`Unknown command: ${command}. Expected 'review' or 'batch'.`,
+	);
 }
 
 export function isReviewCliOptions(
@@ -274,7 +282,20 @@ export function isBatchCliOptions(
 	return "command" in options && options.command === "batch";
 }
 
-export function getHelpText(): string {
+export function getHelpText(
+	commandName?: keyof typeof CLI_COMMAND_METADATA,
+): string {
+	if (commandName) {
+		return buildCommandHelp({
+			commandName,
+			optionMetadata: Object.values(
+				commandName === "review"
+					? REVIEW_CLI_OPTION_METADATA
+					: BATCH_CLI_OPTION_METADATA,
+			),
+		}).join("\n");
+	}
+
 	return [
 		"Usage: bitbucket-copilot-pr-review <command> [options]",
 		"",

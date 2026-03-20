@@ -1,5 +1,5 @@
 import { z } from "zod";
-
+import { CliUserError } from "./errors.ts";
 import {
 	CONFIDENCE_VALUES,
 	REASONING_EFFORT_VALUES,
@@ -205,7 +205,7 @@ export function parseRepoReviewConfig(
 	try {
 		parsed = JSON.parse(configText);
 	} catch (error) {
-		throw new Error(
+		throw new CliUserError(
 			`Invalid JSON in ${pathLabel}: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
@@ -215,7 +215,7 @@ export function parseRepoReviewConfig(
 		return result.data;
 	}
 
-	throw new Error(
+	throw new CliUserError(
 		`Invalid ${pathLabel}:\n${formatRepoConfigError(result.error)}`,
 	);
 }

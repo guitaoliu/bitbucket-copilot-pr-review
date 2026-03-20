@@ -5,6 +5,7 @@ import type { ReviewCliOptions } from "./args.ts";
 import { REVIEWER_CONFIG_DEFAULTS } from "./defaults.ts";
 import type { ParsedEnvironment } from "./env.ts";
 import { normalizeReportKey } from "./env.ts";
+import { CliUserError } from "./errors.ts";
 import { CONFIG_FIELD_METADATA } from "./metadata.ts";
 import {
 	getConfigPathValue,
@@ -311,7 +312,7 @@ function resolveRepoRoot(
 	try {
 		accessSync(repoRoot, fsConstants.R_OK);
 	} catch {
-		throw new Error(`Repository root is not readable: ${repoRoot}`);
+		throw new CliUserError(`Repository root is not readable: ${repoRoot}`);
 	}
 
 	return repoRoot;

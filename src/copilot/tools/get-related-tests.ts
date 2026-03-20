@@ -2,6 +2,7 @@ import { defineTool } from "@github/copilot-sdk";
 import { z } from "zod";
 
 import type { ChangedFile } from "../../git/types.ts";
+import { getReviewedFilePathForVersion } from "../../review/file.ts";
 import { omitUndefined } from "../../shared/object.ts";
 import { truncateText } from "../../shared/text.ts";
 import { toRejectedResult } from "./common.ts";
@@ -111,8 +112,7 @@ function buildCandidateDirectories(
 	file: ChangedFile,
 	version: "head" | "base",
 ): string[] {
-	const activePath =
-		version === "base" ? (file.oldPath ?? file.path) : file.path;
+	const activePath = getReviewedFilePathForVersion(file, version);
 	const segments = activePath.split("/");
 	const directories: string[] = [];
 
@@ -199,9 +199,7 @@ export function createGetRelatedTestsTool(toolContext: ReviewToolContext) {
 				}
 			}
 
-			const tokens = tokenizePath(
-				version === "base" ? (file.oldPath ?? file.path) : file.path,
-			);
+			const tokens = tokenizePath(getReviewedFilePathForVersion(file, version));
 			const limit = parsedArgs.data.limit ?? 20;
 			const rankedCandidates = uniquePaths(collected)
 				.map((candidatePath) => ({

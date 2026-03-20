@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { omitUndefined } from "../shared/object.ts";
+import { CliUserError } from "./errors.ts";
 import type {
 	ConfigFieldEnvParser,
 	ConfigFieldEnvValue,
@@ -208,7 +209,7 @@ function getEnvRepoOverridePaths(): Record<string, readonly string[]> {
 
 function requireEnvValue<T>(value: T | undefined, message: string): T {
 	if (value === undefined) {
-		throw new Error(message);
+		throw new CliUserError(message);
 	}
 
 	return value;
@@ -336,7 +337,7 @@ export function getRequiredEnvValue<TKey extends keyof ParsedEnvironment>(
 ): Exclude<ParsedEnvironment[TKey], undefined> {
 	const field = CONFIG_FIELD_METADATA[keyToMetadataKey(key)];
 	if (!isEnvConfigField(field)) {
-		throw new Error(
+		throw new CliUserError(
 			`Metadata registered for environment key ${String(key)} is incomplete.`,
 		);
 	}
@@ -361,7 +362,7 @@ function keyToMetadataKey(
 		([, field]) => "env" in field && field.env === key,
 	);
 	if (!entry) {
-		throw new Error(
+		throw new CliUserError(
 			`No metadata registered for environment key ${String(key)}.`,
 		);
 	}
@@ -375,5 +376,5 @@ export function parseEnvironment(env: NodeJS.ProcessEnv): ParsedEnvironment {
 		return result.data;
 	}
 
-	throw new Error(formatEnvironmentError(result.error));
+	throw new CliUserError(formatEnvironmentError(result.error));
 }

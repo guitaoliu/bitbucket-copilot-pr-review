@@ -243,6 +243,81 @@ describe("Copilot tools", () => {
 		});
 	});
 
+	it("reads base content from the current path for copied files", async () => {
+		const copiedReviewContext: ReviewContext = {
+			...reviewContext,
+			reviewedFiles: [
+				{
+					path: "src/copied.ts",
+					oldPath: "src/original.ts",
+					status: "copied",
+					patch: "diff --git a/src/original.ts b/src/copied.ts",
+					changedLines: [10],
+					hunks: [
+						{
+							oldStart: 10,
+							oldLines: 0,
+							newStart: 10,
+							newLines: 1,
+							header: "",
+							changedLines: [10],
+						},
+					],
+					additions: 1,
+					deletions: 0,
+					isBinary: false,
+				},
+			],
+		};
+		const git = createGitStub({
+			readTextFileAtCommit: async (commit, filePath) => {
+				assert.equal(commit, "base-123");
+				assert.equal(filePath, "src/copied.ts");
+				return {
+					status: "ok" as const,
+					content: ["one", "two"].join("\n"),
+				};
+			},
+		});
+		const tool = createGetFileContentTool(
+			createReviewToolContext(
+				config,
+				copiedReviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{
+				path: string;
+				version: "head" | "base";
+				startLine?: number;
+				endLine?: number;
+			},
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{ path: "src/copied.ts", version: "base" },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_file_content",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			path: "src/copied.ts",
+			version: "base",
+			totalLines: 2,
+			returnedStartLine: 1,
+			returnedEndLine: 2,
+			content: "1: one\n2: two",
+		});
+	});
+
 	it("rejects emit_finding when the line is not changed", async () => {
 		const drafts: FindingDraft[] = [];
 		const tool = createEmitFindingTool(
@@ -254,7 +329,10 @@ describe("Copilot tools", () => {
 				createSummaryDrafts(),
 			),
 		);
-		const handler = getHandler<FindingDraft, string>(tool);
+		const handler = getHandler<
+			FindingDraft,
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
 
 		const result = await handler(
 			{
@@ -302,7 +380,10 @@ describe("Copilot tools", () => {
 				createSummaryDrafts(),
 			),
 		);
-		const handler = getHandler<FindingDraft, string>(tool);
+		const handler = getHandler<
+			FindingDraft,
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
 
 		const result = await handler(
 			{
@@ -337,6 +418,73 @@ describe("Copilot tools", () => {
 				details: "The finding started from the base path.",
 			},
 		]);
+	});
+
+	it("rejects copied-file findings addressed by the source path", async () => {
+		const drafts: FindingDraft[] = [];
+		const copiedReviewContext: ReviewContext = {
+			...reviewContext,
+			reviewedFiles: [
+				{
+					path: "src/copied.ts",
+					oldPath: "src/original.ts",
+					status: "copied",
+					patch: "diff --git a/src/original.ts b/src/copied.ts",
+					changedLines: [10],
+					hunks: [
+						{
+							oldStart: 10,
+							oldLines: 0,
+							newStart: 10,
+							newLines: 1,
+							header: "",
+							changedLines: [10],
+						},
+					],
+					additions: 1,
+					deletions: 0,
+					isBinary: false,
+				},
+			],
+		};
+		const tool = createEmitFindingTool(
+			createReviewToolContext(
+				config,
+				copiedReviewContext,
+				createGitStub(),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			FindingDraft,
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
+
+		const result = await handler(
+			{
+				path: "src/original.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Copied path issue",
+				details: "Should not resolve through oldPath for copied files.",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "emit_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.equal(
+			result.textResultForLlm,
+			"The file src/original.ts is not one of the reviewed files.",
+		);
+		assert.deepEqual(drafts, []);
 	});
 
 	it("normalizes search options and directory restriction", async () => {
@@ -410,6 +558,7 @@ describe("Copilot tools", () => {
 			totalMatches: 1,
 			unfilteredMatchCount: 1,
 			filteredMatchCount: 0,
+			safeTotalMatches: 1,
 		});
 	});
 
@@ -544,6 +693,60 @@ describe("Copilot tools", () => {
 			totalMatches: 1,
 			unfilteredMatchCount: 2,
 			filteredMatchCount: 1,
+			safeTotalMatches: 1,
+		});
+	});
+
+	it("preserves git-layer truncation metadata for text search", async () => {
+		const git = createGitStub({
+			getPathTypeAtCommit: async () => "directory",
+			searchTextAtCommit: async () => ({
+				matches: [{ path: "src/new-name.ts", line: 10, text: "needle" }],
+				truncated: true,
+				totalMatches: 2,
+			}),
+		});
+		const tool = createSearchTextInRepoTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{
+				query: string;
+				version: "head" | "base";
+				limit?: number;
+				directories?: string[];
+			},
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{ query: "needle", version: "head", directories: ["src"], limit: 1 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "search_text_in_repo",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			query: "needle",
+			version: "head",
+			mode: "literal",
+			wholeWord: false,
+			directories: ["src"],
+			matches: [{ path: "src/new-name.ts", line: 10, text: "needle" }],
+			truncated: true,
+			totalMatches: 1,
+			unfilteredMatchCount: 2,
+			filteredMatchCount: 0,
+			safeTotalMatches: 2,
 		});
 	});
 

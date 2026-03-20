@@ -46,7 +46,7 @@ function comparePullRequestComments(
 }
 
 const SUPERSEDED_PULL_REQUEST_COMMENT_TEXT =
-	"_Superseded by a newer automated PR review summary. This thread is preserved because it has replies._";
+	"_Superseded by a newer automated PR review summary. This thread is preserved because Bitbucket will not delete it._";
 
 function getErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -64,6 +64,17 @@ function isCommentDeletionBlockedByReplies(
 		detail.includes("CommentDeletionException") ||
 		/replies which must be deleted first/i.test(detail)
 	);
+}
+
+function isCommentDeletionBlockedByResolvedThread(
+	error: unknown,
+): error is BitbucketApiError {
+	if (!(error instanceof BitbucketApiError) || error.statusCode !== 400) {
+		return false;
+	}
+
+	const detail = `${error.responseBody}\n${error.message}`;
+	return /cannot be deleted from resolved thread/i.test(detail);
 }
 
 export class PullRequestCommentsApi {
@@ -222,10 +233,17 @@ export class PullRequestCommentsApi {
 					);
 					await this.deletePullRequestComment(comment.id, comment.version);
 				} catch (error) {
-					if (isCommentDeletionBlockedByReplies(error)) {
+					const deleteBlockedByReplies =
+						isCommentDeletionBlockedByReplies(error);
+					const deleteBlockedByResolvedThread =
+						isCommentDeletionBlockedByResolvedThread(error);
+
+					if (deleteBlockedByReplies || deleteBlockedByResolvedThread) {
 						try {
 							this.logger.info(
-								`Superseded pull request summary comment ${comment.id} tagged ${tag} has replies; archiving it instead of deleting`,
+								deleteBlockedByReplies
+									? `Superseded pull request summary comment ${comment.id} tagged ${tag} has replies; archiving it instead of deleting`
+									: `Superseded pull request summary comment ${comment.id} tagged ${tag} is in a resolved thread; archiving it instead of deleting`,
 							);
 							await this.updatePullRequestComment(
 								comment.id,
@@ -234,9 +252,15 @@ export class PullRequestCommentsApi {
 							);
 							continue;
 						} catch (archiveError) {
-							this.logger.warn(
-								`Failed to archive superseded pull request summary comment ${comment.id} tagged ${tag} after delete was blocked by replies: ${getErrorMessage(archiveError)}`,
-							);
+							if (deleteBlockedByReplies) {
+								this.logger.warn(
+									`Failed to archive superseded pull request summary comment ${comment.id} tagged ${tag} after delete was blocked by replies: ${getErrorMessage(archiveError)}`,
+								);
+							} else {
+								this.logger.debug(
+									`Superseded pull request summary comment ${comment.id} tagged ${tag} is in a resolved thread and could not be archived after delete was blocked; leaving it in place: ${getErrorMessage(archiveError)}`,
+								);
+							}
 							continue;
 						}
 					}

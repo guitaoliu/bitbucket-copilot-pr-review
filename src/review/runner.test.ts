@@ -7,9 +7,15 @@ import type {
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import type { Logger } from "../shared/logger.ts";
+import {
+	baseReviewerConfig as baseConfig,
+	createPullRequest,
+	createReviewContext,
+	createReviewOutcome,
+} from "../test-support/review-fixtures.ts";
 import { buildReviewMetadataFields } from "./publication-state.ts";
 import { runReview } from "./runner.ts";
-import type { ReviewContext, ReviewOutcome } from "./types.ts";
+import type { ReviewContext } from "./types.ts";
 
 const logger: Logger = {
 	debug() {},
@@ -20,119 +26,12 @@ const logger: Logger = {
 	json() {},
 };
 
-const baseConfig: ReviewerConfig = {
-	repoRoot: "/tmp/repo",
-	gitRemoteName: "origin",
-	logLevel: "info",
-	bitbucket: {
-		baseUrl: "https://bitbucket.example.com",
-		projectKey: "PROJ",
-		repoSlug: "repo",
-		prId: 123,
-		auth: {
-			type: "bearer",
-			token: "token",
-		},
-		tls: {
-			insecureSkipVerify: false,
-		},
-	},
-	copilot: {
-		model: "gpt-5.4",
-		reasoningEffort: "xhigh",
-		timeoutMs: 1800000,
-	},
-	report: {
-		key: "copilot-review",
-		title: "Copilot PR Review",
-		reporter: "GitHub Copilot via Jenkins",
-		commentTag: "copilot-pr-review",
-		commentStrategy: "recreate",
-	},
-	review: {
-		dryRun: false,
-		forceReview: false,
-		confirmRerun: false,
-		maxFiles: 100,
-		maxFindings: 10,
-		minConfidence: "high",
-		maxPatchChars: 12000,
-		defaultFileSliceLines: 250,
-		maxFileSliceLines: 400,
-		ignorePaths: [],
-		skipBranchPrefixes: ["renovate/"],
-	},
-};
-
-function createPullRequest(commit = "head-123"): PullRequestInfo {
+function createGitStub(): GitRepository {
 	return {
-		id: 123,
-		version: 1,
-		state: "OPEN",
-		title: "Test PR",
-		description: "",
-		source: {
-			repositoryId: 1,
-			projectKey: "PROJ",
-			repoSlug: "repo",
-			refId: "refs/heads/feature",
-			displayId: "feature",
-			latestCommit: commit,
+		getTelemetrySnapshot() {
+			return { byOperation: {} };
 		},
-		target: {
-			repositoryId: 1,
-			projectKey: "PROJ",
-			repoSlug: "repo",
-			refId: "refs/heads/main",
-			displayId: "main",
-			latestCommit: "base-123",
-		},
-	};
-}
-
-function createReviewContext(pr: PullRequestInfo): ReviewContext {
-	return {
-		repoRoot: "/tmp/repo",
-		pr,
-		headCommit: pr.source.latestCommit,
-		baseCommit: pr.target.latestCommit,
-		mergeBaseCommit: pr.target.latestCommit,
-		reviewRevision: "review-rev-123",
-		rawDiff: "",
-		diffStats: { fileCount: 1, additions: 1, deletions: 0 },
-		reviewedFiles: [
-			{
-				path: "src/example.ts",
-				status: "modified",
-				patch: "diff --git a/src/example.ts b/src/example.ts",
-				changedLines: [10],
-				hunks: [
-					{
-						oldStart: 10,
-						oldLines: 1,
-						newStart: 10,
-						newLines: 1,
-						header: "",
-						changedLines: [10],
-					},
-				],
-				additions: 1,
-				deletions: 0,
-				isBinary: false,
-			},
-		],
-		skippedFiles: [],
-	};
-}
-
-function createReviewOutcome(): ReviewOutcome {
-	return {
-		summary: "No reportable issues found.",
-		prSummary: "Confirms the reviewed change is safe to merge.",
-		fileSummaries: [],
-		findings: [],
-		stale: false,
-	};
+	} as GitRepository;
 }
 
 type FakeBitbucketClient = {
@@ -256,7 +155,7 @@ describe("runReview", () => {
 			buildReviewContext: async () => ({
 				config: baseConfig,
 				context,
-				git: {} as GitRepository,
+				git: createGitStub(),
 			}),
 			runCopilotReview: async () => createReviewOutcome(),
 		});
@@ -314,7 +213,7 @@ describe("runReview", () => {
 			buildReviewContext: async () => ({
 				config: baseConfig,
 				context,
-				git: {} as GitRepository,
+				git: createGitStub(),
 			}),
 		});
 
@@ -359,16 +258,69 @@ describe("runReview", () => {
 			buildReviewContext: async () => ({
 				config: baseConfig,
 				context: createReviewContext(firstPr),
-				git: {} as GitRepository,
+				git: createGitStub(),
 			}),
 			runCopilotReview: async () => createReviewOutcome(),
 		});
 
 		assert.equal(result.skipped, false);
 		assert.equal(result.published, false);
+		assert.equal(result.publicationStatus, "stale");
 		assert.equal(result.review.stale, true);
 		assert.equal(publishCalled, false);
 		assert.equal(commentCalled, false);
+	});
+
+	it("returns partial publication metadata when the PR comment update fails", async () => {
+		let commentAttempts = 0;
+		const pr = createPullRequest();
+		const client: FakeBitbucketClient = {
+			async getPullRequest() {
+				return pr;
+			},
+			async getCodeInsightsReport() {
+				return undefined;
+			},
+			async listCodeInsightsAnnotations() {
+				return [];
+			},
+			async getCodeInsightsAnnotationCount() {
+				return 0;
+			},
+			async findPullRequestCommentByTag() {
+				return undefined;
+			},
+			async publishCodeInsights() {},
+			async upsertPullRequestComment() {
+				commentAttempts += 1;
+				throw new Error(`comment failure ${commentAttempts}`);
+			},
+		};
+
+		const result = await runReview(baseConfig, logger, {
+			createBitbucketClient: () => client as never,
+			buildReviewContext: async () => ({
+				config: baseConfig,
+				context: createReviewContext(pr),
+				git: createGitStub(),
+			}),
+			runCopilotReview: async () => createReviewOutcome(),
+		});
+
+		assert.equal(commentAttempts, 2);
+		assert.equal(result.skipped, false);
+		assert.equal(result.published, false);
+		assert.equal(result.publicationStatus, "partial");
+		assert.deepEqual(result.publication, {
+			status: "partial",
+			attempted: true,
+			codeInsightsPublished: true,
+			pullRequestCommentUpdated: false,
+			error: {
+				stage: "pull_request_comment",
+				message: "comment failure 2",
+			},
+		});
 	});
 
 	it("skips closed pull requests before building review context", async () => {
@@ -409,7 +361,7 @@ describe("runReview", () => {
 				return {
 					config: baseConfig,
 					context: createReviewContext(pr),
-					git: {} as GitRepository,
+					git: createGitStub(),
 				};
 			},
 		});
@@ -461,7 +413,7 @@ describe("runReview", () => {
 				return {
 					config: baseConfig,
 					context: createReviewContext(pr),
-					git: {} as GitRepository,
+					git: createGitStub(),
 				};
 			},
 		});
@@ -509,7 +461,7 @@ describe("runReview", () => {
 				return {
 					config: baseConfig,
 					context: createReviewContext(pr),
-					git: {} as GitRepository,
+					git: createGitStub(),
 				};
 			},
 		});
@@ -564,7 +516,7 @@ describe("runReview", () => {
 					},
 				},
 				context: createReviewContext(pr),
-				git: {} as GitRepository,
+				git: createGitStub(),
 			}),
 			runCopilotReview: async () => {
 				copilotCalled = true;
@@ -627,7 +579,7 @@ describe("runReview", () => {
 					return {
 						config: baseConfig,
 						context: createReviewContext(pr),
-						git: {} as GitRepository,
+						git: createGitStub(),
 					};
 				},
 			},
@@ -701,7 +653,7 @@ describe("runReview", () => {
 				buildReviewContext: async () => ({
 					config: baseConfig,
 					context,
-					git: {} as GitRepository,
+					git: createGitStub(),
 				}),
 				runCopilotReview: async () => {
 					copilotCalled = true;
@@ -794,7 +746,7 @@ describe("runReview", () => {
 				buildReviewContext: async () => ({
 					config: baseConfig,
 					context,
-					git: {} as GitRepository,
+					git: createGitStub(),
 				}),
 				runCopilotReview: async () => {
 					copilotCalled = true;

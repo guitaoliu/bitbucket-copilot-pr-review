@@ -1,5 +1,5 @@
 import { z } from "zod";
-
+import { CliUserError } from "./errors.ts";
 import {
 	CONFIDENCE_VALUES,
 	CONFIG_FIELD_METADATA,
@@ -213,7 +213,7 @@ export function validateReviewerConfigRepoOverrides(
 		return result.data as ReviewerConfigRepoOverrides;
 	}
 
-	throw new Error(formatReviewerConfigError(result.error));
+	throw new CliUserError(formatReviewerConfigError(result.error));
 }
 
 export function pickRepoOverrides(
@@ -281,7 +281,7 @@ export function validateReviewerConfig(input: unknown): ReviewerConfig {
 		return result.data as ReviewerConfig;
 	}
 
-	throw new Error(formatReviewerConfigError(result.error));
+	throw new CliUserError(formatReviewerConfigError(result.error));
 }
 
 export function applyRepoOverrides(

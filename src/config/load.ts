@@ -14,6 +14,7 @@ import {
 } from "./bitbucket-resolver.ts";
 import { REVIEWER_CONFIG_DEFAULTS } from "./defaults.ts";
 import { getEnvRepoOverrides, parseEnvironment } from "./env.ts";
+import { CliUserError } from "./errors.ts";
 import {
 	cloneRepoOverrides,
 	validateReviewerConfig,
@@ -27,7 +28,7 @@ function resolveReadableFilePath(filePath: string, label: string): string {
 	try {
 		accessSync(resolvedPath, fsConstants.R_OK);
 	} catch {
-		throw new Error(`${label} is not readable: ${resolvedPath}`);
+		throw new CliUserError(`${label} is not readable: ${resolvedPath}`);
 	}
 
 	return resolvedPath;
@@ -41,7 +42,7 @@ export function loadConfig(
 			argv[0] === "review" ? argv : ["review", ...argv],
 		);
 		if (!isReviewCliOptions(parsed)) {
-			throw new Error("review command options are required.");
+			throw new CliUserError("review command options are required.");
 		}
 
 		return parsed;
@@ -93,7 +94,7 @@ export function loadBatchConfig(
 			argv[0] === "batch" ? argv : ["batch", ...argv],
 		);
 		if (!isBatchCliOptions(parsed)) {
-			throw new Error("batch command options are required.");
+			throw new CliUserError("batch command options are required.");
 		}
 
 		return parsed;

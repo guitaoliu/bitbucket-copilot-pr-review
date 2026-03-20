@@ -2,12 +2,68 @@
 
 Automated Bitbucket Data Center pull request review for Jenkins, powered by the GitHub Copilot SDK.
 
+## Quick Start
+
+1. Install and build the reviewer:
+
+   ```bash
+   corepack enable
+   pnpm install
+   pnpm build
+   ```
+
+2. Export Bitbucket auth and point the reviewer at the target checkout when needed:
+
+   ```bash
+   export BITBUCKET_TOKEN="<bitbucket token>"
+   export REPO_ROOT="/path/to/local/my-repo"
+   ```
+
+3. Dry-run one pull request first:
+
+   ```bash
+   pnpm review:dry-run -- https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
+   ```
+
+4. Publish once the dry-run output looks correct:
+
+   ```bash
+   pnpm review -- https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
+   ```
+
+Use `pnpm review --help` or `pnpm batch --help` for command-specific help.
+
 ## What it does
 
 - reads PR metadata from Bitbucket Data Center
 - computes the PR diff locally from the Jenkins workspace
 - asks Copilot to review only the changed PR scope through read-only custom tools
 - publishes the result as Bitbucket Code Insights reports and annotations
+
+## Configuration precedence
+
+The runtime resolves settings in this order:
+
+| Priority | Source | Notes |
+| --- | --- | --- |
+| 1 | CLI flags and command arguments | Highest priority for the current invocation. |
+| 2 | Environment variables | Best for Jenkins and other CI systems. |
+| 3 | Trusted repo config | Loaded from `copilot-code-review.json` at the PR base commit. |
+| 4 | Built-in defaults | Used only when nothing else overrides the setting. |
+
+## Setting Sources
+
+| Setting area | CLI | Environment | Trusted repo config |
+| --- | --- | --- | --- |
+| PR URL / repository URL | required positional arg | - | - |
+| `repoRoot` | `--repo-root` | `REPO_ROOT` | - |
+| batch workspace controls | `--temp-root`, `--max-parallel`, `--keep-workdirs` | - | - |
+| Bitbucket auth and TLS | - | yes | - |
+| Copilot model / reasoning / timeout | - | yes | yes |
+| report title / comment strategy | - | yes | yes |
+| review limits / ignore paths / skip prefixes | `--dry-run`, `--force-review`, `--confirm-rerun` | yes | yes |
+
+Trusted repo config stays intentionally narrow: repository-level JSON can tune review behavior, but it cannot replace command arguments or CI-only connection details.
 
 ## Runtime requirements
 
@@ -328,6 +384,10 @@ Useful reviewer env vars in Jenkins:
 - `REVIEW_IGNORE_PATHS=i18n/locales/**/*.json`
 
 For a safe first rollout, start with `--dry-run`, inspect the payload in Jenkins logs, then remove `--dry-run` once the Code Insights output looks right.
+
+## Release Verification
+
+Run `pnpm release:check` before publishing or cutting a release. It runs formatting/lint checks, typecheck, tests, a production build, built CLI help smoke tests, and `npm pack --dry-run`, then verifies that the packed tarball would include `dist/cli.js`, `README.md`, and `schemas/copilot-code-review.schema.json`.
 
 ## Notes
 

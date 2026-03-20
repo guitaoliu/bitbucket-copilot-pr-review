@@ -52,6 +52,14 @@ type TestableGitRepository = {
 		truncated: boolean;
 		totalMatches: number;
 	}>;
+	runGitTextSearch(
+		args: string[],
+		limit?: number,
+	): Promise<{
+		matches: Array<{ path: string; line: number; text: string }>;
+		truncated: boolean;
+		totalMatches: number;
+	}>;
 	runGit(args: string[]): Promise<string>;
 	runGitDetailed(args: string[]): Promise<{
 		stdout: string;
@@ -165,7 +173,7 @@ describe("GitRepository.ensureCommitAvailable", () => {
 			"origin",
 		) as unknown as TestableGitRepository;
 
-		repo.runGitDetailed = async (args) => {
+		repo.runGitTextSearch = async (args, limit) => {
 			assert.deepEqual(args, [
 				"grep",
 				"-n",
@@ -179,14 +187,14 @@ describe("GitRepository.ensureCommitAvailable", () => {
 				"src",
 				"test",
 			]);
+			assert.equal(limit, undefined);
 			return {
-				stdout: [
-					"head-123:src/a.ts:10:needle",
-					"head-123:src/a.ts:10:needle",
-					"head-123:test/a.test.ts:7:needle",
-				].join("\n"),
-				stderr: "",
-				exitCode: 0,
+				matches: [
+					{ path: "src/a.ts", line: 10, text: "needle" },
+					{ path: "test/a.test.ts", line: 7, text: "needle" },
+				],
+				truncated: false,
+				totalMatches: 2,
 			};
 		};
 
@@ -201,6 +209,44 @@ describe("GitRepository.ensureCommitAvailable", () => {
 				{ path: "test/a.test.ts", line: 7, text: "needle" },
 			],
 			truncated: false,
+			totalMatches: 2,
+		});
+	});
+
+	it("passes the requested limit through to git text search", async () => {
+		const repo = new GitRepository(
+			"/tmp/repo",
+			logger,
+			"origin",
+		) as unknown as TestableGitRepository;
+
+		repo.runGitTextSearch = async (args, limit) => {
+			assert.deepEqual(args, [
+				"grep",
+				"-n",
+				"-I",
+				"--full-name",
+				"-F",
+				"-e",
+				"needle",
+				"head-123",
+			]);
+			assert.equal(limit, 1);
+			return {
+				matches: [{ path: "src/a.ts", line: 10, text: "needle" }],
+				truncated: true,
+				totalMatches: 2,
+			};
+		};
+
+		const result = await repo.searchTextAtCommit("head-123", "needle", {
+			limit: 1,
+			mode: "literal",
+		});
+
+		assert.deepEqual(result, {
+			matches: [{ path: "src/a.ts", line: 10, text: "needle" }],
+			truncated: true,
 			totalMatches: 2,
 		});
 	});

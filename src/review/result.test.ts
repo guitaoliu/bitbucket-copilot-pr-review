@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { PullRequestInfo } from "../bitbucket/types.ts";
-import type { ReviewerConfig } from "../config/types.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
+import {
+	baseReviewerConfig as baseConfig,
+	createPullRequest,
+} from "../test-support/review-fixtures.ts";
 import {
 	buildReviewArtifacts,
 	buildReviewRunOutput,
@@ -12,75 +14,6 @@ import {
 import type { ReviewArtifacts } from "./runner-types.ts";
 import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "./summary.ts";
 import type { ReviewContext, ReviewOutcome } from "./types.ts";
-
-const baseConfig: ReviewerConfig = {
-	repoRoot: "/tmp/repo",
-	gitRemoteName: "origin",
-	logLevel: "info",
-	bitbucket: {
-		baseUrl: "https://bitbucket.example.com",
-		projectKey: "PROJ",
-		repoSlug: "repo",
-		prId: 123,
-		auth: {
-			type: "bearer",
-			token: "token",
-		},
-		tls: {
-			insecureSkipVerify: false,
-		},
-	},
-	copilot: {
-		model: "gpt-5.4",
-		reasoningEffort: "xhigh",
-		timeoutMs: 1800000,
-	},
-	report: {
-		key: "copilot-review",
-		title: "Copilot PR Review",
-		reporter: "GitHub Copilot via Jenkins",
-		commentTag: "copilot-pr-review",
-		commentStrategy: "recreate",
-	},
-	review: {
-		dryRun: false,
-		forceReview: false,
-		confirmRerun: false,
-		maxFiles: 100,
-		maxFindings: 10,
-		minConfidence: "high",
-		maxPatchChars: 12000,
-		defaultFileSliceLines: 250,
-		maxFileSliceLines: 400,
-		ignorePaths: [],
-		skipBranchPrefixes: ["renovate/"],
-	},
-};
-
-function createPullRequest(commit = "head-123"): PullRequestInfo {
-	return {
-		id: 123,
-		version: 1,
-		title: "Test PR",
-		description: "",
-		source: {
-			repositoryId: 1,
-			projectKey: "PROJ",
-			repoSlug: "repo",
-			refId: "refs/heads/feature",
-			displayId: "feature",
-			latestCommit: commit,
-		},
-		target: {
-			repositoryId: 1,
-			projectKey: "PROJ",
-			repoSlug: "repo",
-			refId: "refs/heads/main",
-			displayId: "main",
-			latestCommit: "base-123",
-		},
-	};
-}
 
 function createReviewContext(): ReviewContext {
 	const pr = createPullRequest();
@@ -437,11 +370,23 @@ describe("buildReviewRunOutput", () => {
 		const context = createReviewContext();
 		const review: ReviewOutcome = {
 			...createReviewOutcome(),
+			gitTelemetry: {
+				byOperation: {
+					diff: {
+						count: 2,
+						durationMsTotal: 17,
+					},
+				},
+			},
 			toolTelemetry: {
 				totalRequested: 3,
 				totalAllowed: 3,
 				totalDenied: 0,
 				totalCompleted: 3,
+				totalDurationMs: 44,
+				sessionDurationMs: 80,
+				errorCount: 0,
+				assistantMessageChars: 19,
 				byTool: {
 					get_pr_overview: {
 						requested: 1,
@@ -449,6 +394,12 @@ describe("buildReviewRunOutput", () => {
 						denied: 0,
 						completed: 1,
 						resultCounts: { success: 1 },
+						totalDurationMs: 44,
+						maxDurationMs: 44,
+						totalInputChars: 2,
+						totalOutputChars: 18,
+						truncatedResponses: 0,
+						filteredResultCount: 0,
 					},
 				},
 			},
@@ -471,7 +422,12 @@ describe("buildReviewRunOutput", () => {
 			],
 			commentBody: "comment body",
 		};
-		const output = buildReviewRunOutput(context, review, artifacts, true);
+		const output = buildReviewRunOutput(context, review, artifacts, true, {
+			status: "published",
+			attempted: true,
+			codeInsightsPublished: true,
+			pullRequestCommentUpdated: true,
+		});
 
 		assert.deepEqual(output, {
 			context: {
@@ -486,6 +442,7 @@ describe("buildReviewRunOutput", () => {
 				skippedFiles: 1,
 			},
 			metrics: {
+				gitTelemetry: review.gitTelemetry,
 				toolTelemetry: review.toolTelemetry,
 			},
 			review: {
@@ -499,6 +456,13 @@ describe("buildReviewRunOutput", () => {
 			annotations: artifacts.annotations,
 			commentBody: "comment body",
 			published: true,
+			publication: {
+				status: "published",
+				attempted: true,
+				codeInsightsPublished: true,
+				pullRequestCommentUpdated: true,
+			},
+			publicationStatus: "published",
 			skipped: false,
 		});
 	});

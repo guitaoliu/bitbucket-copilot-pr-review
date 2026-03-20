@@ -2,9 +2,16 @@ import type {
 	InsightAnnotationPayload,
 	InsightReportPayload,
 } from "../bitbucket/types.ts";
-import type { ReviewOutcome } from "./types.ts";
+import type {
+	ReviewOutcome,
+	ReviewPublication,
+	ReviewPublicationStatus,
+} from "./types.ts";
 
-type ReviewRunOutputReview = Omit<ReviewOutcome, "toolTelemetry">;
+type ReviewRunOutputReview = Omit<
+	ReviewOutcome,
+	"gitTelemetry" | "toolTelemetry"
+>;
 
 export interface ReviewRunOutput {
 	context: {
@@ -19,6 +26,7 @@ export interface ReviewRunOutput {
 		skippedFiles: number;
 	};
 	metrics?: {
+		gitTelemetry?: ReviewOutcome["gitTelemetry"];
 		toolTelemetry?: ReviewOutcome["toolTelemetry"];
 	};
 	review: ReviewRunOutputReview;
@@ -26,6 +34,8 @@ export interface ReviewRunOutput {
 	annotations: InsightAnnotationPayload[];
 	commentBody?: string;
 	published: boolean;
+	publication?: ReviewPublication;
+	publicationStatus?: ReviewPublicationStatus;
 	skipped: boolean;
 	skipReason?: string;
 }

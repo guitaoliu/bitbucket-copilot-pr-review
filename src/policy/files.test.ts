@@ -81,6 +81,54 @@ describe("filterChangedFiles", () => {
 			],
 		);
 	});
+
+	it("skips renamed files when the source path is disallowed", () => {
+		const result = filterChangedFiles(
+			[
+				{
+					...reviewedFile,
+					path: "src/safe.ts",
+					oldPath: "config/.env.local",
+					status: "renamed",
+				},
+			],
+			10,
+		);
+
+		assert.deepEqual(result.reviewedFiles, []);
+		assert.deepEqual(result.skippedFiles, [
+			{
+				path: "src/safe.ts",
+				oldPath: "config/.env.local",
+				status: "renamed",
+				reason: "source path rejected: potential secret-bearing path",
+			},
+		]);
+	});
+
+	it("skips copied files when the source path is disallowed", () => {
+		const result = filterChangedFiles(
+			[
+				{
+					...reviewedFile,
+					path: "src/copied.ts",
+					oldPath: "config/.env.local",
+					status: "copied",
+				},
+			],
+			10,
+		);
+
+		assert.deepEqual(result.reviewedFiles, []);
+		assert.deepEqual(result.skippedFiles, [
+			{
+				path: "src/copied.ts",
+				oldPath: "config/.env.local",
+				status: "copied",
+				reason: "source path rejected: potential secret-bearing path",
+			},
+		]);
+	});
 });
 
 describe("repo path access decisions", () => {
@@ -209,7 +257,13 @@ describe("finalizeFindings", () => {
 
 		const findings = finalizeFindings(
 			drafts,
-			[{ ...reviewedFile, oldPath: "src/old-service.ts" }],
+			[
+				{
+					...reviewedFile,
+					oldPath: "src/old-service.ts",
+					status: "renamed",
+				},
+			],
 			5,
 			"medium",
 		);
@@ -226,5 +280,35 @@ describe("finalizeFindings", () => {
 				{ path: "src/service.ts", line: 10, title: "Renamed path issue" },
 			],
 		);
+	});
+
+	it("does not normalize copied-file findings from the old path", () => {
+		const drafts: FindingDraft[] = [
+			{
+				path: "src/original.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Copied path issue",
+				details: "Should not be accepted through the source path alias.",
+			},
+		];
+
+		const findings = finalizeFindings(
+			drafts,
+			[
+				{
+					...reviewedFile,
+					path: "src/copied.ts",
+					oldPath: "src/original.ts",
+					status: "copied",
+				},
+			],
+			5,
+			"medium",
+		);
+
+		assert.deepEqual(findings, []);
 	});
 });

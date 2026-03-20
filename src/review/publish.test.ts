@@ -1,118 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
-import type { Logger } from "../shared/logger.ts";
+import {
+	baseReviewerConfig,
+	createLoggerSpy,
+	createPullRequest,
+	createReviewArtifacts,
+	createReviewContext,
+	createReviewOutcome,
+} from "../test-support/review-fixtures.ts";
 import { publishReview } from "./publish.ts";
-import type { ReviewArtifacts, ReviewBitbucketClient } from "./runner-types.ts";
-import type { ReviewContext, ReviewOutcome } from "./types.ts";
-
-const baseConfig: ReviewerConfig = {
-	repoRoot: "/tmp/repo",
-	gitRemoteName: "origin",
-	logLevel: "info",
-	bitbucket: {
-		baseUrl: "https://bitbucket.example.com",
-		projectKey: "PROJ",
-		repoSlug: "repo",
-		prId: 123,
-		auth: {
-			type: "bearer",
-			token: "token",
-		},
-		tls: {
-			insecureSkipVerify: false,
-		},
-	},
-	copilot: {
-		model: "gpt-5.4",
-		reasoningEffort: "xhigh",
-		timeoutMs: 1800000,
-	},
-	report: {
-		key: "copilot-review",
-		title: "Copilot PR Review",
-		reporter: "GitHub Copilot via Jenkins",
-		commentTag: "copilot-pr-review",
-		commentStrategy: "recreate",
-	},
-	review: {
-		dryRun: false,
-		forceReview: false,
-		confirmRerun: false,
-		maxFiles: 100,
-		maxFindings: 10,
-		minConfidence: "high",
-		maxPatchChars: 12000,
-		defaultFileSliceLines: 250,
-		maxFileSliceLines: 400,
-		ignorePaths: [],
-		skipBranchPrefixes: ["renovate/"],
-	},
-};
-
-function createPullRequest(commit = "head-123"): PullRequestInfo {
-	return {
-		id: 123,
-		version: 1,
-		title: "Test PR",
-		description: "",
-		source: {
-			repositoryId: 1,
-			projectKey: "PROJ",
-			repoSlug: "repo",
-			refId: "refs/heads/feature",
-			displayId: "feature",
-			latestCommit: commit,
-		},
-		target: {
-			repositoryId: 1,
-			projectKey: "PROJ",
-			repoSlug: "repo",
-			refId: "refs/heads/main",
-			displayId: "main",
-			latestCommit: "base-123",
-		},
-	};
-}
-
-function createReviewContext(pr: PullRequestInfo): ReviewContext {
-	return {
-		repoRoot: "/tmp/repo",
-		pr,
-		headCommit: pr.source.latestCommit,
-		baseCommit: pr.target.latestCommit,
-		mergeBaseCommit: pr.target.latestCommit,
-		reviewRevision: "review-rev-123",
-		rawDiff: "",
-		diffStats: { fileCount: 1, additions: 1, deletions: 0 },
-		reviewedFiles: [],
-		skippedFiles: [],
-	};
-}
-
-function createReviewOutcome(): ReviewOutcome {
-	return {
-		summary: "No reportable issues found.",
-		prSummary: "Confirms the lightweight PR update is safe to merge.",
-		fileSummaries: [],
-		findings: [],
-		stale: false,
-	};
-}
-
-function createReviewArtifacts(): ReviewArtifacts {
-	return {
-		report: {
-			title: baseConfig.report.title,
-			result: "PASS",
-			reporter: baseConfig.report.reporter,
-		},
-		annotations: [],
-		commentBody: "review comment",
-	};
-}
+import type { ReviewBitbucketClient } from "./runner-types.ts";
 
 function createBitbucketClient(
 	overrides: Partial<ReviewBitbucketClient> = {},
@@ -139,43 +38,18 @@ function createBitbucketClient(
 	};
 }
 
-function createLoggerSpy(): {
-	logger: Logger;
-	infoMessages: string[];
-	warnMessages: string[];
-} {
-	const infoMessages: string[] = [];
-	const warnMessages: string[] = [];
-
-	return {
-		logger: {
-			debug() {},
-			info(message) {
-				infoMessages.push(message);
-			},
-			warn(message) {
-				warnMessages.push(message);
-			},
-			error() {},
-			trace() {},
-			json() {},
-		},
-		infoMessages,
-		warnMessages,
-	};
-}
-
 describe("publishReview", () => {
 	it("returns early without touching Bitbucket when dry run is enabled", async () => {
 		const config: ReviewerConfig = {
-			...baseConfig,
+			...baseReviewerConfig,
 			review: {
-				...baseConfig.review,
+				...baseReviewerConfig.review,
 				dryRun: true,
 			},
 		};
 		let pullRequestCalls = 0;
-		const { logger, infoMessages, warnMessages } = createLoggerSpy();
+		const { logger, infoMessages, warnMessages, errorMessages } =
+			createLoggerSpy();
 		const result = await publishReview(
 			createBitbucketClient({
 				async getPullRequest() {
@@ -192,6 +66,12 @@ describe("publishReview", () => {
 
 		assert.deepEqual(result, {
 			published: false,
+			publication: {
+				status: "dry_run",
+				attempted: false,
+				codeInsightsPublished: false,
+				pullRequestCommentUpdated: false,
+			},
 			review: createReviewOutcome(),
 		});
 		assert.equal(pullRequestCalls, 0);
@@ -199,6 +79,7 @@ describe("publishReview", () => {
 			"Dry run enabled, skipping Bitbucket Code Insights publish.",
 		]);
 		assert.deepEqual(warnMessages, []);
+		assert.deepEqual(errorMessages, []);
 	});
 
 	it("marks the review stale when the pull request head moves before publish", async () => {
@@ -220,7 +101,7 @@ describe("publishReview", () => {
 					commentCalled = true;
 				},
 			}),
-			baseConfig,
+			baseReviewerConfig,
 			context,
 			review,
 			createReviewArtifacts(),
@@ -229,6 +110,12 @@ describe("publishReview", () => {
 
 		assert.deepEqual(result, {
 			published: false,
+			publication: {
+				status: "stale",
+				attempted: false,
+				codeInsightsPublished: false,
+				pullRequestCommentUpdated: false,
+			},
 			review: {
 				...review,
 				stale: true,
@@ -250,15 +137,15 @@ describe("publishReview", () => {
 		const publishCalls: Array<{
 			commitId: string;
 			reportKey: string;
-			report: ReviewArtifacts["report"];
-			annotations: ReviewArtifacts["annotations"];
+			report: ReturnType<typeof createReviewArtifacts>["report"];
+			annotations: ReturnType<typeof createReviewArtifacts>["annotations"];
 		}> = [];
 		const commentCalls: Array<{
 			tag: string;
 			text: string;
 			strategy: ReviewerConfig["report"]["commentStrategy"] | undefined;
 		}> = [];
-		const { logger, warnMessages } = createLoggerSpy();
+		const { logger, warnMessages, errorMessages } = createLoggerSpy();
 		const result = await publishReview(
 			createBitbucketClient({
 				async getPullRequest() {
@@ -271,29 +158,107 @@ describe("publishReview", () => {
 					commentCalls.push({ tag, text, strategy: options?.strategy });
 				},
 			}),
-			baseConfig,
+			baseReviewerConfig,
 			context,
 			review,
 			artifacts,
 			logger,
 		);
 
-		assert.deepEqual(result, { published: true, review });
+		assert.deepEqual(result, {
+			published: true,
+			publication: {
+				status: "published",
+				attempted: true,
+				codeInsightsPublished: true,
+				pullRequestCommentUpdated: true,
+			},
+			review,
+		});
 		assert.deepEqual(publishCalls, [
 			{
 				commitId: context.headCommit,
-				reportKey: baseConfig.report.key,
+				reportKey: baseReviewerConfig.report.key,
 				report: artifacts.report,
 				annotations: artifacts.annotations,
 			},
 		]);
 		assert.deepEqual(commentCalls, [
 			{
-				tag: baseConfig.report.commentTag,
+				tag: baseReviewerConfig.report.commentTag,
 				text: artifacts.commentBody,
-				strategy: baseConfig.report.commentStrategy,
+				strategy: baseReviewerConfig.report.commentStrategy,
 			},
 		]);
 		assert.deepEqual(warnMessages, []);
+		assert.deepEqual(errorMessages, []);
+	});
+
+	it("returns a failed publication result when Code Insights publish fails", async () => {
+		const { logger, errorMessages } = createLoggerSpy();
+		const result = await publishReview(
+			createBitbucketClient({
+				async publishCodeInsights() {
+					throw new Error("report unavailable");
+				},
+			}),
+			baseReviewerConfig,
+			createReviewContext(),
+			createReviewOutcome(),
+			createReviewArtifacts(),
+			logger,
+		);
+
+		assert.equal(result.published, false);
+		assert.deepEqual(result.publication, {
+			status: "failed",
+			attempted: true,
+			codeInsightsPublished: false,
+			pullRequestCommentUpdated: false,
+			error: {
+				stage: "code_insights",
+				message: "report unavailable",
+			},
+		});
+		assert.match(
+			errorMessages[0] ?? "",
+			/Bitbucket publication failed before the PR comment update/,
+		);
+	});
+
+	it("returns a partial publication result when the PR comment update fails twice", async () => {
+		let commentAttempts = 0;
+		const { logger, warnMessages, errorMessages } = createLoggerSpy();
+		const result = await publishReview(
+			createBitbucketClient({
+				async upsertPullRequestComment() {
+					commentAttempts += 1;
+					throw new Error(`comment failure ${commentAttempts}`);
+				},
+			}),
+			baseReviewerConfig,
+			createReviewContext(),
+			createReviewOutcome(),
+			createReviewArtifacts(),
+			logger,
+		);
+
+		assert.equal(commentAttempts, 2);
+		assert.equal(result.published, false);
+		assert.deepEqual(result.publication, {
+			status: "partial",
+			attempted: true,
+			codeInsightsPublished: true,
+			pullRequestCommentUpdated: false,
+			error: {
+				stage: "pull_request_comment",
+				message: "comment failure 2",
+			},
+		});
+		assert.match(
+			warnMessages[0] ?? "",
+			/retrying before marking publication partial/,
+		);
+		assert.match(errorMessages[0] ?? "", /failed during PR comment update/);
 	});
 });
