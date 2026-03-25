@@ -8,7 +8,7 @@ Usage:
 
 Examples:
   scripts/run-local-batch-review.sh \
-    https://bitbucket.example.com/projects/AAAS/repos/sbp
+    https://bitbucket.example.com/projects/PROJ/repos/my-repo
 
 Required environment:
   BITBUCKET_TOKEN         Bitbucket token
@@ -71,7 +71,7 @@ REPO_URL="${REPO_URL%%#*}"
 REPO_URL="${REPO_URL%/}"
 
 if [[ ! "$REPO_URL" =~ ^https?://.+/projects/[^/]+/repos/[^/]+$ ]]; then
-  die "Repository URL must look like https://bitbucket.example.com/projects/AAAS/repos/sbp"
+  die "Repository URL must look like https://bitbucket.example.com/projects/PROJ/repos/my-repo"
 fi
 
 if [[ -z "${BITBUCKET_TOKEN:-}" && ( -z "${BITBUCKET_USERNAME:-}" || -z "${BITBUCKET_PASSWORD:-}" ) ]]; then

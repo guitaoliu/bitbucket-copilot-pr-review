@@ -36,7 +36,7 @@ describe("buildConfigReferenceMarkdown", () => {
 		assert.match(markdown, /Argument: `<repository-url>`/);
 		assert.match(
 			markdown,
-			/Bitbucket repository URL, for example https:\/\/host\/projects\/AAAS\/repos\/sbp/,
+			/Bitbucket repository URL, for example https:\/\/host\/projects\/PROJ\/repos\/my-repo/,
 		);
 	});
 });

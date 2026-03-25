@@ -2,6 +2,10 @@
 	"name": "bitbucket-copilot-pr-review",
 	"version": "0.1.0",
 	"description": "Jenkins-driven Bitbucket Data Center pull request review with GitHub Copilot SDK",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/guitaoliu/bitbucket-copilot-pr-review.git"
+	},
 	"type": "module",
 	"packageManager": "pnpm@10.32.1",
 	"bin": {

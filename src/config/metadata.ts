@@ -422,7 +422,7 @@ export const CLI_COMMAND_METADATA = {
 			"Review all open pull requests for one Bitbucket repository URL",
 		argumentLabel: "<repository-url>",
 		argumentDescription:
-			"Bitbucket repository URL, for example https://host/projects/AAAS/repos/sbp.",
+			"Bitbucket repository URL, for example https://host/projects/PROJ/repos/my-repo.",
 	},
 } as const satisfies Record<string, CliCommandMetadata>;
 

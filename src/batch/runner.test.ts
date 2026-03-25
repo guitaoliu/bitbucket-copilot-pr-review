@@ -16,8 +16,8 @@ const logger: Logger = {
 };
 
 const baseConfig: BatchReviewConfig = {
-	repoId: "AAAS/sbp",
-	repositoryUrl: "https://bitbucket.example.com/projects/AAAS/repos/sbp",
+	repoId: "PROJ/my-repo",
+	repositoryUrl: "https://bitbucket.example.com/projects/PROJ/repos/my-repo",
 	tempRoot: "/tmp/batch",
 	maxParallel: 2,
 	keepWorkdirs: false,
@@ -25,8 +25,8 @@ const baseConfig: BatchReviewConfig = {
 	logLevel: "info",
 	bitbucket: {
 		baseUrl: "https://bitbucket.example.com",
-		projectKey: "AAAS",
-		repoSlug: "sbp",
+		projectKey: "PROJ",
+		repoSlug: "my-repo",
 		auth: {
 			type: "bearer",
 			token: "token",
@@ -52,18 +52,18 @@ function createPullRequest(id: number, title: string): PullRequestInfo {
 		description: "",
 		source: {
 			repositoryId: 1,
-			projectKey: "AAAS",
-			repoSlug: "sbp",
-			cloneUrl: "https://bitbucket.example.com/scm/aaas/sbp.git",
+			projectKey: "PROJ",
+			repoSlug: "my-repo",
+			cloneUrl: "https://bitbucket.example.com/scm/proj/my-repo.git",
 			refId: `refs/heads/feature-${id}`,
 			displayId: `feature-${id}`,
 			latestCommit: `head-${id}`,
 		},
 		target: {
 			repositoryId: 1,
-			projectKey: "AAAS",
-			repoSlug: "sbp",
-			cloneUrl: "https://bitbucket.example.com/scm/aaas/sbp.git",
+			projectKey: "PROJ",
+			repoSlug: "my-repo",
+			cloneUrl: "https://bitbucket.example.com/scm/proj/my-repo.git",
 			refId: "refs/heads/main",
 			displayId: "main",
 			latestCommit: `base-${id}`,
@@ -115,8 +115,8 @@ describe("runBatchReview", () => {
 				runRoot: "/tmp/batch-root/run-1",
 				cacheRoot: "/tmp/batch-root/.cache",
 				repoRoot: "/tmp/batch-root/run-1/workspaces",
-				repoCacheRoot: "/tmp/batch-root/.cache/AAAS-sbp",
-				mirrorRoot: "/tmp/batch-root/.cache/AAAS-sbp/mirror.git",
+				repoCacheRoot: "/tmp/batch-root/.cache/PROJ-my-repo",
+				mirrorRoot: "/tmp/batch-root/.cache/PROJ-my-repo/mirror.git",
 			}),
 			ensureMirrorClone: async ({ cloneUrl, workspace }) => {
 				mirrorClones.push(cloneUrl);
@@ -203,14 +203,14 @@ describe("runBatchReview", () => {
 		});
 
 		assert.deepEqual(mirrorClones, [
-			"https://bitbucket.example.com/scm/aaas/sbp.git",
+			"https://bitbucket.example.com/scm/proj/my-repo.git",
 		]);
 		assert.equal(output.totalOpenPullRequests, 3);
 		assert.equal(output.reviewed, 1);
 		assert.equal(output.skipped, 1);
 		assert.equal(output.failed, 1);
 		assert.deepEqual(output.metrics.mirror, {
-			path: "/tmp/batch-root/.cache/AAAS-sbp/mirror.git",
+			path: "/tmp/batch-root/.cache/PROJ-my-repo/mirror.git",
 			action: "refreshed",
 			durationMs: 15,
 			lockWaitMs: 3,
@@ -276,8 +276,8 @@ describe("runBatchReview", () => {
 					runRoot: "/tmp/batch-root/run-1",
 					cacheRoot: "/tmp/batch-root/.cache",
 					repoRoot: "/tmp/batch-root/run-1/workspaces",
-					repoCacheRoot: "/tmp/batch-root/.cache/AAAS-sbp",
-					mirrorRoot: "/tmp/batch-root/.cache/AAAS-sbp/mirror.git",
+					repoCacheRoot: "/tmp/batch-root/.cache/PROJ-my-repo",
+					mirrorRoot: "/tmp/batch-root/.cache/PROJ-my-repo/mirror.git",
 				}),
 				ensureMirrorClone: async ({ workspace }) => ({
 					path: workspace.mirrorRoot,
@@ -324,8 +324,8 @@ describe("runBatchReview", () => {
 				runRoot: "/tmp/batch-root/run-1",
 				cacheRoot: "/tmp/batch-root/.cache",
 				repoRoot: "/tmp/batch-root/run-1/workspaces",
-				repoCacheRoot: "/tmp/batch-root/.cache/AAAS-sbp",
-				mirrorRoot: "/tmp/batch-root/.cache/AAAS-sbp/mirror.git",
+				repoCacheRoot: "/tmp/batch-root/.cache/PROJ-my-repo",
+				mirrorRoot: "/tmp/batch-root/.cache/PROJ-my-repo/mirror.git",
 			}),
 			ensureMirrorClone: async ({ workspace }) => ({
 				path: workspace.mirrorRoot,
@@ -372,8 +372,8 @@ describe("runBatchReview", () => {
 					runRoot: "/tmp/batch-root/run-keep",
 					cacheRoot: "/tmp/batch-root/.cache",
 					repoRoot: "/tmp/batch-root/run-keep/workspaces",
-					repoCacheRoot: "/tmp/batch-root/.cache/AAAS-sbp",
-					mirrorRoot: "/tmp/batch-root/.cache/AAAS-sbp/mirror.git",
+					repoCacheRoot: "/tmp/batch-root/.cache/PROJ-my-repo",
+					mirrorRoot: "/tmp/batch-root/.cache/PROJ-my-repo/mirror.git",
 				}),
 				ensureMirrorClone: async ({ workspace }) => ({
 					path: workspace.mirrorRoot,
@@ -450,8 +450,8 @@ describe("runBatchReview", () => {
 				runRoot: "/tmp/batch-root/run-1",
 				cacheRoot: "/tmp/batch-root/.cache",
 				repoRoot: "/tmp/batch-root/run-1/workspaces",
-				repoCacheRoot: "/tmp/batch-root/.cache/AAAS-sbp",
-				mirrorRoot: "/tmp/batch-root/.cache/AAAS-sbp/mirror.git",
+				repoCacheRoot: "/tmp/batch-root/.cache/PROJ-my-repo",
+				mirrorRoot: "/tmp/batch-root/.cache/PROJ-my-repo/mirror.git",
 			}),
 			ensureMirrorClone: async ({ workspace }) => ({
 				path: workspace.mirrorRoot,
@@ -495,7 +495,7 @@ describe("runBatchReview", () => {
 
 		assert.ok(infoMessages.includes("Using batch temp root /tmp/batch-root"));
 		assert.ok(
-			infoMessages.includes("Discovered 1 open pull requests for AAAS/sbp"),
+			infoMessages.includes("Discovered 1 open pull requests for PROJ/my-repo"),
 		);
 		assert.ok(
 			infoMessages.includes(

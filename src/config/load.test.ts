@@ -20,7 +20,8 @@ import { resolveRuntimeConfigGroups } from "./runtime-resolver.ts";
 
 const pullRequestUrl =
 	"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123";
-const repositoryUrl = "https://bitbucket.example.com/projects/AAAS/repos/sbp";
+const repositoryUrl =
+	"https://bitbucket.example.com/projects/PROJ/repos/my-repo";
 
 describe("normalizeReportKey", () => {
 	it("keeps short report keys unchanged", () => {
@@ -143,8 +144,8 @@ describe("parseBitbucketRepositoryUrl", () => {
 
 		assert.deepEqual(parsed, {
 			baseUrl: "https://bitbucket.example.com",
-			projectKey: "AAAS",
-			repoSlug: "sbp",
+			projectKey: "PROJ",
+			repoSlug: "my-repo",
 			repositoryUrl,
 		});
 	});
@@ -153,7 +154,7 @@ describe("parseBitbucketRepositoryUrl", () => {
 		assert.throws(
 			() =>
 				parseBitbucketRepositoryUrl(
-					"https://bitbucket.example.com/projects/AAAS",
+					"https://bitbucket.example.com/projects/PROJ",
 				),
 			/Repository URL must point to a repository page/,
 		);
@@ -402,11 +403,11 @@ describe("loadBatchConfig", () => {
 			},
 		);
 
-		assert.equal(config.repoId, "AAAS/sbp");
+		assert.equal(config.repoId, "PROJ/my-repo");
 		assert.equal(config.repositoryUrl, repositoryUrl);
 		assert.equal(config.bitbucket.baseUrl, "https://bitbucket.example.com");
-		assert.equal(config.bitbucket.projectKey, "AAAS");
-		assert.equal(config.bitbucket.repoSlug, "sbp");
+		assert.equal(config.bitbucket.projectKey, "PROJ");
+		assert.equal(config.bitbucket.repoSlug, "my-repo");
 		assert.equal(config.maxParallel, 4);
 		assert.equal(config.gitRemoteName, "upstream");
 		assert.equal(config.logLevel, "debug");
@@ -436,7 +437,7 @@ describe("loadBatchConfig", () => {
 		assert.throws(
 			() =>
 				loadBatchConfig(
-					["batch", "https://bitbucket.example.com/projects/AAAS"],
+					["batch", "https://bitbucket.example.com/projects/PROJ"],
 					{
 						BITBUCKET_TOKEN: "token",
 					},

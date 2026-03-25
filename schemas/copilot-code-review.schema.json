@@ -1,5 +1,5 @@
 {
-	"$id": "https://pmsplbbitbucket01.corporate.datacard.com:8443/projects/AAAS/repos/bitbucket-copilot-pr-review/raw/schemas/copilot-code-review.schema.json",
+	"$id": "https://raw.githubusercontent.com/guitaoliu/bitbucket-copilot-pr-review/main/schemas/copilot-code-review.schema.json",
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"type": "object",
 	"properties": {

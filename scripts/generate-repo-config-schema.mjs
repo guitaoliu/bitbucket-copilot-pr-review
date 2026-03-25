@@ -13,7 +13,7 @@ const outputPath = path.resolve(
 await mkdir(path.dirname(outputPath), { recursive: true });
 
 const schema = {
-	$id: "https://pmsplbbitbucket01.corporate.datacard.com:8443/projects/AAAS/repos/bitbucket-copilot-pr-review/raw/schemas/copilot-code-review.schema.json",
+	$id: "https://raw.githubusercontent.com/guitaoliu/bitbucket-copilot-pr-review/main/schemas/copilot-code-review.schema.json",
 	...getRepoReviewConfigSchema(),
 	title: "Copilot Code Review Config",
 	description:

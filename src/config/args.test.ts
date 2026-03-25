@@ -36,7 +36,7 @@ describe("parseCliArgs", () => {
 	it("parses batch command options", () => {
 		const parsed = parseCliArgs([
 			"batch",
-			"https://bitbucket.example.com/projects/AAAS/repos/sbp",
+			"https://bitbucket.example.com/projects/PROJ/repos/my-repo",
 			"--temp-root",
 			"/tmp/batch",
 			"--max-parallel",
@@ -51,7 +51,7 @@ describe("parseCliArgs", () => {
 
 		assert.equal(
 			parsed.repositoryUrl,
-			"https://bitbucket.example.com/projects/AAAS/repos/sbp",
+			"https://bitbucket.example.com/projects/PROJ/repos/my-repo",
 		);
 		assert.equal(parsed.tempRoot, "/tmp/batch");
 		assert.equal(parsed.maxParallel, 3);
@@ -89,7 +89,7 @@ describe("parseCliArgs", () => {
 			() =>
 				parseCliArgs([
 					"batch",
-					"https://bitbucket.example.com/projects/AAAS/repos/sbp",
+					"https://bitbucket.example.com/projects/PROJ/repos/my-repo",
 					"--max-parallel",
 					"zero",
 				]),
