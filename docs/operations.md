@@ -17,6 +17,8 @@ This guide collects the implementation and operator detail that is intentionally
 
 Official Copilot SDK auth docs: <https://github.com/github/copilot-sdk/blob/main/docs/auth/index.md>
 
+`REPO_ROOT` is optional for single-PR review. If you run the CLI from the target repository root, the current working directory is used automatically. Set `REPO_ROOT` or pass `--repo-root` only when the local checkout you want to review lives somewhere else. Batch mode does not use `REPO_ROOT`; it provisions its own temp clones.
+
 ## Configuration Model
 
 The runtime resolves settings in this order:

@@ -19,18 +19,32 @@ This project computes a PR diff locally, gives Copilot a tightly scoped read-onl
 - Bitbucket Data Center API access
 - a GitHub Copilot-enabled account for CI
 
+## Authentication
+
+- Bitbucket: set `BITBUCKET_TOKEN`, or use `BITBUCKET_USERNAME` and `BITBUCKET_PASSWORD` with `BITBUCKET_AUTH_TYPE=basic`
+- GitHub Copilot: this CLI relies on the GitHub Copilot SDK, which uses existing GitHub or Copilot authentication already available in your environment
+
+In practice, that usually means one of these is already set up before you run the tool:
+
+- an existing `gh auth` login
+- an existing Copilot CLI login
+- a supported GitHub token environment variable recognized by the Copilot SDK
+
+See `docs/operations.md` for the operator-focused details and the upstream SDK auth reference.
+
 ## Use With npx
 
-Once published to npm, you can run the CLI directly with `npx`:
+Run the CLI with `npx` from the same local repository checkout that the pull request points to:
 
 ```bash
 export BITBUCKET_TOKEN="<bitbucket token>"
-export REPO_ROOT="/path/to/local/my-repo"
 
 NODE_USE_SYSTEM_CA=1 npx bitbucket-copilot-pr-review review \
   https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123 \
   --dry-run
 ```
+
+The `review` command reads local git data from your current working directory by default, so run it from the target repository root. Set `REPO_ROOT` or `--repo-root` only when the repository being reviewed lives somewhere else. Batch mode does not need `REPO_ROOT` because it clones the repository into its own temp workspace.
 
 When the dry run looks correct, rerun without `--dry-run` to publish the Bitbucket review artifacts.
 
@@ -83,6 +97,49 @@ Use `pnpm review --help` or `pnpm batch --help` for command-specific help while 
 - asks Copilot to inspect only the changed review scope through read-only tools
 - validates findings against changed lines before publication
 - publishes a Bitbucket Code Insights report, annotations, and a tagged PR comment
+
+## Repo Config Example
+
+If the target repository contains a root-level `copilot-code-review.json`, the reviewer loads it from the trusted base commit and uses it as repo-scoped configuration. The schema lives at `schemas/copilot-code-review.schema.json`.
+
+Minimal example:
+
+```json
+{
+  "$schema": "./schemas/copilot-code-review.schema.json",
+  "review": {
+    "ignorePaths": ["i18n/locales/**/*.json"],
+    "maxFiles": 300,
+    "maxFindings": 25
+  }
+}
+```
+
+Expanded example:
+
+```json
+{
+  "$schema": "./schemas/copilot-code-review.schema.json",
+  "copilot": {
+    "model": "gpt-5.4",
+    "reasoningEffort": "xhigh"
+  },
+  "report": {
+    "title": "Copilot Review",
+    "commentStrategy": "recreate"
+  },
+  "review": {
+    "ignorePaths": ["i18n/locales/**/*.json", "docs/generated/**"],
+    "maxFiles": 300,
+    "maxFindings": 25,
+    "minConfidence": "medium",
+    "maxPatchChars": 12000,
+    "defaultFileSliceLines": 250,
+    "maxFileSliceLines": 400,
+    "skipBranchPrefixes": ["renovate/", "deps/"]
+  }
+}
+```
 
 ## CLI Usage
 
