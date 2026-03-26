@@ -7,7 +7,7 @@ This guide collects the implementation and operator detail that is intentionally
 - Node.js 24.12+
 - pnpm 10+
 - `@github/copilot` is installed with this package so the reviewer can resolve and launch the bundled Copilot CLI runtime from `node_modules`
-- a GitHub Copilot-enabled account for CI
+- a GitHub Copilot-enabled account
 
 ## Authentication
 
@@ -26,11 +26,11 @@ The runtime resolves settings in this order:
 | Priority | Source | Notes |
 | --- | --- | --- |
 | 1 | CLI flags and command arguments | Highest priority for the current invocation. |
-| 2 | Environment variables | Best for CI systems such as Jenkins. |
+| 2 | Environment variables | Best for CI systems and other automation. |
 | 3 | Trusted repo config | Loaded from `copilot-code-review.json` at the PR base commit. |
 | 4 | Built-in defaults | Used only when nothing else overrides the setting. |
 
-Trusted repo config stays intentionally narrow: repository-level JSON can tune review behavior, but it cannot replace command arguments or CI-only connection details.
+Trusted repo config stays intentionally narrow: repository-level JSON can tune review behavior, but it cannot replace command arguments or runtime-only connection details.
 
 Setting sources at a glance:
 
@@ -103,7 +103,7 @@ Bitbucket repository URL, for example https://host/projects/PROJ/repos/my-repo.
 | `CI_SUMMARY_PATH` | - | Path to a CI summary file included in review context. |
 | `REPORT_KEY` | `copilot-pr-review` | Code Insights report key. |
 | `REPORT_TITLE` | `Copilot PR Review` | Code Insights report title. |
-| `REPORTER_NAME` | `GitHub Copilot via Jenkins` | Displayed report publisher name. |
+| `REPORTER_NAME` | `GitHub Copilot` | Displayed report publisher name. |
 | `REPORT_COMMENT_TAG` | `copilot-pr-review` | Tag used to locate the PR summary comment. |
 | `REPORT_COMMENT_STRATEGY` | `recreate` | How the tagged PR summary comment is updated. |
 | `REPORT_LINK` | falls back to `BUILD_URL` when present | Code Insights report link. |
@@ -282,7 +282,7 @@ pnpm review:dry-run -- https://bitbucket.example.com/projects/PROJ/repos/my-repo
 
 Copilot reasoning is written through the logger to `stderr`, while the final review payload is printed as JSON on `stdout`.
 
-If you want to include local CI context in the review:
+If you want to include local build or CI context in the review:
 
 ```bash
 printf 'Unit tests passed\nLint passed\n' > /tmp/ci-summary.txt
@@ -290,7 +290,7 @@ export CI_SUMMARY_PATH="/tmp/ci-summary.txt"
 pnpm review:dry-run -- https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
-If you want the local run to publish to the Bitbucket PR page, drop the trailing `--dry-run` and use a unique report key so you do not overwrite the CI report. Bitbucket Data Center limits report keys to 50 characters, and the reviewer still sanitizes and shortens overrides when needed:
+If you want the local run to publish to the Bitbucket PR page, drop the trailing `--dry-run` and use a unique report key so you do not overwrite your normal automated report. Bitbucket Data Center limits report keys to 50 characters, and the reviewer still sanitizes and shortens overrides when needed:
 
 ```bash
 export REPORT_KEY="copilot-local-$USER"
@@ -314,33 +314,31 @@ Common local test issues:
 - Node.js does not trust the Bitbucket TLS certificate chain; use `BITBUCKET_CA_CERT_PATH`, or keep the default `BITBUCKET_INSECURE_TLS=1` until trust is configured
 - the PR is from a fork and your local git credentials cannot fetch the fork remote URL returned by Bitbucket
 
-## Jenkins Usage
+## CI Usage
 
-See `Jenkinsfile.example` for a Declarative Pipeline example.
-
-Suggested pipeline flow:
+Suggested CI flow:
 
 1. run your normal checkout, lint, test, and build stages first
 2. write a compact CI summary to `CI_SUMMARY_PATH`
 3. invoke `node dist/cli.js review <pull-request-url>` in the PR workspace, or `pnpm review -- <pull-request-url>`
 
-Important Jenkins assumptions:
+Typical CI assumptions:
 
-- the Jenkins workspace is the repository root, or set `REPO_ROOT`
-- the PR source and target commits are fetchable from the workspace remotes
+- the current working directory is the repository root, or set `REPO_ROOT`
+- the PR source and target commits are fetchable from the checked-out remotes
 - `pnpm install` has been run so the bundled `@github/copilot` runtime is available to the reviewer
 
-Useful reviewer env vars in Jenkins:
+Useful reviewer env vars in CI:
 
-- `REPO_ROOT=${WORKSPACE}`
-- `REPORT_LINK=${BUILD_URL}`
-- `REPORTER_NAME=GitHub Copilot via Jenkins`
+- `REPO_ROOT="$PWD"`
+- `REPORT_LINK="<build or job URL>"`
+- `REPORTER_NAME=GitHub Copilot`
 - `COPILOT_TIMEOUT_MS=1800000`
 - `REVIEW_MAX_FINDINGS=25`
 - `REVIEW_MAX_FILES=300`
 - `REVIEW_IGNORE_PATHS=i18n/locales/**/*.json`
 
-For a safe first rollout, start with `--dry-run`, inspect the payload in Jenkins logs, then remove `--dry-run` once the Code Insights output looks right.
+For a safe first rollout, start with `--dry-run`, inspect the payload in your CI logs, then remove `--dry-run` once the Code Insights output looks right.
 
 ## Release and Publishing
 
@@ -359,7 +357,7 @@ After that, bump `package.json`, create a tag like `v0.1.1`, and push the tag to
 
 ## Notes
 
-- the reviewer intentionally blocks Copilot from using general shell or edit tools in CI
+- the reviewer intentionally blocks Copilot from using general shell or edit tools during automated review runs
 - only annotations that land on changed lines are published
 - the reviewer also upserts one tagged pull-request summary comment by default
 - for reruns, the script replaces the prior report for the same report key

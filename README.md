@@ -7,7 +7,7 @@ This project computes a PR diff locally, gives Copilot a tightly scoped read-onl
 ## Highlights
 
 - reviews only the changed pull request scope
-- runs from your CI workspace instead of shipping repository contents to a separate service
+- runs from your local checkout or CI workspace instead of shipping repository contents to a separate service
 - publishes native Bitbucket review artifacts
 - supports single-PR and batch repository review flows
 - loads trusted repo-level configuration from the PR base commit
@@ -17,7 +17,7 @@ This project computes a PR diff locally, gives Copilot a tightly scoped read-onl
 - Node.js 24.12+
 - pnpm 10+
 - Bitbucket Data Center API access
-- a GitHub Copilot-enabled account for CI
+- a GitHub Copilot-enabled account
 
 ## Authentication
 
@@ -162,13 +162,12 @@ node dist/cli.js review --help
 
 ## Documentation
 
-- `docs/operations.md` - configuration, local testing, batch mode, Jenkins usage, release verification, and npm publishing
+- `docs/operations.md` - configuration, local testing, CI usage, batch mode, release verification, and npm publishing
 - `schemas/copilot-code-review.schema.json` - JSON schema for trusted repo config
-- `Jenkinsfile.example` - sample Jenkins pipeline wiring
 
 ## Why This Exists
 
-Bitbucket Data Center teams often want Copilot-assisted review inside their existing CI and review workflows. This project keeps the review loop inside your own Bitbucket and CI environment while staying conservative about file access, changed-line validation, and publication behavior.
+Bitbucket Data Center teams often want Copilot-assisted review inside their existing development and CI workflows. This project keeps the review loop inside your own Bitbucket and execution environment while staying conservative about file access, changed-line validation, and publication behavior.
 
 ## License
 

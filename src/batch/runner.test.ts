@@ -160,7 +160,7 @@ describe("runBatchReview", () => {
 						report: {
 							title: "Copilot PR Review",
 							result: "PASS",
-							reporter: "GitHub Copilot via Jenkins",
+							reporter: "GitHub Copilot",
 						},
 						annotations: [],
 						published: false,
@@ -184,7 +184,7 @@ describe("runBatchReview", () => {
 						report: {
 							title: "Copilot PR Review",
 							result: "PASS",
-							reporter: "GitHub Copilot via Jenkins",
+							reporter: "GitHub Copilot",
 						},
 						annotations: [],
 						published: false,
@@ -409,7 +409,7 @@ describe("runBatchReview", () => {
 					report: {
 						title: "Copilot PR Review",
 						result: "PASS",
-						reporter: "GitHub Copilot via Jenkins",
+						reporter: "GitHub Copilot",
 					},
 					annotations: [],
 					published: false,
@@ -483,7 +483,7 @@ describe("runBatchReview", () => {
 				report: {
 					title: "Copilot PR Review",
 					result: "PASS",
-					reporter: "GitHub Copilot via Jenkins",
+					reporter: "GitHub Copilot",
 				},
 				annotations: [],
 				published: false,

@@ -48,7 +48,7 @@ const baseConfig: ReviewerConfig = {
 	report: {
 		key: "copilot-pr-review",
 		title: "Copilot PR Review",
-		reporter: "GitHub Copilot via Jenkins",
+		reporter: "GitHub Copilot",
 		commentTag: "copilot-pr-review",
 		commentStrategy: "recreate",
 	},
