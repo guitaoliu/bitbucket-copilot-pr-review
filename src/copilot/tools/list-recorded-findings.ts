@@ -8,6 +8,7 @@ export function createListRecordedFindingsTool(toolContext: ReviewToolContext) {
 	return defineTool("list_recorded_findings", {
 		description:
 			"List the currently recorded finding drafts so the reviewer can avoid duplicates or replace weaker findings.",
+		skipPermission: true,
 		handler: async () => ({
 			count: drafts.length,
 			findings: drafts.map((draft, index) => ({

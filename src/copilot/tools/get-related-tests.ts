@@ -138,6 +138,7 @@ export function createGetRelatedTestsTool(toolContext: ReviewToolContext) {
 	return defineTool("get_related_tests", {
 		description:
 			"Suggest likely nearby automated tests for a reviewed file by scanning concrete directories at head or base.",
+		skipPermission: true,
 		parameters: {
 			type: "object",
 			additionalProperties: false,

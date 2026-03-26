@@ -1,58 +1,71 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { SessionEvent } from "@github/copilot-sdk";
 import type { Logger } from "../shared/logger.ts";
-import { wireReasoningTrace } from "./trace.ts";
+import { createSessionEventTracer } from "./trace.ts";
 
-type Handler = (event: {
-	data: { reasoningId: string; deltaContent?: string; content?: string };
-}) => void;
-
-function createSessionStub() {
-	const handlers = new Map<string, Handler[]>();
+function createLoggerSpy(): {
+	logger: Logger;
+	traceCalls: Array<{ message: string; details: unknown[] }>;
+	infoCalls: Array<{ message: string; details: unknown[] }>;
+} {
+	const traceCalls: Array<{ message: string; details: unknown[] }> = [];
+	const infoCalls: Array<{ message: string; details: unknown[] }> = [];
 
 	return {
-		on(eventName: string, handler: Handler) {
-			handlers.set(eventName, [...(handlers.get(eventName) ?? []), handler]);
-		},
-		emit(
-			eventName: string,
-			data: { reasoningId: string; deltaContent?: string; content?: string },
-		) {
-			for (const handler of handlers.get(eventName) ?? []) {
-				handler({ data });
-			}
-		},
-	};
-}
-
-describe("wireReasoningTrace", () => {
-	it("buffers deltas and logs one reasoning block when completed", () => {
-		const traceCalls: Array<{ message: string; details: unknown[] }> = [];
-		const logger: Logger = {
+		logger: {
 			debug() {},
-			info() {},
+			info(message, ...details) {
+				infoCalls.push({ message, details });
+			},
 			warn() {},
 			error() {},
 			trace(message, ...details) {
 				traceCalls.push({ message, details });
 			},
 			json() {},
-		};
-		const session = createSessionStub();
+		},
+		traceCalls,
+		infoCalls,
+	};
+}
 
-		wireReasoningTrace(session as never, logger);
+describe("createSessionEventTracer", () => {
+	it("buffers deltas and logs one reasoning block when completed", () => {
+		const { logger, traceCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
 
-		session.emit("assistant.reasoning_delta", {
-			reasoningId: "r1",
-			deltaContent: "Hel",
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			ephemeral: true,
+			type: "assistant.reasoning_delta",
+			data: {
+				reasoningId: "r1",
+				deltaContent: "Hel",
+			},
 		});
-		session.emit("assistant.reasoning_delta", {
-			reasoningId: "r1",
-			deltaContent: "lo",
+		tracer.handleEvent({
+			id: "2",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: "1",
+			ephemeral: true,
+			type: "assistant.reasoning_delta",
+			data: {
+				reasoningId: "r1",
+				deltaContent: "lo",
+			},
 		});
-		session.emit("assistant.reasoning", {
-			reasoningId: "r1",
-			content: "ignored fallback",
+		tracer.handleEvent({
+			id: "3",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: "2",
+			type: "assistant.reasoning",
+			data: {
+				reasoningId: "r1",
+				content: "ignored fallback",
+			},
 		});
 
 		assert.deepEqual(traceCalls, [
@@ -64,24 +77,18 @@ describe("wireReasoningTrace", () => {
 	});
 
 	it("falls back to full reasoning content when no deltas arrive", () => {
-		const traceCalls: Array<{ message: string; details: unknown[] }> = [];
-		const logger: Logger = {
-			debug() {},
-			info() {},
-			warn() {},
-			error() {},
-			trace(message, ...details) {
-				traceCalls.push({ message, details });
+		const { logger, traceCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			type: "assistant.reasoning",
+			data: {
+				reasoningId: "r2",
+				content: "Complete reasoning",
 			},
-			json() {},
-		};
-		const session = createSessionStub();
-
-		wireReasoningTrace(session as never, logger);
-
-		session.emit("assistant.reasoning", {
-			reasoningId: "r2",
-			content: "Complete reasoning",
 		});
 
 		assert.deepEqual(traceCalls, [
@@ -93,31 +100,71 @@ describe("wireReasoningTrace", () => {
 	});
 
 	it("flushes buffered reasoning on idle when completion does not arrive", () => {
-		const traceCalls: Array<{ message: string; details: unknown[] }> = [];
-		const logger: Logger = {
-			debug() {},
-			info() {},
-			warn() {},
-			error() {},
-			trace(message, ...details) {
-				traceCalls.push({ message, details });
+		const { logger, traceCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			ephemeral: true,
+			type: "assistant.reasoning_delta",
+			data: {
+				reasoningId: "r3",
+				deltaContent: "Partial",
 			},
-			json() {},
-		};
-		const session = createSessionStub();
-
-		wireReasoningTrace(session as never, logger);
-
-		session.emit("assistant.reasoning_delta", {
-			reasoningId: "r3",
-			deltaContent: "Partial",
 		});
-		session.emit("session.idle", { reasoningId: "idle" });
+		tracer.handleEvent({
+			id: "2",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: "1",
+			ephemeral: true,
+			type: "session.idle",
+			data: {},
+		});
 
 		assert.deepEqual(traceCalls, [
 			{
 				message: "copilot reasoning",
 				details: [{ reasoningId: "r3", content: "Partial" }],
+			},
+		]);
+	});
+
+	it("logs system notifications through the shared logger", () => {
+		const { logger, infoCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		const event = {
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			ephemeral: true,
+			type: "system.notification",
+			data: {
+				content: "<system_notification>Agent completed</system_notification>",
+				kind: {
+					type: "agent_completed",
+					agentId: "agent-1",
+					agentType: "explore",
+					status: "completed",
+				},
+			},
+		} as SessionEvent;
+
+		tracer.handleEvent(event);
+
+		assert.deepEqual(infoCalls, [
+			{
+				message: "Copilot system notification",
+				details: [
+					{
+						kind: "agent_completed",
+						status: "completed",
+						content:
+							"<system_notification>Agent completed</system_notification>",
+					},
+				],
 			},
 		]);
 	});

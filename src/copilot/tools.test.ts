@@ -17,8 +17,10 @@ import { createGetFileContentTool } from "./tools/get-file-content.ts";
 import { createGetFileDiffTool } from "./tools/get-file-diff.ts";
 import { createGetFileDiffHunkTool } from "./tools/get-file-diff-hunk.ts";
 import { createGetFileListByDirectoryTool } from "./tools/get-file-list-by-directory.ts";
+import { createGetPrOverviewTool } from "./tools/get-pr-overview.ts";
 import { createGetRelatedFileContentTool } from "./tools/get-related-file-content.ts";
 import { createGetRelatedTestsTool } from "./tools/get-related-tests.ts";
+import { createListChangedFilesTool } from "./tools/list-changed-files.ts";
 import { createListRecordedFindingsTool } from "./tools/list-recorded-findings.ts";
 import { createRecordFileSummaryTool } from "./tools/record-file-summary.ts";
 import { createRecordPrSummaryTool } from "./tools/record-pr-summary.ts";
@@ -997,6 +999,30 @@ describe("Copilot tools", () => {
 			status: "missing",
 			message: "No CI summary was provided.",
 		});
+	});
+
+	it("marks safe read-only tools to skip permission prompts", () => {
+		const toolContext = createReviewToolContext(
+			config,
+			reviewContext,
+			createGitStub(),
+			[],
+			createSummaryDrafts(),
+		);
+
+		assert.equal(createGetPrOverviewTool(toolContext).skipPermission, true);
+		assert.equal(createListChangedFilesTool(toolContext).skipPermission, true);
+		assert.equal(createGetFileContentTool(toolContext).skipPermission, true);
+		assert.equal(
+			createGetRelatedFileContentTool(toolContext).skipPermission,
+			true,
+		);
+		assert.equal(createGetCiSummaryTool(toolContext).skipPermission, true);
+		assert.equal(
+			createRecordPrSummaryTool(toolContext).skipPermission,
+			undefined,
+		);
+		assert.equal(createEmitFindingTool(toolContext).skipPermission, undefined);
 	});
 
 	it("reports diff truncation metadata", async () => {

@@ -10,6 +10,7 @@ export function createListChangedFilesTool(toolContext: ReviewToolContext) {
 	return defineTool("list_changed_files", {
 		description:
 			"List the changed files available for review, with status and changed line ranges.",
+		skipPermission: true,
 		parameters: {
 			type: "object",
 			additionalProperties: false,

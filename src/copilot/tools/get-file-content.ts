@@ -26,6 +26,7 @@ export function createGetFileContentTool(toolContext: ReviewToolContext) {
 	return defineTool("get_file_content", {
 		description:
 			"Get head or base file contents with line numbers for a reviewed file.",
+		skipPermission: true,
 		parameters: {
 			type: "object",
 			additionalProperties: false,

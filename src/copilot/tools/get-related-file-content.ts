@@ -28,6 +28,7 @@ export function createGetRelatedFileContentTool(
 	return defineTool("get_related_file_content", {
 		description:
 			"Read a safe repo-relative file outside the changed set for nearby architectural context.",
+		skipPermission: true,
 		parameters: {
 			type: "object",
 			additionalProperties: false,

@@ -10,6 +10,7 @@ export function createGetCiSummaryTool(toolContext: ReviewToolContext) {
 	return defineTool("get_ci_summary", {
 		description:
 			"Get the optional CI summary text produced earlier in the Jenkins pipeline.",
+		skipPermission: true,
 		handler: async () =>
 			omitUndefined({
 				status: context.ciSummary ? "ok" : "missing",

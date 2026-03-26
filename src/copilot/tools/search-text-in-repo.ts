@@ -39,6 +39,7 @@ export function createSearchTextInRepoTool(toolContext: ReviewToolContext) {
 	return defineTool("search_text_in_repo", {
 		description:
 			"Search repo files at the head or base revision for literal or regex text matches within safe directories.",
+		skipPermission: true,
 		parameters: {
 			type: "object",
 			additionalProperties: false,

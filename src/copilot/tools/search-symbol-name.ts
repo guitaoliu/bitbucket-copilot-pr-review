@@ -28,6 +28,7 @@ export function createSearchSymbolNameTool(toolContext: ReviewToolContext) {
 	return defineTool("search_symbol_name", {
 		description:
 			"Search for a likely identifier or symbol name across repo files at the head or base revision.",
+		skipPermission: true,
 		parameters: {
 			type: "object",
 			additionalProperties: false,

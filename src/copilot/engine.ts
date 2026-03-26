@@ -1,6 +1,7 @@
 import type {
 	CopilotClientOptions,
 	CopilotSession,
+	SessionEvent,
 	ToolResultObject,
 } from "@github/copilot-sdk";
 import { approveAll, CopilotClient } from "@github/copilot-sdk";
@@ -24,14 +25,14 @@ import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
 import { truncateText } from "../shared/text.ts";
 import { resolveBundledCopilotCliPath } from "./cli-path.ts";
-import { buildPrompt } from "./prompt.ts";
+import { buildPrompt, buildSystemMessage } from "./prompt.ts";
 import {
 	FINDING_TAXONOMY_HINT,
 	QUESTION_SHAPED_FINDING_HINT,
 	TEST_COVERAGE_HINT,
 } from "./review-guidance.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
-import { wireReasoningTrace } from "./trace.ts";
+import { createSessionEventTracer } from "./trace.ts";
 
 type ReviewToolName = (typeof REVIEW_TOOL_NAMES)[number];
 
@@ -51,7 +52,6 @@ type CopilotClientLike = Pick<
 >;
 
 export interface CopilotSessionLike {
-	on: CopilotSession["on"];
 	sendAndWait(
 		options: Parameters<CopilotSession["sendAndWait"]>[0],
 		timeout?: Parameters<CopilotSession["sendAndWait"]>[1],
@@ -759,11 +759,32 @@ export async function runCopilotReview(
 		config,
 		dependencies.resolveCliPath,
 	);
+	const sessionEventTracer = createSessionEventTracer(logger);
 
 	const client =
 		dependencies.createCopilotClient?.(clientOptions) ??
 		new CopilotClient(clientOptions);
 	await client.start();
+	const sessionConfig = {
+		clientName: "bitbucket-copilot-pr-review",
+		model: config.copilot.model,
+		reasoningEffort: config.copilot.reasoningEffort,
+		systemMessage: buildSystemMessage(config, context.reviewedFiles.length),
+		streaming: true,
+		tools: createReviewTools(config, context, git, drafts, summaryDrafts),
+		availableTools: [...REVIEW_TOOL_NAMES],
+		onPermissionRequest: approveAll,
+		onEvent: (event: SessionEvent) => {
+			sessionEventTracer.handleEvent(event);
+		},
+		hooks: createReviewSessionHooks(config, logger, drafts, {
+			reviewedFileCount: context.reviewedFiles.length,
+			summaryDrafts,
+			toolTelemetry,
+		}),
+		workingDirectory: config.repoRoot,
+		infiniteSessions: { enabled: false },
+	};
 	const session = await (dependencies.createReviewSession?.({
 		client,
 		config,
@@ -772,25 +793,7 @@ export async function runCopilotReview(
 		logger,
 		drafts,
 		summaryDrafts,
-	}) ??
-		client.createSession({
-			clientName: "bitbucket-copilot-pr-review",
-			model: config.copilot.model,
-			reasoningEffort: config.copilot.reasoningEffort,
-			streaming: true,
-			tools: createReviewTools(config, context, git, drafts, summaryDrafts),
-			availableTools: [...REVIEW_TOOL_NAMES],
-			onPermissionRequest: approveAll,
-			hooks: createReviewSessionHooks(config, logger, drafts, {
-				reviewedFileCount: context.reviewedFiles.length,
-				summaryDrafts,
-				toolTelemetry,
-			}),
-			workingDirectory: config.repoRoot,
-			infiniteSessions: { enabled: false },
-		}));
-
-	wireReasoningTrace(session, logger);
+	}) ?? client.createSession(sessionConfig));
 
 	try {
 		const response = await session.sendAndWait(

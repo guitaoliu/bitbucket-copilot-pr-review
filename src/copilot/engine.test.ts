@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { SessionConfig, SessionEventHandler } from "@github/copilot-sdk";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { ChangedFile, HunkSummary } from "../git/types.ts";
 import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "../review/summary.ts";
@@ -15,6 +16,7 @@ import {
 	createReviewSessionHooks,
 	runCopilotReview,
 } from "./engine.ts";
+import { buildSystemMessage } from "./prompt.ts";
 import {
 	FINDING_TAXONOMY_HINT,
 	QUESTION_SHAPED_FINDING_HINT,
@@ -768,5 +770,58 @@ describe("runCopilotReview", () => {
 		assert.equal(createdOptions[0]?.cwd, config.repoRoot);
 		assert.equal(outcome.findings.length, 0);
 		assert.equal(outcome.assistantMessage, "Looks good.");
+	});
+
+	it("passes system prompt customization and early event handler into session creation", async () => {
+		const context = createReviewContext();
+		const createdSessionConfigs: SessionConfig[] = [];
+		const logSpy = createLoggerSpy();
+
+		await runCopilotReview(config, context, {} as never, logSpy.logger, {
+			resolveCliPath: () => "/tmp/node_modules/@github/copilot/index.js",
+			createCopilotClient() {
+				return {
+					async start() {},
+					async createSession(configArg: SessionConfig) {
+						createdSessionConfigs.push(configArg);
+
+						const onEvent: SessionEventHandler | undefined = configArg.onEvent;
+						onEvent?.({
+							id: "1",
+							timestamp: "2026-03-25T00:00:00.000Z",
+							parentId: null,
+							ephemeral: true,
+							type: "assistant.reasoning",
+							data: {
+								reasoningId: "r1",
+								content: "Review reasoning",
+							},
+						});
+
+						return {
+							on() {
+								return () => {};
+							},
+							async sendAndWait() {
+								return { data: { content: "Looks good." } };
+							},
+							async disconnect() {},
+						} as never;
+					},
+					async stop() {
+						return [];
+					},
+				} as never;
+			},
+		});
+
+		assert.equal(createdSessionConfigs.length, 1);
+		assert.deepEqual(
+			createdSessionConfigs[0]?.systemMessage,
+			buildSystemMessage(config, context.reviewedFiles.length),
+		);
+		assert.equal(typeof createdSessionConfigs[0]?.onEvent, "function");
+		assert.deepEqual(logSpy.infoEntries, []);
+		assert.deepEqual(logSpy.warnEntries, []);
 	});
 });

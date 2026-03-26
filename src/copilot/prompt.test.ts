@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { SystemMessageCustomizeConfig } from "@github/copilot-sdk";
 
 import type { ReviewerConfig } from "../config/types.ts";
 import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "../review/summary.ts";
 import type { ReviewContext } from "../review/types.ts";
-import { buildPrompt } from "./prompt.ts";
+import { buildPrompt, buildSystemMessage } from "./prompt.ts";
+
+function expectCustomizeSystemMessage(
+	systemMessage: ReturnType<typeof buildSystemMessage>,
+): SystemMessageCustomizeConfig {
+	assert.equal(systemMessage.mode, "customize");
+	return systemMessage;
+}
 
 const config: ReviewerConfig = {
 	repoRoot: "/tmp/repo",
@@ -100,89 +108,7 @@ const context: ReviewContext = {
 };
 
 describe("buildPrompt", () => {
-	it("requires test coverage for meaningful behavior changes", () => {
-		const prompt = buildPrompt(config, context);
-
-		assert.match(
-			prompt,
-			/Missing or inadequate tests are reportable only when the gap materially weakens confidence in a meaningful behavior change/,
-		);
-		assert.match(
-			prompt,
-			/Do not emit a standalone test-coverage finding when a stronger concrete BUG or VULNERABILITY already captures the same root cause/,
-		);
-		assert.match(
-			prompt,
-			/Tests: for every non-trivial behavior change, verify positive, negative, and edge-case coverage at an appropriate level\. If coverage is missing, only flag it when that gap creates a distinct merge-relevant risk/,
-		);
-	});
-
-	it("defines a concrete review checklist and finding taxonomy", () => {
-		const prompt = buildPrompt(config, context);
-
-		assert.match(prompt, /Review checklist:/);
-		assert.match(
-			prompt,
-			/Security and access control: authentication, authorization/,
-		);
-		assert.match(
-			prompt,
-			/Data integrity and concurrency: transactions, retries, idempotency/,
-		);
-		assert.match(prompt, /Finding taxonomy:/);
-		assert.match(
-			prompt,
-			/- BUG: concrete correctness, data integrity, contract, state-transition/,
-		);
-		assert.match(
-			prompt,
-			/- VULNERABILITY: concrete security defects such as auth or authz bypass/,
-		);
-		assert.match(
-			prompt,
-			/- CODE_SMELL: only for substantial merge-relevant fragility with concrete impact/,
-		);
-	});
-
-	it("discourages speculative and question-shaped findings", () => {
-		const prompt = buildPrompt(config, context);
-
-		assert.match(
-			prompt,
-			/No question-shaped or speculative findings: verify the code path or drop the concern/,
-		);
-		assert.match(
-			prompt,
-			/pass concrete repo-relative directories as a directories array; wildcard directory patterns are not supported/,
-		);
-		assert.match(
-			prompt,
-			/Use emit_finding only for concrete validated issues\. If a concern is still a question, investigate more or drop it/,
-		);
-	});
-
-	it("deprioritizes generated artifacts and avoids redundant startup calls", () => {
-		const prompt = buildPrompt(config, context);
-
-		assert.match(
-			prompt,
-			/Deprioritize generated artifacts such as lockfiles, snapshots, and regenerated API specs unless they reveal a concrete contract or publishing problem/,
-		);
-		assert.match(
-			prompt,
-			/Call get_pr_overview first to understand the PR, changed files, file summaries, and CI context/,
-		);
-		assert.match(
-			prompt,
-			/Call list_changed_files only if you need a refreshed file list or skipped-file details beyond the overview/,
-		);
-		assert.match(
-			prompt,
-			/Use get_related_tests before broad repo search when you need likely nearby coverage/,
-		);
-	});
-
-	it("includes trusted nested AGENTS instructions with path scoping", () => {
+	it("keeps trusted pull request context and repo instructions in the user prompt", () => {
 		const prompt = buildPrompt(config, {
 			...context,
 			repoAgentsInstructions: [
@@ -191,26 +117,21 @@ describe("buildPrompt", () => {
 					appliesTo: ["."],
 					content: "root instructions",
 				},
-				{
-					path: "ui/AGENTS.md",
-					appliesTo: ["ui/src/page.tsx"],
-					content: "ui instructions",
-				},
 			],
 		});
 
 		assert.match(
 			prompt,
-			/Repository instructions from trusted AGENTS\.md files:/,
+			/Please review this Bitbucket Data Center pull request/,
 		);
-		assert.match(prompt, /Path: AGENTS\.md/);
-		assert.match(prompt, /Applies to: \./);
-		assert.match(prompt, /Path: ui\/AGENTS\.md/);
-		assert.match(prompt, /Applies to: ui\/src\/page\.tsx/);
+		assert.match(prompt, /<pull_request_context>/);
+		assert.match(prompt, /title: Test PR/);
+		assert.match(prompt, /head_commit: head-123/);
 		assert.match(
 			prompt,
-			/More specific nested AGENTS\.md instructions override broader ones for matching paths/,
+			/Repository instructions from trusted AGENTS\.md files:/,
 		);
+		assert.match(prompt, /root instructions/);
 	});
 
 	it("disables per-file summary instructions for large reviews", () => {
@@ -249,9 +170,84 @@ describe("buildPrompt", () => {
 			prompt,
 			/new_file_summaries|per_file_summaries: disabled|per-file summaries are disabled/i,
 		);
-		assert.match(prompt, /do not call record_file_summary for this review/);
+		assert.doesNotMatch(prompt, /Finding taxonomy:/);
+		assert.doesNotMatch(prompt, /Review checklist:/);
+	});
+});
+
+describe("buildSystemMessage", () => {
+	it("moves stable review policy into customized system sections", () => {
+		const systemMessage = expectCustomizeSystemMessage(
+			buildSystemMessage(config, context.reviewedFiles.length),
+		);
+
 		assert.match(
-			prompt,
+			systemMessage.sections?.guidelines?.content ?? "",
+			/Missing or inadequate tests are reportable only when the gap materially weakens confidence in a meaningful behavior change/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/Review checklist:/,
+		);
+		assert.match(
+			systemMessage.sections?.environment_context?.content ?? "",
+			/pass concrete repo-relative directories as a directories array; wildcard directory patterns are not supported/,
+		);
+		assert.match(
+			systemMessage.sections?.code_change_rules?.content ?? "",
+			/Use emit_finding only for concrete validated issues\. If a concern is still a question, investigate more or drop it/,
+		);
+		assert.match(
+			systemMessage.sections?.tool_efficiency?.content ?? "",
+			/Call get_pr_overview first to understand the PR, changed files, file summaries, and CI context/,
+		);
+		assert.match(
+			systemMessage.sections?.last_instructions?.content ?? "",
+			/Return only a short plain-text summary, not JSON/,
+		);
+	});
+
+	it("includes review taxonomy and constraints in the system message", () => {
+		const systemMessage = expectCustomizeSystemMessage(
+			buildSystemMessage(config, context.reviewedFiles.length),
+		);
+
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/No question-shaped or speculative findings: verify the code path or drop the concern/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/Finding taxonomy:/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/- BUG: concrete correctness, data integrity, contract, state-transition/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/- VULNERABILITY: concrete security defects such as auth or authz bypass/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/- CODE_SMELL: only for substantial merge-relevant fragility with concrete impact/,
+		);
+	});
+
+	it("turns off per-file summary rules for large reviews in the system message", () => {
+		const systemMessage = expectCustomizeSystemMessage(
+			buildSystemMessage(
+				config,
+				MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1,
+			),
+		);
+
+		assert.match(
+			systemMessage.sections?.code_change_rules?.content ?? "",
+			/do not call record_file_summary for this review/,
+		);
+		assert.match(
+			systemMessage.sections?.tool_efficiency?.content ?? "",
 			/Do not record per-file summaries when reviewed files exceed 25/,
 		);
 	});

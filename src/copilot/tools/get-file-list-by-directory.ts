@@ -27,6 +27,7 @@ export function createGetFileListByDirectoryTool(
 	return defineTool("get_file_list_by_directory", {
 		description:
 			"List repo files under a safe directory at the head or base revision for architectural context.",
+		skipPermission: true,
 		parameters: {
 			type: "object",
 			additionalProperties: false,

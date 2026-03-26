@@ -12,6 +12,7 @@ export function createGetFileDiffTool(toolContext: ReviewToolContext) {
 
 	return defineTool("get_file_diff", {
 		description: "Get the unified diff for a specific reviewed file.",
+		skipPermission: true,
 		parameters: {
 			type: "object",
 			additionalProperties: false,

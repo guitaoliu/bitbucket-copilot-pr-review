@@ -9,6 +9,7 @@ export function createGetPrOverviewTool(toolContext: ReviewToolContext) {
 
 	return defineTool("get_pr_overview", {
 		description: "Get pull request metadata, diff statistics, and CI summary.",
+		skipPermission: true,
 		handler: async () =>
 			omitUndefined({
 				title: context.pr.title,

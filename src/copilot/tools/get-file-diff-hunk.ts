@@ -14,6 +14,7 @@ export function createGetFileDiffHunkTool(toolContext: ReviewToolContext) {
 	return defineTool("get_file_diff_hunk", {
 		description:
 			"Get a specific diff hunk for a reviewed file, including file header context.",
+		skipPermission: true,
 		parameters: {
 			type: "object",
 			additionalProperties: false,

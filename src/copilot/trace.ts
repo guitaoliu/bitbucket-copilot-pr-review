@@ -1,10 +1,20 @@
-import type { Logger } from "../shared/logger.ts";
-import type { CopilotSessionLike } from "./engine.ts";
+import type { SessionEvent } from "@github/copilot-sdk";
 
-export function wireReasoningTrace(
-	session: CopilotSessionLike,
+import type { Logger } from "../shared/logger.ts";
+
+export type CopilotSessionEventTracer = {
+	handleEvent(event: SessionEvent): void;
+};
+
+type SessionEventWithData = SessionEvent & { data?: Record<string, unknown> };
+
+function getEventData(event: SessionEvent): Record<string, unknown> {
+	return (event as SessionEventWithData).data ?? {};
+}
+
+export function createSessionEventTracer(
 	logger: Logger,
-): void {
+): CopilotSessionEventTracer {
 	const reasoningContentById = new Map<string, string>();
 
 	const appendContent = (reasoningId: string, content: string): void => {
@@ -33,17 +43,53 @@ export function wireReasoningTrace(
 		logger.trace("copilot reasoning", { reasoningId, content });
 	};
 
-	session.on("assistant.reasoning_delta", (event) => {
-		appendContent(event.data.reasoningId, event.data.deltaContent);
-	});
+	return {
+		handleEvent(event) {
+			if (event.type === "assistant.reasoning_delta") {
+				const data = getEventData(event);
+				const reasoningId =
+					typeof data.reasoningId === "string" ? data.reasoningId : undefined;
+				const deltaContent =
+					typeof data.deltaContent === "string" ? data.deltaContent : undefined;
+				if (reasoningId && deltaContent) {
+					appendContent(reasoningId, deltaContent);
+				}
+				return;
+			}
 
-	session.on("assistant.reasoning", (event) => {
-		flushReasoning(event.data.reasoningId, event.data.content);
-	});
+			if (event.type === "assistant.reasoning") {
+				const data = getEventData(event);
+				const reasoningId =
+					typeof data.reasoningId === "string" ? data.reasoningId : undefined;
+				const content =
+					typeof data.content === "string" ? data.content : undefined;
+				if (reasoningId) {
+					flushReasoning(reasoningId, content);
+				}
+				return;
+			}
 
-	session.on("session.idle", () => {
-		for (const reasoningId of reasoningContentById.keys()) {
-			flushReasoning(reasoningId);
-		}
-	});
+			if (event.type === "session.idle") {
+				for (const reasoningId of reasoningContentById.keys()) {
+					flushReasoning(reasoningId);
+				}
+				return;
+			}
+
+			if ((event as { type?: string }).type === "system.notification") {
+				const data = getEventData(event);
+				const content =
+					typeof data.content === "string" ? data.content : undefined;
+				const kind =
+					data.kind && typeof data.kind === "object"
+						? (data.kind as Record<string, unknown>)
+						: undefined;
+				logger.info("Copilot system notification", {
+					kind: typeof kind?.type === "string" ? kind.type : undefined,
+					status: typeof kind?.status === "string" ? kind.status : undefined,
+					content,
+				});
+			}
+		},
+	};
 }
