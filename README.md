@@ -169,3 +169,9 @@ node dist/cli.js review --help
 ## Why This Exists
 
 Bitbucket Data Center teams often want Copilot-assisted review inside their existing CI and review workflows. This project keeps the review loop inside your own Bitbucket and CI environment while staying conservative about file access, changed-line validation, and publication behavior.
+
+## License
+
+This project is licensed under Apache-2.0.
+
+It depends on `@github/copilot`, which is distributed under GitHub's separate license terms. Those terms apply to that runtime and GitHub Copilot service access; Apache-2.0 applies to this repository's source code.

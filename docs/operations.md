@@ -355,7 +355,7 @@ Before the workflow can publish, configure the package's trusted publisher on np
 - repository: `bitbucket-copilot-pr-review`
 - workflow filename: `publish.yml`
 
-After that, bump `package.json`, create a tag like `v0.1.1`, and push the tag to GitHub. The workflow installs dependencies with pnpm, runs `pnpm release:check`, and publishes with `npm publish` on a GitHub-hosted runner using OIDC.
+After that, bump `package.json`, create a tag like `v0.1.1`, and push the tag to GitHub. The workflow installs dependencies with pnpm, runs `pnpm release:check`, generates the GitHub release notes with `npx changelogithub`, and publishes with `npm publish` on a GitHub-hosted runner using OIDC.
 
 ## Notes
 
