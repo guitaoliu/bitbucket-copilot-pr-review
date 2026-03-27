@@ -33,9 +33,6 @@ Optional environment:
   COPILOT_MODEL=gpt-5.4
   COPILOT_REASONING_EFFORT=xhigh
   LOG_LEVEL=debug
-  REPORT_KEY=copilot-local-$USER
-  REPORT_TITLE='Copilot PR Review (local batch)'
-  REPORTER_NAME='GitHub Copilot Local Batch Test'
 
 Notes:
   - Batch mode clones the target repo automatically; no local checkout is required.
@@ -91,17 +88,13 @@ fi
 export COPILOT_MODEL="${COPILOT_MODEL:-gpt-5.4}"
 export COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 export LOG_LEVEL="${LOG_LEVEL:-debug}"
-export REPORT_KEY="${REPORT_KEY:-copilot-local-${USER:-local}}"
 export NODE_USE_SYSTEM_CA="${NODE_USE_SYSTEM_CA:-1}"
 
 declare -a REVIEW_ARGS=(batch "$REPO_URL")
 
 if [[ "${PUBLISH:-0}" == "1" ]]; then
-  export REPORT_TITLE="${REPORT_TITLE:-Copilot PR Review (local batch)}"
-  export REPORTER_NAME="${REPORTER_NAME:-GitHub Copilot Local Batch Test}"
+  :
 else
-  export REPORT_TITLE="${REPORT_TITLE:-Copilot PR Review (local batch dry run)}"
-  export REPORTER_NAME="${REPORTER_NAME:-GitHub Copilot Local Batch Dry Run}"
   REVIEW_ARGS+=(--dry-run)
 fi
 

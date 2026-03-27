@@ -32,10 +32,6 @@ Optional environment:
   COPILOT_MODEL=gpt-5.4
   COPILOT_REASONING_EFFORT=xhigh
   LOG_LEVEL=debug
-  REPORT_KEY=copilot-local-$USER
-  REPORT_TITLE='Copilot PR Review (local)'
-  REPORTER_NAME='GitHub Copilot Local Test'
-  REPORT_LINK=https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 EOF
 }
 
@@ -84,18 +80,13 @@ export REPO_ROOT="$TARGET_REPO_ROOT"
 export COPILOT_MODEL="${COPILOT_MODEL:-gpt-5.4}"
 export COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 export LOG_LEVEL="${LOG_LEVEL:-debug}"
-export REPORT_KEY="${REPORT_KEY:-copilot-local-${USER:-local}}"
-export REPORT_LINK="${REPORT_LINK:-$PR_URL}"
 export NODE_USE_SYSTEM_CA="${NODE_USE_SYSTEM_CA:-1}"
 
 declare -a REVIEW_ARGS=(review "$PR_URL")
 
 if [[ "${PUBLISH:-0}" == "1" ]]; then
-  export REPORT_TITLE="${REPORT_TITLE:-Copilot PR Review (local)}"
-  export REPORTER_NAME="${REPORTER_NAME:-GitHub Copilot Local Test}"
+  :
 else
-  export REPORT_TITLE="${REPORT_TITLE:-Copilot PR Review (local dry run)}"
-  export REPORTER_NAME="${REPORTER_NAME:-GitHub Copilot Local Dry Run}"
   REVIEW_ARGS+=(--dry-run)
 fi
 
