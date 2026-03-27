@@ -1,17 +1,5 @@
 import type { PullRequestInfo } from "../bitbucket/types.ts";
-import { REVIEWER_CONFIG_DEFAULTS } from "../config/defaults.ts";
 import type { ReviewerConfig } from "../config/types.ts";
-
-function buildEffectiveSkipBranchPrefixes(
-	configuredPrefixes: ReviewerConfig["review"]["skipBranchPrefixes"],
-): string[] {
-	return [
-		...new Set([
-			...REVIEWER_CONFIG_DEFAULTS.review.skipBranchPrefixes,
-			...configuredPrefixes,
-		]),
-	];
-}
 
 export function getPullRequestSkipReason(
 	pullRequest: Pick<PullRequestInfo, "id" | "source" | "draft">,
@@ -21,7 +9,7 @@ export function getPullRequestSkipReason(
 		return `Skipping review because pull request #${pullRequest.id} is a draft.`;
 	}
 
-	for (const prefix of buildEffectiveSkipBranchPrefixes(skipBranchPrefixes)) {
+	for (const prefix of skipBranchPrefixes) {
 		if (pullRequest.source.displayId.startsWith(prefix)) {
 			return `Skipping review because pull request #${pullRequest.id} source branch ${pullRequest.source.displayId} matches skip prefix ${prefix}.`;
 		}

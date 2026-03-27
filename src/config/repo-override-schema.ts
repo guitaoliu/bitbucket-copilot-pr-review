@@ -35,7 +35,6 @@ function boundedStringArray(options: {
 	maxItems: number;
 	maxEntryLength: number;
 	requireNonEmptyArray?: boolean;
-	requireAtLeastOne?: boolean;
 	entryLabel: string;
 	entriesLabel: string;
 }) {
@@ -49,7 +48,7 @@ function boundedStringArray(options: {
 			),
 	);
 
-	if (options.requireAtLeastOne || options.requireNonEmptyArray) {
+	if (options.requireNonEmptyArray) {
 		schema = schema.min(
 			1,
 			`${options.fieldName} must contain at least one ${options.entryLabel}.`,

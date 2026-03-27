@@ -88,7 +88,21 @@ describe("getPullRequestSkipReason", () => {
 		);
 	});
 
-	it("always keeps the renovate default even with custom prefixes", () => {
+	it("allows clearing the renovate default when no skip prefixes are configured", () => {
+		const reason = getPullRequestSkipReason(
+			{
+				id: 123,
+				source: {
+					displayId: "renovate/npm-10",
+				},
+			} as never,
+			[],
+		);
+
+		assert.equal(reason, undefined);
+	});
+
+	it("uses only configured prefixes when custom prefixes are provided", () => {
 		const reason = getPullRequestSkipReason(
 			{
 				id: 123,
@@ -99,9 +113,6 @@ describe("getPullRequestSkipReason", () => {
 			["deps/"],
 		);
 
-		assert.equal(
-			reason,
-			"Skipping review because pull request #123 source branch renovate/npm-10 matches skip prefix renovate/.",
-		);
+		assert.equal(reason, undefined);
 	});
 });

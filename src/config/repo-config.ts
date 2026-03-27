@@ -14,9 +14,7 @@ import {
 } from "./reviewer-config.ts";
 import type { ReviewerConfig, ReviewerConfigRepoOverrides } from "./types.ts";
 
-const reviewRepoConfigSchema = createReviewOverrideSchema({
-	requireNonEmptyArrays: true,
-});
+const reviewRepoConfigSchema = createReviewOverrideSchema();
 
 const repoConfigSchema = z
 	.object({

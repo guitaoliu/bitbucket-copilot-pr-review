@@ -152,15 +152,16 @@ describe("parseRepoReviewConfig", () => {
 		);
 	});
 
-	it("still rejects empty arrays in repo config", () => {
-		assert.throws(
-			() => parseRepoReviewConfig('{"review":{"ignorePaths":[]}}'),
-			/must contain at least one pattern/,
-		);
-		assert.throws(
-			() => parseRepoReviewConfig('{"review":{"skipBranchPrefixes":[]}}'),
-			/must contain at least one prefix/,
-		);
+	it("allows clearing list-based review overrides with empty arrays", () => {
+		const config = parseRepoReviewConfig(`{
+		  "review": {
+		    "ignorePaths": [],
+		    "skipBranchPrefixes": []
+		  }
+		}`);
+
+		assert.deepEqual(config.review?.ignorePaths, []);
+		assert.deepEqual(config.review?.skipBranchPrefixes, []);
 	});
 });
 
@@ -195,6 +196,15 @@ describe("mergeRepoReviewConfig", () => {
 		);
 
 		assert.deepEqual(merged.review.skipBranchPrefixes, ["renovate/", "deps/"]);
+	});
+
+	it("lets repo config clear default skip branch prefixes", () => {
+		const merged = mergeRepoReviewConfig(
+			baseConfig,
+			parseRepoReviewConfig('{"review":{"skipBranchPrefixes":[]}}'),
+		);
+
+		assert.deepEqual(merged.review.skipBranchPrefixes, []);
 	});
 
 	it("preserves explicit env overrides over repo config", () => {

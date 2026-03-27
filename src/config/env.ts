@@ -129,8 +129,8 @@ function buildEnvBoolean(name: string) {
 	});
 }
 
-function buildEnvStringArray(name: string) {
-	return optionalEnvString().transform((value, ctx): string[] | undefined => {
+function buildEnvStringArray(_name: string) {
+	return optionalEnvString().transform((value): string[] | undefined => {
 		if (value === undefined) {
 			return undefined;
 		}
@@ -140,11 +140,7 @@ function buildEnvStringArray(name: string) {
 			.map((part) => part.trim())
 			.filter((part) => part.length > 0);
 		if (parts.length === 0) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message: `${name} must contain at least one non-empty value when provided.`,
-			});
-			return z.NEVER;
+			return [];
 		}
 
 		return parts;

@@ -185,7 +185,7 @@ The batch JSON output includes `metrics.mirror` and `metrics.workspaces`. Single
 
 The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and forwards common controls such as `MAX_PARALLEL`, `TEMP_ROOT`, `KEEP_WORKDIRS=1`, and `FORCE_REVIEW=1`.
 
-Pull requests whose source branch starts with `renovate/` are skipped automatically. You can override the skipped branch prefixes with `REVIEW_SKIP_BRANCH_PREFIXES` or repo-level `review.skipBranchPrefixes`; the default remains `["renovate/"]`.
+Pull requests whose source branch starts with `renovate/` are skipped automatically by default. You can override the skipped branch prefixes with `REVIEW_SKIP_BRANCH_PREFIXES` or repo-level `review.skipBranchPrefixes`, including clearing the list entirely.
 
 ## Testing Against a Real Repo and PR
 

@@ -100,6 +100,23 @@ describe("parseEnvironment", () => {
 		});
 	});
 
+	it("allows clearing env-based list overrides with blank values", () => {
+		const env = parseEnvironment({
+			BITBUCKET_TOKEN: "token",
+			REVIEW_IGNORE_PATHS: " , ",
+			REVIEW_SKIP_BRANCH_PREFIXES: " , ",
+		});
+
+		assert.deepEqual(getEnvRepoOverrides(env), {
+			copilot: {},
+			report: {},
+			review: {
+				ignorePaths: [],
+				skipBranchPrefixes: [],
+			},
+		});
+	});
+
 	it("applies repo-config bounds to env-based repo overrides", () => {
 		assert.throws(
 			() =>
@@ -415,6 +432,27 @@ describe("loadConfig feature flags", () => {
 		assert.equal(merged.copilot.model, "env-model");
 	});
 
+	it("lets env values clear repo-configured list overrides", () => {
+		const config = loadConfig(["review", pullRequestUrl], {
+			BITBUCKET_TOKEN: "token",
+			REVIEW_IGNORE_PATHS: " , ",
+			REVIEW_SKIP_BRANCH_PREFIXES: " , ",
+		});
+
+		const merged = mergeRepoReviewConfig(
+			config,
+			parseRepoReviewConfig(`{
+			  "review": {
+			    "ignorePaths": ["generated/**"],
+			    "skipBranchPrefixes": ["renovate/", "deps/"]
+			  }
+			}`),
+		);
+
+		assert.deepEqual(merged.review.ignorePaths, []);
+		assert.deepEqual(merged.review.skipBranchPrefixes, []);
+	});
+
 	it("requires Bitbucket authentication envs", () => {
 		assert.throws(
 			() => loadConfig(["review", pullRequestUrl], {}),
@@ -453,6 +491,15 @@ describe("loadBatchConfig", () => {
 		});
 
 		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/", "deps/"]);
+	});
+
+	it("lets batch env clear default skip branch prefixes", () => {
+		const config = loadBatchConfig(["batch", repositoryUrl], {
+			BITBUCKET_TOKEN: "token",
+			REVIEW_SKIP_BRANCH_PREFIXES: " , ",
+		});
+
+		assert.deepEqual(config.review.skipBranchPrefixes, []);
 	});
 
 	it("rejects batch-only command invocations without a repository url", () => {
