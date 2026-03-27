@@ -142,7 +142,7 @@ export class GitRepository {
 				stdio: ["ignore", "pipe", "pipe"],
 			});
 			const matchesByKey = new Map<string, GitTextSearchMatch>();
-			let stdoutBuffer = "";
+			const stdoutChunks: Buffer[] = [];
 			let stderr = "";
 			let terminatedForLimit = false;
 			let recordedDuration = false;
@@ -200,25 +200,22 @@ export class GitRepository {
 				}
 			};
 
-			const flushBufferedLines = (flushRemainder: boolean) => {
-				let newlineIndex = stdoutBuffer.indexOf("\n");
-				while (newlineIndex >= 0) {
-					const line = stdoutBuffer.slice(0, newlineIndex).replace(/\r$/, "");
-					stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-					noteMatch(line);
-					newlineIndex = stdoutBuffer.indexOf("\n");
-				}
+			const flushMatchesFromOutput = () => {
+				const output = Buffer.concat(stdoutChunks).toString("utf8");
+				for (const rawLine of output.split("\n")) {
+					const line = rawLine.replace(/\r$/, "");
+					if (line.length === 0) {
+						continue;
+					}
 
-				if (flushRemainder && stdoutBuffer.trim().length > 0) {
-					noteMatch(stdoutBuffer.replace(/\r$/, ""));
-					stdoutBuffer = "";
+					noteMatch(line);
 				}
 			};
 
-			child.stdout.setEncoding("utf8");
-			child.stdout.on("data", (chunk: string) => {
-				stdoutBuffer += chunk;
-				flushBufferedLines(false);
+			child.stdout.on("data", (chunk: Buffer | string) => {
+				stdoutChunks.push(
+					Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"),
+				);
 			});
 
 			child.stderr.setEncoding("utf8");
@@ -233,7 +230,7 @@ export class GitRepository {
 
 			child.on("close", (exitCode) => {
 				recordDuration();
-				flushBufferedLines(true);
+				flushMatchesFromOutput();
 				const matches = [...matchesByKey.values()];
 				if (terminatedForLimit && boundedLimit !== undefined) {
 					finalize({
@@ -449,7 +446,7 @@ export class GitRepository {
 			wholeWord?: boolean;
 		},
 	): Promise<GitTextSearchResult> {
-		const args = ["grep", "-n", "-I", "--full-name"];
+		const args = ["grep", "-n", "-I", "--full-name", "--null"];
 		const mode = options?.mode ?? "literal";
 
 		if (mode === "literal") {

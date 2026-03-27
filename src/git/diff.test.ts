@@ -98,6 +98,25 @@ describe("git search helpers", () => {
 		);
 	});
 
+	it("parses git grep output for paths containing colons", () => {
+		assert.deepEqual(parseGitGrepLine("dir:a.ts:7:export const value = 1"), {
+			path: "dir:a.ts",
+			line: 7,
+			text: "export const value = 1",
+		});
+	});
+
+	it("parses null-delimited git grep output for paths containing colons", () => {
+		assert.deepEqual(
+			parseGitGrepLine("abc123:dir:a.ts\u00007\u0000export const value = 1"),
+			{
+				path: "dir:a.ts",
+				line: 7,
+				text: "export const value = 1",
+			},
+		);
+	});
+
 	it("returns undefined for malformed grep lines", () => {
 		assert.equal(parseGitGrepLine("not-a-match"), undefined);
 	});
