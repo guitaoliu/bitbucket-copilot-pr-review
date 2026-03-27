@@ -230,7 +230,7 @@ export function createGetRelatedTestsTool(toolContext: ReviewToolContext) {
 				note:
 					rankedCandidates.length === 0
 						? truncateText(
-								"No likely related tests were found in nearby concrete directories. If coverage still matters, search more narrowly with search_text_in_repo or inspect known test roots.",
+								"No likely related tests were found in nearby concrete directories. This heuristic result is not proof that no relevant tests exist. If coverage still matters, search more narrowly with search_text_in_repo or inspect known test roots.",
 								240,
 							)
 						: undefined,

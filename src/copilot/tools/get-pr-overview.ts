@@ -1,6 +1,7 @@
 import { defineTool } from "@github/copilot-sdk";
 
 import { omitUndefined } from "../../shared/object.ts";
+import { truncatePullRequestDescription } from "../pr-description.ts";
 import { summarizeFile } from "./common.ts";
 import type { ReviewToolContext } from "./context.ts";
 
@@ -8,12 +9,19 @@ export function createGetPrOverviewTool(toolContext: ReviewToolContext) {
 	const { context } = toolContext;
 
 	return defineTool("get_pr_overview", {
-		description: "Get pull request metadata, diff statistics, and CI summary.",
+		description:
+			"Get pull request metadata, changed-file metadata, and CI summary.",
 		skipPermission: true,
-		handler: async () =>
-			omitUndefined({
+		handler: async () => {
+			const description = truncatePullRequestDescription(
+				context.pr.description,
+			);
+
+			return omitUndefined({
 				title: context.pr.title,
-				description: context.pr.description,
+				description: description.content,
+				descriptionTruncated: description.truncated,
+				descriptionOriginalChars: description.originalChars,
 				sourceBranch: context.pr.source.displayId,
 				targetBranch: context.pr.target.displayId,
 				headCommit: context.headCommit,
@@ -28,6 +36,7 @@ export function createGetPrOverviewTool(toolContext: ReviewToolContext) {
 						? undefined
 						: "No CI summary was provided.",
 				}),
-			}),
+			});
+		},
 	});
 }

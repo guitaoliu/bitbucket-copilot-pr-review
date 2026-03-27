@@ -36,7 +36,7 @@ export function createEmitFindingTool(toolContext: ReviewToolContext) {
 				category: {
 					type: "string",
 					description:
-						"Optional category such as security, correctness, or performance.",
+						"Optional short category when obvious and helpful, such as security, correctness, data-integrity, concurrency, reliability, performance, or tests.",
 				},
 			},
 			required: [

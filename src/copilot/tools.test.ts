@@ -814,6 +814,54 @@ describe("Copilot tools", () => {
 		});
 	});
 
+	it("explains that missing nearby-test suggestions are only heuristic", async () => {
+		const git = createGitStub({
+			getPathTypeAtCommit: async (_commit, filePath) => {
+				if (filePath === "src" || filePath === "test") {
+					return "directory";
+				}
+
+				return undefined;
+			},
+			listFilesAtCommit: async () => [
+				"src/new-name.ts",
+				"test/unrelated.test.ts",
+			],
+		});
+		const tool = createGetRelatedTestsTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{ path: string; version?: "head" | "base"; limit?: number },
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{ path: "src/new-name.ts", limit: 3 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_related_tests",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			path: "src/new-name.ts",
+			version: "head",
+			directoriesSearched: ["src", "test", "tests"],
+			candidateCount: 0,
+			candidates: [],
+			note: "No likely related tests were found in nearby concrete directories. This heuristic result is not proof that no relevant tests exist. If coverage still matters, search more narrowly with search_text_in_repo or inspect known test roots.",
+		});
+	});
+
 	it("lists files across multiple directories and filters blocked descendants", async () => {
 		const git = createGitStub({
 			getPathTypeAtCommit: async (_commit, filePath) => {
@@ -1023,6 +1071,140 @@ describe("Copilot tools", () => {
 			undefined,
 		);
 		assert.equal(createEmitFindingTool(toolContext).skipPermission, undefined);
+	});
+
+	it("describes overview and finding category fields precisely", () => {
+		const toolContext = createReviewToolContext(
+			config,
+			reviewContext,
+			createGitStub(),
+			[],
+			createSummaryDrafts(),
+		);
+		const overviewTool = createGetPrOverviewTool(toolContext);
+		const emitFindingTool = createEmitFindingTool(toolContext);
+		const emitFindingParameters = emitFindingTool.parameters as {
+			properties?: Record<string, { description?: string }>;
+		};
+
+		assert.equal(
+			overviewTool.description,
+			"Get pull request metadata, changed-file metadata, and CI summary.",
+		);
+		assert.equal(
+			emitFindingParameters.properties?.category?.description,
+			"Optional short category when obvious and helpful, such as security, correctness, data-integrity, concurrency, reliability, performance, or tests.",
+		);
+	});
+
+	it("returns overview metadata including PR description and CI summary", async () => {
+		const tool = createGetPrOverviewTool(
+			createReviewToolContext(
+				config,
+				{
+					...reviewContext,
+					pr: {
+						...reviewContext.pr,
+						description: "Untrusted summary from the PR body.",
+					},
+					ciSummary: "1 failing test in validation suite",
+				},
+				createGitStub(),
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<unknown, unknown>(tool);
+
+		const result = await handler(
+			{},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_pr_overview",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			title: "Test PR",
+			description: "Untrusted summary from the PR body.",
+			sourceBranch: "feature",
+			targetBranch: "main",
+			headCommit: "head-123",
+			mergeBaseCommit: "base-123",
+			diffStats: { fileCount: 1, additions: 2, deletions: 1 },
+			reviewedFiles: [
+				{
+					path: "src/new-name.ts",
+					oldPath: "src/old-name.ts",
+					status: "renamed",
+					additions: 2,
+					deletions: 1,
+					changedLineCount: 2,
+					changedLineRanges: "10-11",
+					hunks: [{ newStart: 10, newEnd: 11, header: "" }],
+				},
+				{
+					path: "src/multi-hunk.ts",
+					oldPath: undefined,
+					status: "modified",
+					additions: 2,
+					deletions: 1,
+					changedLineCount: 2,
+					changedLineRanges: "1, 10",
+					hunks: [
+						{ newStart: 1, newEnd: 3, header: "" },
+						{ newStart: 10, newEnd: 13, header: "" },
+					],
+				},
+			],
+			skippedFiles: [],
+			ciSummary: {
+				status: "ok",
+				content: "1 failing test in validation suite",
+			},
+		});
+	});
+
+	it("truncates oversized PR descriptions in the overview response", async () => {
+		const description = `intro ${"x".repeat(2500)}`;
+		const tool = createGetPrOverviewTool(
+			createReviewToolContext(
+				config,
+				{
+					...reviewContext,
+					pr: {
+						...reviewContext.pr,
+						description,
+					},
+				},
+				createGitStub(),
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<unknown, unknown>(tool);
+
+		const result = (await handler(
+			{},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_pr_overview",
+				arguments: {},
+			},
+		)) as {
+			description?: string;
+			descriptionTruncated?: boolean;
+			descriptionOriginalChars?: number;
+		};
+
+		assert.equal(result.descriptionTruncated, true);
+		assert.equal(result.descriptionOriginalChars, description.length);
+		assert.equal(result.description?.startsWith("intro "), true);
+		assert.equal(result.description?.endsWith("... truncated ..."), true);
+		assert.equal(result.description?.includes("x".repeat(2200)), false);
 	});
 
 	it("reports diff truncation metadata", async () => {

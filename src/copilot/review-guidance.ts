@@ -9,22 +9,24 @@ type FindingTaxonomyRule = {
 const FINDING_TAXONOMY_RULES = [
 	{
 		type: "BUG",
-		hintClause: " for concrete defects",
+		hintClause:
+			" for concrete defects introduced or materially worsened by the PR",
 		promptDetails:
-			"concrete correctness, data integrity, contract, state-transition, error-handling, or performance defects that can cause wrong results, crashes, corruption, stuck behavior, or broken compatibility.",
+			"concrete correctness, data integrity, contract, state-transition, error-handling, or performance defects that can cause wrong results, crashes, corruption, stuck behavior, or broken compatibility when introduced or materially worsened by this PR.",
 	},
 	{
 		type: "VULNERABILITY",
-		hintClause: " for concrete security issues",
+		hintClause:
+			" for concrete security issues introduced or materially worsened by the PR",
 		promptDetails:
-			"concrete security defects such as auth or authz bypass, injection, secret exposure, unsafe execution, trust-boundary violations, or unintended data disclosure.",
+			"concrete security defects such as auth or authz bypass, injection, secret exposure, unsafe execution, trust-boundary violations, or unintended data disclosure when introduced or materially worsened by this PR.",
 	},
 	{
 		type: "CODE_SMELL",
 		hintClause:
-			" only for substantial merge-relevant fragility such as missing test coverage",
+			" only for substantial merge-relevant fragility introduced or materially worsened by the PR, such as missing test coverage",
 		promptDetails:
-			"only for substantial merge-relevant fragility with concrete impact, such as missing test coverage for a meaningful behavior change or brittle logic likely to break soon. Never use it for style, naming, formatting, or preference.",
+			"only for substantial merge-relevant fragility with concrete impact, such as missing test coverage for a meaningful behavior change or brittle logic likely to break soon, when the PR introduces or materially worsens that risk. Never use it for style, naming, formatting, or preference.",
 	},
 ] as const satisfies readonly FindingTaxonomyRule[];
 
@@ -55,7 +57,7 @@ export const FINDING_TAXONOMY_PROMPT_LINES = FINDING_TAXONOMY_RULES.map(
 );
 
 export const FINDING_TAXONOMY_PREFERENCE_PROMPT_LINE =
-	"- Prefer BUG or VULNERABILITY when the code is already wrong or already widens access.";
+	"- Prefer BUG or VULNERABILITY when the PR makes behavior wrong or widens access.";
 
 export const FINDING_TAXONOMY_HINT = `Use ${joinNaturalLanguageList(
 	FINDING_TAXONOMY_RULES.map((rule) => `${rule.type}${rule.hintClause}`),
@@ -68,9 +70,9 @@ export const QUESTION_SHAPED_FINDING_PROMPT_LINE =
 	"- No question-shaped or speculative findings: verify the code path or drop the concern.";
 
 export const TEST_COVERAGE_HINT =
-	"Only treat missing tests as a standalone finding when the gap materially reduces confidence in a risky behavior change; prefer concrete BUG or VULNERABILITY findings when the code is already wrong.";
+	"Only treat missing tests as a standalone finding when the gap materially reduces confidence in a risky behavior change introduced or materially changed by the PR; prefer concrete BUG or VULNERABILITY findings when the PR already makes the behavior wrong.";
 
 export const TEST_COVERAGE_PROMPT_LINES = [
-	"- Missing or inadequate tests are reportable only when the gap materially weakens confidence in a meaningful behavior change, especially in auth, validation, persistence, or public API paths.",
-	"- Do not emit a standalone test-coverage finding when a stronger concrete BUG or VULNERABILITY already captures the same root cause unless the missing coverage leaves a distinct untested risk.",
+	"- Missing or inadequate tests are reportable only when the gap materially weakens confidence in a meaningful behavior change introduced or materially changed by the PR, especially in auth, validation, persistence, or public API paths.",
+	"- Do not emit a standalone test-coverage finding when a stronger concrete BUG or VULNERABILITY already captures the same PR-introduced or PR-worsened root cause unless the missing coverage leaves a distinct untested risk.",
 ] as const;
