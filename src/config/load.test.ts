@@ -303,11 +303,19 @@ describe("loadConfig feature flags", () => {
 		assert.equal(config.bitbucket.projectKey, "PROJ");
 		assert.equal(config.bitbucket.repoSlug, "repo");
 		assert.equal(config.bitbucket.prId, 123);
-		assert.equal(config.bitbucket.tls.insecureSkipVerify, true);
+		assert.equal(config.bitbucket.tls.insecureSkipVerify, false);
 		assert.equal(config.report.key, "copilot-pr-review");
 		assert.equal(config.review.forceReview, false);
 		assert.equal(config.review.confirmRerun, false);
 		assert.equal(config.review.maxFiles, 300);
+	});
+
+	it("keeps strict TLS enabled by default in batch mode", () => {
+		const config = loadBatchConfig(["batch", repositoryUrl], {
+			BITBUCKET_TOKEN: "token",
+		});
+
+		assert.equal(config.bitbucket.tls.insecureSkipVerify, false);
 	});
 
 	it("parses ignored review path globs from env", () => {

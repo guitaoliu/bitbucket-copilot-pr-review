@@ -10,7 +10,7 @@ export const REVIEWER_CONFIG_DEFAULTS = {
 	logLevel: "info" as LogLevel,
 	bitbucket: {
 		tls: {
-			insecureSkipVerify: true,
+			insecureSkipVerify: false,
 		},
 	},
 	copilot: {

@@ -96,7 +96,7 @@ Bitbucket repository URL, for example https://host/projects/PROJ/repos/my-repo.
 | `LOG_LEVEL` | `info` | Logger verbosity. |
 | `BITBUCKET_AUTH_TYPE` | auto-detected from provided credentials | Bitbucket authentication strategy. |
 | `BITBUCKET_CA_CERT_PATH` | - | PEM CA bundle path for Bitbucket TLS. |
-| `BITBUCKET_INSECURE_TLS` | `true` | Skip strict TLS verification for Bitbucket. |
+| `BITBUCKET_INSECURE_TLS` | `false` | Skip strict TLS verification for Bitbucket. |
 | `COPILOT_MODEL` | `gpt-5.4` | Copilot model override. |
 | `COPILOT_REASONING_EFFORT` | `xhigh` | Copilot reasoning effort. |
 | `COPILOT_TIMEOUT_MS` | `1800000` | Copilot timeout in milliseconds. |
@@ -200,7 +200,7 @@ scripts/run-local-review.sh /path/to/local/my-repo \
 
 The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, and runs in dry-run mode unless you set `PUBLISH=1`.
 
-If your Bitbucket Data Center uses an internal or self-signed certificate, prefer setting `BITBUCKET_CA_CERT_PATH` to a PEM file containing your CA bundle. Strict TLS verification is disabled by default. Set `BITBUCKET_INSECURE_TLS=0` after `BITBUCKET_CA_CERT_PATH` is configured if you want certificate validation enforced.
+If your Bitbucket Data Center uses an internal or self-signed certificate, prefer setting `BITBUCKET_CA_CERT_PATH` to a PEM file containing your CA bundle. Strict TLS verification is enabled by default. Set `BITBUCKET_INSECURE_TLS=1` only as a temporary workaround if you need to bypass certificate validation while trust is being configured.
 
 For local helper-script runs, Node system CA loading is enabled by default with `NODE_USE_SYSTEM_CA=1`. Set `NODE_USE_SYSTEM_CA=0` if you need to disable that behavior for troubleshooting.
 
@@ -311,7 +311,7 @@ Common local test issues:
 - the repo in `REPO_ROOT` is not the same repo referenced by the PR URL
 - the local checkout cannot fetch the source or target commit referenced by the PR
 - the bundled `@github/copilot` runtime is missing or the Copilot SDK cannot resolve auth from your existing login or token setup
-- Node.js does not trust the Bitbucket TLS certificate chain; use `BITBUCKET_CA_CERT_PATH`, or keep the default `BITBUCKET_INSECURE_TLS=1` until trust is configured
+- Node.js does not trust the Bitbucket TLS certificate chain; use `BITBUCKET_CA_CERT_PATH`, or set `BITBUCKET_INSECURE_TLS=1` temporarily until trust is configured
 - the PR is from a fork and your local git credentials cannot fetch the fork remote URL returned by Bitbucket
 
 ## CI Usage
