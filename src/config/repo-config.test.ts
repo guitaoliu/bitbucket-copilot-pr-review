@@ -151,6 +151,17 @@ describe("parseRepoReviewConfig", () => {
 			/at most 128 characters/,
 		);
 	});
+
+	it("still rejects empty arrays in repo config", () => {
+		assert.throws(
+			() => parseRepoReviewConfig('{"review":{"ignorePaths":[]}}'),
+			/must contain at least one pattern/,
+		);
+		assert.throws(
+			() => parseRepoReviewConfig('{"review":{"skipBranchPrefixes":[]}}'),
+			/must contain at least one prefix/,
+		);
+	});
 });
 
 describe("mergeRepoReviewConfig", () => {

@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { CliUserError } from "./errors.ts";
 import {
-	CONFIDENCE_VALUES,
-	REASONING_EFFORT_VALUES,
-	REPORT_COMMENT_STRATEGY_VALUES,
-} from "./metadata.ts";
+	createCopilotOverrideSchema,
+	createReportOverrideSchema,
+	createReviewOverrideSchema,
+	REPO_CONFIG_LIMITS,
+} from "./repo-override-schema.ts";
 import {
 	applyRepoOverrides,
 	createEmptyRepoOverrides,
@@ -13,114 +14,9 @@ import {
 } from "./reviewer-config.ts";
 import type { ReviewerConfig, ReviewerConfigRepoOverrides } from "./types.ts";
 
-const REPO_CONFIG_LIMITS = {
-	schemaRefMaxLength: 2048,
-	modelMaxLength: 120,
-	reportTitleMaxLength: 120,
-	timeoutMs: { min: 60_000, max: 3_600_000 },
-	maxFiles: { min: 1, max: 500 },
-	maxFindings: { min: 1, max: 100 },
-	maxPatchChars: { min: 500, max: 50_000 },
-	defaultFileSliceLines: { min: 1, max: 500 },
-	maxFileSliceLines: { min: 1, max: 1_000 },
-	ignorePaths: { maxItems: 200, maxPatternLength: 512 },
-	skipBranchPrefixes: { maxItems: 50, maxPrefixLength: 128 },
-} as const;
-
-function boundedInteger(name: string, limits: { min: number; max: number }) {
-	return z
-		.int(`${name} must be an integer.`)
-		.min(limits.min, `${name} must be at least ${limits.min}.`)
-		.max(limits.max, `${name} must be at most ${limits.max}.`);
-}
-
-const reviewRepoConfigSchema = z
-	.object({
-		maxFiles: boundedInteger("review.maxFiles", REPO_CONFIG_LIMITS.maxFiles)
-			.describe("Maximum number of changed files to review after filtering.")
-			.optional(),
-		maxFindings: boundedInteger(
-			"review.maxFindings",
-			REPO_CONFIG_LIMITS.maxFindings,
-		)
-			.describe("Maximum number of findings to publish.")
-			.optional(),
-		minConfidence: z
-			.enum(CONFIDENCE_VALUES)
-			.describe("Minimum confidence threshold for reportable findings.")
-			.optional(),
-		maxPatchChars: boundedInteger(
-			"review.maxPatchChars",
-			REPO_CONFIG_LIMITS.maxPatchChars,
-		)
-			.describe("Maximum diff characters to send for a reviewed file.")
-			.optional(),
-		defaultFileSliceLines: boundedInteger(
-			"review.defaultFileSliceLines",
-			REPO_CONFIG_LIMITS.defaultFileSliceLines,
-		)
-			.describe("Default line window when reading file content slices.")
-			.optional(),
-		maxFileSliceLines: boundedInteger(
-			"review.maxFileSliceLines",
-			REPO_CONFIG_LIMITS.maxFileSliceLines,
-		)
-			.describe("Maximum line window allowed for file content slices.")
-			.optional(),
-		ignorePaths: z
-			.array(
-				z
-					.string()
-					.min(1, "review.ignorePaths entries must not be empty.")
-					.max(
-						REPO_CONFIG_LIMITS.ignorePaths.maxPatternLength,
-						`review.ignorePaths entries must be at most ${REPO_CONFIG_LIMITS.ignorePaths.maxPatternLength} characters.`,
-					),
-			)
-			.min(1, "review.ignorePaths must contain at least one pattern.")
-			.max(
-				REPO_CONFIG_LIMITS.ignorePaths.maxItems,
-				`review.ignorePaths must contain at most ${REPO_CONFIG_LIMITS.ignorePaths.maxItems} patterns.`,
-			)
-			.describe(
-				"Repo-relative glob patterns for changed files that should be skipped during review.",
-			)
-			.optional(),
-		skipBranchPrefixes: z
-			.array(
-				z
-					.string()
-					.min(1, "review.skipBranchPrefixes entries must not be empty.")
-					.max(
-						REPO_CONFIG_LIMITS.skipBranchPrefixes.maxPrefixLength,
-						`review.skipBranchPrefixes entries must be at most ${REPO_CONFIG_LIMITS.skipBranchPrefixes.maxPrefixLength} characters.`,
-					),
-			)
-			.min(1, "review.skipBranchPrefixes must contain at least one prefix.")
-			.max(
-				REPO_CONFIG_LIMITS.skipBranchPrefixes.maxItems,
-				`review.skipBranchPrefixes must contain at most ${REPO_CONFIG_LIMITS.skipBranchPrefixes.maxItems} prefixes.`,
-			)
-			.describe(
-				"Source branch prefixes that should always be skipped during review.",
-			)
-			.optional(),
-	})
-	.strict()
-	.superRefine((review, ctx) => {
-		if (
-			review.defaultFileSliceLines !== undefined &&
-			review.maxFileSliceLines !== undefined &&
-			review.defaultFileSliceLines > review.maxFileSliceLines
-		) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				path: ["defaultFileSliceLines"],
-				message:
-					"review.defaultFileSliceLines must be less than or equal to review.maxFileSliceLines.",
-			});
-		}
-	});
+const reviewRepoConfigSchema = createReviewOverrideSchema({
+	requireNonEmptyArrays: true,
+});
 
 const repoConfigSchema = z
 	.object({
@@ -132,50 +28,8 @@ const repoConfigSchema = z
 			)
 			.describe("Optional JSON Schema reference for editor support.")
 			.optional(),
-		copilot: z
-			.object({
-				model: z
-					.string()
-					.min(1, "copilot.model must not be empty.")
-					.max(
-						REPO_CONFIG_LIMITS.modelMaxLength,
-						`copilot.model must be at most ${REPO_CONFIG_LIMITS.modelMaxLength} characters.`,
-					)
-					.describe("Optional Copilot model override for this repository.")
-					.optional(),
-				reasoningEffort: z
-					.enum(REASONING_EFFORT_VALUES)
-					.describe("Optional reasoning effort override for this repository.")
-					.optional(),
-				timeoutMs: boundedInteger(
-					"copilot.timeoutMs",
-					REPO_CONFIG_LIMITS.timeoutMs,
-				)
-					.describe("Optional Copilot timeout in milliseconds.")
-					.optional(),
-			})
-			.strict()
-			.optional(),
-		report: z
-			.object({
-				title: z
-					.string()
-					.min(1, "report.title must not be empty.")
-					.max(
-						REPO_CONFIG_LIMITS.reportTitleMaxLength,
-						`report.title must be at most ${REPO_CONFIG_LIMITS.reportTitleMaxLength} characters.`,
-					)
-					.describe("Optional Code Insights report title override.")
-					.optional(),
-				commentStrategy: z
-					.enum(REPORT_COMMENT_STRATEGY_VALUES)
-					.describe(
-						"How the tagged pull request summary comment should be updated.",
-					)
-					.optional(),
-			})
-			.strict()
-			.optional(),
+		copilot: createCopilotOverrideSchema().optional(),
+		report: createReportOverrideSchema().optional(),
 		review: reviewRepoConfigSchema.optional(),
 	})
 	.strict();

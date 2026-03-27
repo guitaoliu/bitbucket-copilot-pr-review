@@ -99,6 +99,30 @@ describe("parseEnvironment", () => {
 			},
 		});
 	});
+
+	it("applies repo-config bounds to env-based repo overrides", () => {
+		assert.throws(
+			() =>
+				getEnvRepoOverrides(
+					parseEnvironment({
+						BITBUCKET_TOKEN: "token",
+						REVIEW_MAX_FILES: "999999",
+					}),
+				),
+			/Invalid environment repo overrides:\nreview\.maxFiles: review\.maxFiles must be at most 500\./,
+		);
+
+		assert.throws(
+			() =>
+				getEnvRepoOverrides(
+					parseEnvironment({
+						BITBUCKET_TOKEN: "token",
+						COPILOT_TIMEOUT_MS: "999999999",
+					}),
+				),
+			/copilot\.timeoutMs: copilot\.timeoutMs must be at most 3600000\./,
+		);
+	});
 });
 
 describe("parseBitbucketPullRequestUrl", () => {

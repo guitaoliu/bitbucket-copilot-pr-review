@@ -13,6 +13,11 @@ import {
 	setConfigPathValue,
 	splitConfigPath,
 } from "./path.ts";
+import {
+	createCopilotOverrideSchema,
+	createReportOverrideSchema,
+	createReviewOverrideSchema,
+} from "./repo-override-schema.ts";
 import type { ReviewerConfig, ReviewerConfigRepoOverrides } from "./types.ts";
 
 type RepoOverrideGroup = keyof ReviewerConfigRepoOverrides;
@@ -61,31 +66,9 @@ function buildRepoOverrides(
 
 export const reviewerConfigRepoOverridesSchema = z
 	.object({
-		copilot: z
-			.object({
-				model: z.string().min(1).optional(),
-				reasoningEffort: z.enum(REASONING_EFFORT_VALUES).optional(),
-				timeoutMs: z.number().int().positive().optional(),
-			})
-			.strict(),
-		report: z
-			.object({
-				title: z.string().min(1).optional(),
-				commentStrategy: z.enum(REPORT_COMMENT_STRATEGY_VALUES).optional(),
-			})
-			.strict(),
-		review: z
-			.object({
-				maxFiles: z.number().int().positive().optional(),
-				maxFindings: z.number().int().positive().optional(),
-				minConfidence: z.enum(CONFIDENCE_VALUES).optional(),
-				maxPatchChars: z.number().int().positive().optional(),
-				defaultFileSliceLines: z.number().int().positive().optional(),
-				maxFileSliceLines: z.number().int().positive().optional(),
-				ignorePaths: z.array(z.string().min(1)).optional(),
-				skipBranchPrefixes: z.array(z.string().min(1)).optional(),
-			})
-			.strict(),
+		copilot: createCopilotOverrideSchema(),
+		report: createReportOverrideSchema(),
+		review: createReviewOverrideSchema(),
 	})
 	.strict();
 

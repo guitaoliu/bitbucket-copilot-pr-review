@@ -16,7 +16,10 @@ import {
 	isEnvRepoOverrideField,
 } from "./metadata.ts";
 import { setConfigPathValue, splitConfigPath } from "./path.ts";
-import { createEmptyRepoOverrides } from "./reviewer-config.ts";
+import {
+	createEmptyRepoOverrides,
+	validateReviewerConfigRepoOverrides,
+} from "./reviewer-config.ts";
 import type { ReviewerConfigRepoOverrides } from "./types.ts";
 
 const MAX_REPORT_KEY_LENGTH = 50;
@@ -324,7 +327,17 @@ export function getEnvRepoOverrides(
 		setConfigPathValue(overrides, path, value);
 	}
 
-	return overrides;
+	try {
+		return validateReviewerConfigRepoOverrides(overrides);
+	} catch (error) {
+		if (error instanceof CliUserError) {
+			throw new CliUserError(
+				`Invalid environment repo overrides:\n${error.message}`,
+			);
+		}
+
+		throw error;
+	}
 }
 
 function formatEnvironmentError(error: z.ZodError): string {
