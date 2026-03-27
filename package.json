@@ -1,6 +1,6 @@
 {
 	"name": "bitbucket-copilot-pr-review",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "CLI-first Bitbucket Data Center pull request review with GitHub Copilot SDK",
 	"repository": {
 		"type": "git",
