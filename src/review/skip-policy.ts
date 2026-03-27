@@ -4,10 +4,6 @@ import type {
 } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import {
-	buildInsightAnnotations,
-	buildPullRequestComment,
-} from "../insights.ts";
-import {
 	getInsightReportFindingCount,
 	getInsightReportReviewedCommit,
 	getInsightReportReviewRevision,
@@ -15,6 +11,7 @@ import {
 	parsePullRequestCommentMetadata,
 	rewritePullRequestCommentMetadata,
 } from "./publication-state.ts";
+import { buildReviewArtifacts } from "./result.ts";
 import { getReviewRevisionSchema } from "./revision.ts";
 import type { ReviewArtifacts, ReviewBitbucketClient } from "./runner-types.ts";
 import type {
@@ -411,18 +408,12 @@ export function buildReviewReusePlan(
 			status,
 			config,
 		);
-		const reusedAnnotations =
-			status.existingAnnotations.length > 0
-				? status.existingAnnotations
-				: buildInsightAnnotations(config, reusedReview.findings);
+		const reusedArtifacts = buildReviewArtifacts(config, context, reusedReview);
 		const commentBody = status.existingComment
 			? rewritePullRequestCommentMetadata(status.existingComment.text, {
 					tag: config.report.commentTag,
 					revision: context.reviewRevision,
-					reviewedCommit:
-						status.reportReviewedCommit ??
-						status.reportCommit ??
-						context.headCommit,
+					reviewedCommit: context.headCommit,
 					publishedCommit: context.headCommit,
 					...(status.commentStoredFindings
 						? {
@@ -430,7 +421,7 @@ export function buildReviewReusePlan(
 							}
 						: {}),
 				})
-			: buildPullRequestComment(config, context, reusedReview);
+			: reusedArtifacts.commentBody;
 
 		return {
 			action: "republish",
@@ -440,9 +431,8 @@ export function buildReviewReusePlan(
 					: `Reusing the existing review for unchanged PR revision ${context.reviewRevision} from head ${status.reportCommit} and republishing it onto head ${context.headCommit}.`,
 			reusedReview,
 			reusedArtifacts: {
-				report:
-					status.existingReport as RawBitbucketCodeInsightsReport as ReviewArtifacts["report"],
-				annotations: reusedAnnotations,
+				report: reusedArtifacts.report,
+				annotations: reusedArtifacts.annotations,
 				commentBody,
 			},
 		};

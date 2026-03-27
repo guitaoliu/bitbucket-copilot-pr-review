@@ -10,6 +10,7 @@ import type { ReviewerConfig } from "../config/types.ts";
 import {
 	buildPullRequestCommentMetadataMarkers,
 	buildReviewMetadataFields,
+	getInsightReportReviewedCommit,
 } from "./publication-state.ts";
 import type { ReviewBitbucketClient } from "./runner-types.ts";
 import {
@@ -330,6 +331,14 @@ describe("buildReviewReusePlan", () => {
 		assert.ok(plan.reusedArtifacts);
 		assert.ok(plan.reusedReview);
 		assert.match(plan.repairWarning ?? "", /Reusing the existing review/);
+		assert.equal(
+			getInsightReportReviewedCommit(plan.reusedArtifacts?.report),
+			context.headCommit,
+		);
+		assert.match(
+			plan.reusedArtifacts?.commentBody ?? "",
+			/<!-- copilot-pr-review:reviewed-commit:head-123 -->/,
+		);
 		assert.match(
 			plan.reusedArtifacts?.commentBody ?? "",
 			/<!-- copilot-pr-review:published-commit:head-123 -->/,
