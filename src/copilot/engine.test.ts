@@ -243,7 +243,7 @@ describe("createReviewSessionHooks", () => {
 		assert.deepEqual(result, {
 			permissionDecision: "allow",
 			additionalContext:
-				"Read head and base content as needed to verify a concrete regression, broken invariant, or API change.",
+				"Read head and base content as needed to verify a concrete regression, broken invariant, API change, or removed guard.",
 		});
 		assert.deepEqual(infoEntries, [
 			{
@@ -424,7 +424,7 @@ describe("createReviewSessionHooks", () => {
 
 		assert.deepEqual(result, {
 			permissionDecision: "allow",
-			additionalContext: `Only emit a finding after verifying the issue from inspected code. ${FINDING_TAXONOMY_HINT} ${QUESTION_SHAPED_FINDING_HINT} Use one finding per root cause, anchor cross-file issues to the changed reviewed file that introduced the risk, prefer a changed head-side line, and keep looking for additional distinct issues after recording one.`,
+			additionalContext: `Only emit a finding after inspecting enough code to support the claim from code evidence. ${FINDING_TAXONOMY_HINT} ${QUESTION_SHAPED_FINDING_HINT} Use one finding per root cause, anchor cross-file issues to the changed reviewed file that introduced the risk, prefer a changed head-side line, and keep looking for additional distinct issues after recording one.`,
 		});
 	});
 
@@ -469,7 +469,7 @@ describe("createReviewSessionHooks", () => {
 
 		assert.deepEqual(result, {
 			additionalContext:
-				"Use this context to confirm or reject a specific hypothesis, then move to the next uncovered risky path. If repeated searches are not sharpening the hypothesis, stop searching and decide based on the evidence you have.",
+				"Use this context to confirm or reject a specific hypothesis. If the first pass is inconclusive and the changed code touches auth, validation, persistence, serialization, async flow, or public interfaces, run one or two more targeted follow-up reads or searches before moving on. Stop once extra exploration stops sharpening the hypothesis.",
 		});
 		assert.deepEqual(infoEntries, [
 			{

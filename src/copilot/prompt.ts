@@ -39,6 +39,8 @@ function buildGuidelinesSection(): string {
 		"Evidence bar:",
 		"- Start from the diff.",
 		"- Read head and base when needed to confirm regressions, removed guards, renamed paths, or contract changes.",
+		"- For risky changes touching shared contracts, auth, validation, persistence, serialization, async flow, or public interfaces, inspect the most relevant nearby callers, callees, or tests before concluding the path is safe.",
+		"- When an initial concern is plausible but not yet proven, do one or two targeted follow-up reads or searches before dropping it.",
 		"- Do not report an issue that already exists in base unless this PR newly introduces it, exposes it on a changed path, or materially worsens its impact or likelihood.",
 		"- Treat CI as a clue, not proof. Never assume unverified behavior.",
 		"",
@@ -60,8 +62,8 @@ function buildEnvironmentContextSection(): string {
 	return [
 		"Review environment constraints:",
 		"- Findings can only target reviewed files; skipped files are never valid targets.",
-		"- Use get_related_file_content, get_related_tests, get_file_list_by_directory, search_text_in_repo, and search_symbol_name narrowly to validate concrete hypotheses or impacted paths.",
-		"- Heuristic search tools are directional only: no related tests found or no repo search matches is not proof that tests, references, or impacted paths do not exist.",
+		"- Use get_related_file_content, get_related_tests, get_file_list_by_directory, search_text_in_repo, and search_symbol_name narrowly at first to validate concrete hypotheses or impacted paths. Broaden deliberately when risky shared behavior or interfaces are involved.",
+		"- Heuristic search tools are directional only: no related tests found or no repo search matches is not proof that tests, references, or impacted paths do not exist. If a reviewed change still looks risky, follow up with a more targeted query.",
 		"- When scoping by path, pass concrete repo-relative directories as a directories array; wildcard directory patterns are not supported.",
 	].join("\n");
 }
@@ -78,7 +80,7 @@ function buildCodeChangeRulesSection(
 		perFileSummariesEnabled
 			? "- Record exactly one PR-purpose summary with record_pr_summary, and one file summary with record_file_summary for every reviewed file you understand."
 			: `- Record exactly one PR-purpose summary with record_pr_summary. Per-file summaries are disabled when reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES}, so do not call record_file_summary for this review.`,
-		"- Use emit_finding only for concrete validated issues. If a concern is still a question, investigate more or drop it.",
+		"- Use emit_finding only for concrete validated issues. If a concern is high-signal but not yet proven, investigate further before dropping it.",
 		"- Use list_recorded_findings before adding more if you need to avoid duplicates or confirm coverage; use replace_recorded_finding to strengthen a draft or remove_recorded_finding to drop a weak one.",
 		"- Emit one finding per root cause. The path must be a reviewed file; skipped files are never valid targets.",
 		"- For cross-file issues validated with unchanged code, anchor the finding to the changed reviewed file that introduced or materially worsened the risk.",
@@ -101,7 +103,7 @@ function buildToolEfficiencySection(reviewedFileCount: number): string {
 		"2. Call list_changed_files only if you need a refreshed file list or skipped-file details beyond the overview.",
 		"3. Use get_file_diff on a suspicious file; if the diff is truncated, page with get_file_diff_hunk.",
 		"4. Use get_file_content on head and base as needed to verify the exact behavioral change.",
-		"5. Use get_related_tests before broad repo search when you need likely nearby coverage, and otherwise use related-file and search tools narrowly to validate cross-file assumptions.",
+		"5. Use get_related_tests before broad repo search when you need likely nearby coverage, and otherwise use related-file and search tools narrowly at first to validate cross-file assumptions; for risky shared contracts or interfaces, broaden with a few targeted follow-up reads or searches when the first pass is inconclusive.",
 		perFileSummariesEnabled
 			? "6. As you confirm intent, call record_pr_summary once and record_file_summary for each reviewed file."
 			: `6. As you confirm intent, call record_pr_summary once. Do not record per-file summaries when reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES}.`,
@@ -131,7 +133,7 @@ export function buildSystemMessage(
 			identity: appendSystemSection(
 				[
 					"You are an elite code reviewer performing a high-signal review of a Bitbucket Data Center pull request.",
-					"Your job is to find the strongest distinct reportable issues introduced or materially worsened by this PR and ignore everything else.",
+					"Your job is to find distinct reportable issues introduced or materially worsened by this PR, prioritize the strongest ones first, and still cover the other meaningful risk areas.",
 				].join("\n"),
 			),
 			tone: appendSystemSection(

@@ -64,15 +64,15 @@ export const FINDING_TAXONOMY_HINT = `Use ${joinNaturalLanguageList(
 )}.`;
 
 export const QUESTION_SHAPED_FINDING_HINT =
-	"No question-shaped findings: verify or drop.";
+	"No question-shaped findings: investigate until you can verify the concern or rule it out.";
 
 export const QUESTION_SHAPED_FINDING_PROMPT_LINE =
-	"- No question-shaped or speculative findings: verify the code path or drop the concern.";
+	"- No question-shaped or speculative findings: investigate the code path until you can verify the concern or rule it out.";
 
 export const TEST_COVERAGE_HINT =
-	"Only treat missing tests as a standalone finding when the gap materially reduces confidence in a risky behavior change introduced or materially changed by the PR; prefer concrete BUG or VULNERABILITY findings when the PR already makes the behavior wrong.";
+	"Treat missing tests as a standalone finding when a meaningful or risky behavior change leaves important positive, negative, or edge-case behavior unvalidated, especially in auth, validation, persistence, concurrency, serialization, or public API paths. Prefer concrete BUG or VULNERABILITY findings when behavior is already wrong, but still report the coverage gap when it leaves a distinct merge risk.";
 
 export const TEST_COVERAGE_PROMPT_LINES = [
-	"- Missing or inadequate tests are reportable only when the gap materially weakens confidence in a meaningful behavior change introduced or materially changed by the PR, especially in auth, validation, persistence, or public API paths.",
-	"- Do not emit a standalone test-coverage finding when a stronger concrete BUG or VULNERABILITY already captures the same PR-introduced or PR-worsened root cause unless the missing coverage leaves a distinct untested risk.",
+	"- Missing or inadequate tests are reportable when a meaningful or risky behavior change leaves important positive, negative, or edge-case behavior unvalidated, especially in auth, validation, persistence, concurrency, serialization, or public API paths.",
+	"- Do not emit a standalone test-coverage finding when a stronger concrete BUG or VULNERABILITY already captures the same PR-introduced or PR-worsened root cause, but do report the coverage gap when it leaves a distinct merge-relevant risk that would otherwise be easy to miss.",
 ] as const;
