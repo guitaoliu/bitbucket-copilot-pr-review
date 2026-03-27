@@ -10,6 +10,8 @@ import type {
 } from "./types.ts";
 
 const MAX_INSIGHT_REPORT_DATA_FIELDS = 6;
+const MAX_INSIGHT_ANNOTATIONS_PER_REQUEST = 20;
+const MAX_INSIGHT_ANNOTATIONS_PAYLOAD_CHARS = 40_000;
 
 function normalizeInsightAnnotation(
 	annotation: RawBitbucketInsightAnnotation,
@@ -63,6 +65,45 @@ function validateInsightReportPayload(payload: InsightReportPayload): void {
 			`Bitbucket Code Insights supports at most ${MAX_INSIGHT_REPORT_DATA_FIELDS} report data fields, but got ${payload.data.length}.`,
 		);
 	}
+}
+
+function getInsightAnnotationsPayloadSize(
+	annotations: InsightAnnotationPayload[],
+): number {
+	return JSON.stringify({ annotations }).length;
+}
+
+function chunkInsightAnnotations(
+	annotations: InsightAnnotationPayload[],
+): InsightAnnotationPayload[][] {
+	const batches: InsightAnnotationPayload[][] = [];
+	let currentBatch: InsightAnnotationPayload[] = [];
+
+	for (const annotation of annotations) {
+		if (currentBatch.length === 0) {
+			currentBatch = [annotation];
+			continue;
+		}
+
+		const candidateBatch = [...currentBatch, annotation];
+		if (
+			candidateBatch.length > MAX_INSIGHT_ANNOTATIONS_PER_REQUEST ||
+			getInsightAnnotationsPayloadSize(candidateBatch) >
+				MAX_INSIGHT_ANNOTATIONS_PAYLOAD_CHARS
+		) {
+			batches.push(currentBatch);
+			currentBatch = [annotation];
+			continue;
+		}
+
+		currentBatch = candidateBatch;
+	}
+
+	if (currentBatch.length > 0) {
+		batches.push(currentBatch);
+	}
+
+	return batches;
 }
 
 export class CodeInsightsApi {
@@ -204,10 +245,19 @@ export class CodeInsightsApi {
 		}
 
 		const pathname = `/rest/insights/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/commits/${encodeURIComponent(commitId)}/reports/${encodeURIComponent(reportKey)}/annotations`;
-		await this.request(pathname, {
-			method: "POST",
-			body: JSON.stringify({ annotations }),
-		});
+		const annotationBatches = chunkInsightAnnotations(annotations);
+		if (annotationBatches.length > 1) {
+			this.logger.debug(
+				`Uploading ${annotations.length} annotations in ${annotationBatches.length} Code Insights batches for report ${reportKey} on commit ${commitId}`,
+			);
+		}
+
+		for (const annotationBatch of annotationBatches) {
+			await this.request(pathname, {
+				method: "POST",
+				body: JSON.stringify({ annotations: annotationBatch }),
+			});
+		}
 	}
 
 	async publishCodeInsights(

@@ -63,6 +63,65 @@ describe("CodeInsightsApi", () => {
 		]);
 	});
 
+	it("chunks annotation uploads to avoid oversized publish requests", async () => {
+		const calls: string[] = [];
+		const api = new CodeInsightsApi(
+			"PROJ",
+			"repo",
+			logger,
+			async (pathname, init) => {
+				calls.push(`${init?.method ?? "GET"} ${pathname}`);
+				return "";
+			},
+			async () => ({}) as never,
+		);
+
+		await api.addAnnotations(
+			"commit-1",
+			"report-key",
+			Array.from({ length: 45 }, (_, index) => ({
+				externalId: `finding-${index + 1}`,
+				message: `broken ${index + 1}`,
+				severity: "HIGH" as const,
+			})),
+		);
+
+		assert.deepEqual(calls, [
+			"POST /rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key/annotations",
+			"POST /rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key/annotations",
+			"POST /rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key/annotations",
+		]);
+	});
+
+	it("chunks annotation uploads when one request body would grow too large", async () => {
+		const requestBodies: string[] = [];
+		const api = new CodeInsightsApi(
+			"PROJ",
+			"repo",
+			logger,
+			async (_pathname, init) => {
+				requestBodies.push(String(init?.body ?? ""));
+				return "";
+			},
+			async () => ({}) as never,
+		);
+
+		await api.addAnnotations(
+			"commit-1",
+			"report-key",
+			Array.from({ length: 2 }, (_, index) => ({
+				externalId: `finding-${index + 1}`,
+				message: "x".repeat(25_000),
+				severity: "HIGH" as const,
+			})),
+		);
+
+		assert.equal(requestBodies.length, 2);
+		for (const body of requestBodies) {
+			assert.ok(body.length <= 40_000);
+		}
+	});
+
 	it("rejects report payloads with more than six data fields before sending", async () => {
 		const calls: string[] = [];
 		const api = new CodeInsightsApi(
