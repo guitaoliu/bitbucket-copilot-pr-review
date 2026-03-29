@@ -814,6 +814,61 @@ describe("Copilot tools", () => {
 		});
 	});
 
+	it("filters blocked test candidates from related test suggestions", async () => {
+		const git = createGitStub({
+			getPathTypeAtCommit: async (_commit, filePath) => {
+				if (filePath === "src" || filePath === "tests") {
+					return "directory";
+				}
+
+				return undefined;
+			},
+			listFilesAtCommit: async (commit, directoryPaths) => {
+				assert.equal(commit, "head-123");
+				if (directoryPaths?.[0] === "src") {
+					return ["src/new-name.ts"];
+				}
+
+				if (directoryPaths?.[0] === "tests") {
+					return ["tests/new-name.test.ts", "tests/.env.spec.ts"];
+				}
+
+				return [];
+			},
+		});
+		const tool = createGetRelatedTestsTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{ path: string; version?: "head" | "base"; limit?: number },
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{ path: "src/new-name.ts", limit: 5 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_related_tests",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			path: "src/new-name.ts",
+			version: "head",
+			directoriesSearched: ["src", "test", "tests"],
+			candidateCount: 1,
+			candidates: [{ path: "tests/new-name.test.ts", score: 20 }],
+		});
+	});
+
 	it("explains that missing nearby-test suggestions are only heuristic", async () => {
 		const git = createGitStub({
 			getPathTypeAtCommit: async (_commit, filePath) => {

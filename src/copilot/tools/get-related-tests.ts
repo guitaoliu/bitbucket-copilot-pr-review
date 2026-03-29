@@ -2,6 +2,7 @@ import { defineTool } from "@github/copilot-sdk";
 import { z } from "zod";
 
 import type { ChangedFile } from "../../git/types.ts";
+import { getRepoFileAccessDecision } from "../../policy/path-access.ts";
 import { getReviewedFilePathForVersion } from "../../review/file.ts";
 import { omitUndefined } from "../../shared/object.ts";
 import { truncateText } from "../../shared/text.ts";
@@ -194,8 +195,9 @@ export function createGetRelatedTestsTool(toolContext: ReviewToolContext) {
 
 				const files = await git.listFilesAtCommit(commit, [directory]);
 				for (const candidate of files) {
-					if (isLikelyTestPath(candidate)) {
-						collected.push(candidate);
+					const decision = getRepoFileAccessDecision(candidate);
+					if (decision.include && isLikelyTestPath(decision.normalizedPath)) {
+						collected.push(decision.normalizedPath);
 					}
 				}
 			}
