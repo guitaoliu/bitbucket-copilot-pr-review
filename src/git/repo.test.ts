@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
+import stream from "node:stream";
 
 import type { Logger } from "../shared/logger.ts";
 import { GitRepository } from "./repo.ts";
+
+class MockChildProcess extends EventEmitter {
+	public readonly stdout = new stream.PassThrough();
+	public readonly stderr = new stream.PassThrough();
+	public killedSignals: string[] = [];
+
+	kill(signal: string): boolean {
+		this.killedSignals.push(signal);
+		return true;
+	}
+}
 
 const logger: Logger = {
 	debug() {},
@@ -246,6 +259,44 @@ describe("GitRepository.ensureCommitAvailable", () => {
 			mode: "literal",
 		});
 
+		assert.deepEqual(result, {
+			matches: [{ path: "src/a.ts", line: 10, text: "needle" }],
+			truncated: true,
+			totalMatches: 2,
+		});
+	});
+
+	it("stops parsing git search output once the unique match limit is exceeded", async () => {
+		const child = new MockChildProcess();
+		const commit = "abcdef12";
+		const repo = new GitRepository("/tmp/repo", logger, "origin", {
+			spawnProcess: (() => child) as unknown as typeof import("node:child_process").spawn,
+		}) as unknown as TestableGitRepository;
+
+		const searchPromise = repo.runGitTextSearch(
+			[
+				"grep",
+				"-n",
+				"-I",
+				"--full-name",
+				"--null",
+				"-F",
+				"-e",
+				"needle",
+				commit,
+			],
+			1,
+		);
+
+		child.stdout.write(Buffer.from(`${commit}:src/a.ts\u000010\u0000needle\n`, "utf8"));
+		child.stdout.write(Buffer.from(`${commit}:src/b.ts\u000011\u0000needle\n`, "utf8"));
+		child.stdout.end();
+		child.stderr.end();
+		child.emit("close", 0);
+
+		const result = await searchPromise;
+
+		assert.deepEqual(child.killedSignals, ["SIGTERM"]);
 		assert.deepEqual(result, {
 			matches: [{ path: "src/a.ts", line: 10, text: "needle" }],
 			truncated: true,

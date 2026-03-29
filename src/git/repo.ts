@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { promisify } from "node:util";
 
 import type { PullRequestInfo } from "../bitbucket/types.ts";
@@ -22,6 +23,10 @@ interface GitCommandOptions {
 	allowFailure?: boolean;
 }
 
+interface GitRepositoryDependencies {
+	spawnProcess?: typeof spawn;
+}
+
 interface GitCommandResult {
 	stdout: string;
 	stderr: string;
@@ -37,11 +42,18 @@ export class GitRepository {
 	private readonly logger: Logger;
 	private readonly remoteName: string;
 	private readonly telemetry: ReviewGitTelemetry;
+	private readonly spawnProcess: typeof spawn;
 
-	constructor(repoRoot: string, logger: Logger, remoteName: string) {
+	constructor(
+		repoRoot: string,
+		logger: Logger,
+		remoteName: string,
+		dependencies: GitRepositoryDependencies = {},
+	) {
 		this.repoRoot = repoRoot;
 		this.logger = logger;
 		this.remoteName = remoteName;
+		this.spawnProcess = dependencies.spawnProcess ?? spawn;
 		this.telemetry = {
 			byOperation: {},
 		};
@@ -137,12 +149,13 @@ export class GitRepository {
 		const startedAt = Date.now();
 
 		return new Promise<GitTextSearchResult>((resolve, reject) => {
-			const child = spawn("git", [...GIT_BASE_ARGS, ...args], {
+			const child = this.spawnProcess("git", [...GIT_BASE_ARGS, ...args], {
 				cwd: this.repoRoot,
 				stdio: ["ignore", "pipe", "pipe"],
 			});
 			const matchesByKey = new Map<string, GitTextSearchMatch>();
-			const stdoutChunks: Buffer[] = [];
+			const stdoutDecoder = new StringDecoder("utf8");
+			let stdoutRemainder = "";
 			let stderr = "";
 			let terminatedForLimit = false;
 			let recordedDuration = false;
@@ -200,9 +213,12 @@ export class GitRepository {
 				}
 			};
 
-			const flushMatchesFromOutput = () => {
-				const output = Buffer.concat(stdoutChunks).toString("utf8");
-				for (const rawLine of output.split("\n")) {
+			const processStdoutChunk = (text: string) => {
+				const output = `${stdoutRemainder}${text}`;
+				const lines = output.split("\n");
+				stdoutRemainder = lines.pop() ?? "";
+
+				for (const rawLine of lines) {
 					const line = rawLine.replace(/\r$/, "");
 					if (line.length === 0) {
 						continue;
@@ -212,9 +228,22 @@ export class GitRepository {
 				}
 			};
 
+			const flushStdoutRemainder = () => {
+				const tail = stdoutDecoder.end();
+				if (tail.length > 0) {
+					processStdoutChunk(tail);
+				}
+
+				const line = stdoutRemainder.replace(/\r$/, "");
+				stdoutRemainder = "";
+				if (line.length > 0) {
+					noteMatch(line);
+				}
+			};
+
 			child.stdout.on("data", (chunk: Buffer | string) => {
-				stdoutChunks.push(
-					Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"),
+				processStdoutChunk(
+					Buffer.isBuffer(chunk) ? stdoutDecoder.write(chunk) : chunk,
 				);
 			});
 
@@ -230,7 +259,7 @@ export class GitRepository {
 
 			child.on("close", (exitCode) => {
 				recordDuration();
-				flushMatchesFromOutput();
+				flushStdoutRemainder();
 				const matches = [...matchesByKey.values()];
 				if (terminatedForLimit && boundedLimit !== undefined) {
 					finalize({
