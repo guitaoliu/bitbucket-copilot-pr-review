@@ -233,6 +233,35 @@ describe("finalizeFindings", () => {
 		assert.ok(findings[0]?.externalId.startsWith("finding-"));
 	});
 
+	it("keeps the highest-priority duplicate when equivalent findings repeat", () => {
+		const drafts: FindingDraft[] = [
+			{
+				path: "src/service.ts",
+				line: 10,
+				severity: "MEDIUM",
+				type: "BUG",
+				confidence: "medium",
+				title: "Null handling is broken",
+				details: "The new branch dereferences a possibly null response.",
+			},
+			{
+				path: "src/service.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Null handling is broken",
+				details: "The new branch dereferences a possibly null response.",
+			},
+		];
+
+		const findings = finalizeFindings(drafts, [reviewedFile], 5, "medium");
+
+		assert.equal(findings.length, 1);
+		assert.equal(findings[0]?.severity, "HIGH");
+		assert.equal(findings[0]?.confidence, "high");
+	});
+
 	it("keeps file-level findings and normalizes oldPath entries to the head path", () => {
 		const drafts: FindingDraft[] = [
 			{

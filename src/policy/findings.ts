@@ -25,6 +25,18 @@ const SEVERITY_RANK: Record<ReviewFinding["severity"], number> = {
 	HIGH: 3,
 };
 
+function compareFindingPriority(
+	left: Pick<ReviewFinding, "severity" | "confidence">,
+	right: Pick<ReviewFinding, "severity" | "confidence">,
+): number {
+	const severityDelta = SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity];
+	if (severityDelta !== 0) {
+		return severityDelta;
+	}
+
+	return CONFIDENCE_RANK[left.confidence] - CONFIDENCE_RANK[right.confidence];
+}
+
 function collapseWhitespace(value: string): string {
 	return value.trim().replace(/\s+/g, " ");
 }
@@ -86,8 +98,7 @@ export function finalizeFindings(
 	minConfidence: Confidence,
 ): ReviewFinding[] {
 	const fileMap = createReviewedFileLookup(reviewedFiles);
-	const seen = new Set<string>();
-	const accepted: ReviewFinding[] = [];
+	const acceptedByKey = new Map<string, ReviewFinding>();
 
 	for (const rawDraft of drafts) {
 		const parsed = findingDraftSchema.safeParse(rawDraft);
@@ -127,16 +138,22 @@ export function finalizeFindings(
 			normalizedDraft.title.toLowerCase(),
 			normalizedDraft.details.toLowerCase(),
 		].join("|");
-		if (seen.has(dedupeKey)) {
+		const candidate = {
+			...normalizedDraft,
+			externalId: makeExternalId(normalizedDraft),
+		};
+		const existing = acceptedByKey.get(dedupeKey);
+		if (
+			existing &&
+			compareFindingPriority(candidate, existing) <= 0
+		) {
 			continue;
 		}
 
-		seen.add(dedupeKey);
-		accepted.push({
-			...normalizedDraft,
-			externalId: makeExternalId(normalizedDraft),
-		});
+		acceptedByKey.set(dedupeKey, candidate);
 	}
+
+	const accepted = [...acceptedByKey.values()];
 
 	accepted.sort((left, right) => {
 		const severityDelta =

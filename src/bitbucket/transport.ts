@@ -10,6 +10,15 @@ interface HttpResponseData {
 	body: string;
 }
 
+interface BitbucketTransportDependencies {
+	sendRequest?: (
+		url: URL,
+		method: string,
+		headers: Record<string, string>,
+		body?: string,
+	) => Promise<HttpResponseData>;
+}
+
 export class BitbucketApiError extends Error {
 	public readonly statusCode: number;
 	public readonly statusMessage: string;
@@ -39,9 +48,19 @@ export class BitbucketApiError extends Error {
 export class BitbucketTransport {
 	private caCertPromise?: Promise<string | undefined>;
 	private readonly config: ReviewerConfig["bitbucket"];
+	private readonly sendRequestImpl: (
+		url: URL,
+		method: string,
+		headers: Record<string, string>,
+		body?: string,
+	) => Promise<HttpResponseData>;
 
-	constructor(config: ReviewerConfig["bitbucket"]) {
+	constructor(
+		config: ReviewerConfig["bitbucket"],
+		dependencies: BitbucketTransportDependencies = {},
+	) {
 		this.config = config;
+		this.sendRequestImpl = dependencies.sendRequest ?? this.sendRequest.bind(this);
 	}
 
 	private buildUrl(pathname: string): string {
@@ -64,6 +83,23 @@ export class BitbucketTransport {
 			).toString("base64");
 			headers.set("Authorization", `Basic ${encoded}`);
 		}
+
+		return headers;
+	}
+
+	private mergeHeaders(
+		baseHeaders: Headers,
+		overrideHeaders: HeadersInit | undefined,
+	): Headers {
+		const headers = new Headers(baseHeaders);
+		if (!overrideHeaders) {
+			return headers;
+		}
+
+		const overrides = new Headers(overrideHeaders);
+		overrides.forEach((value, key) => {
+			headers.set(key, value);
+		});
 
 		return headers;
 	}
@@ -204,11 +240,18 @@ export class BitbucketTransport {
 	async request(pathname: string, init?: RequestInit): Promise<string> {
 		const url = new URL(this.buildUrl(pathname));
 		const method = init?.method ?? "GET";
-		const body = typeof init?.body === "string" ? init.body : undefined;
-		const headers = this.toHeaderRecord(this.buildHeaders(body !== undefined));
+		const body =
+			init?.body === undefined
+				? undefined
+				: typeof init.body === "string"
+					? init.body
+					: String(init.body);
+		const headers = this.toHeaderRecord(
+			this.mergeHeaders(this.buildHeaders(body !== undefined), init?.headers),
+		);
 
 		try {
-			const response = await this.sendRequest(url, method, headers, body);
+			const response = await this.sendRequestImpl(url, method, headers, body);
 
 			if (response.statusCode >= 200 && response.statusCode < 300) {
 				return response.body;
