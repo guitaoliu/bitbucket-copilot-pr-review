@@ -3,6 +3,7 @@ import type {
 	InsightReportDataField,
 	InsightReportPayload,
 } from "../bitbucket/types.ts";
+import { omitUndefined } from "../shared/object.ts";
 import { getReviewRevisionSchema } from "./revision.ts";
 import type { StoredReviewFinding } from "./types.ts";
 
@@ -18,6 +19,10 @@ const COMMENT_METADATA_KEYS = [
 	"published-commit",
 	FINDINGS_METADATA_KEY,
 ] as const;
+
+const STORED_FINDING_SEVERITIES = new Set(["LOW", "MEDIUM", "HIGH"]);
+const STORED_FINDING_TYPES = new Set(["BUG", "CODE_SMELL", "VULNERABILITY"]);
+const STORED_FINDING_CONFIDENCES = new Set(["low", "medium", "high"]);
 
 function encodeCommentMetadataValue(value: string): string {
 	return deflateRawSync(Buffer.from(value, "utf8")).toString("base64");
@@ -37,6 +42,71 @@ function decodeCommentMetadataValue(value: string): string | undefined {
 
 function escapeRegexLiteral(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseStoredReviewFinding(entry: unknown): StoredReviewFinding | undefined {
+	if (!entry || typeof entry !== "object") {
+		return undefined;
+	}
+
+	const candidate = entry as Record<string, unknown>;
+	if (
+		typeof candidate.path !== "string" ||
+		candidate.path.trim().length === 0 ||
+		typeof candidate.title !== "string" ||
+		candidate.title.trim().length === 0 ||
+		typeof candidate.severity !== "string" ||
+		!STORED_FINDING_SEVERITIES.has(candidate.severity) ||
+		typeof candidate.type !== "string" ||
+		!STORED_FINDING_TYPES.has(candidate.type)
+	) {
+		return undefined;
+	}
+
+	if (
+		candidate.line !== undefined &&
+		(!Number.isInteger(candidate.line) ||
+			typeof candidate.line !== "number" ||
+			candidate.line < 0)
+	) {
+		return undefined;
+	}
+
+	if (
+		candidate.confidence !== undefined &&
+		(typeof candidate.confidence !== "string" ||
+			!STORED_FINDING_CONFIDENCES.has(candidate.confidence))
+	) {
+		return undefined;
+	}
+
+	if (candidate.details !== undefined && typeof candidate.details !== "string") {
+		return undefined;
+	}
+
+	if (candidate.category !== undefined && typeof candidate.category !== "string") {
+		return undefined;
+	}
+
+	if (
+		candidate.externalId !== undefined &&
+		(typeof candidate.externalId !== "string" ||
+			candidate.externalId.trim().length === 0)
+	) {
+		return undefined;
+	}
+
+	return omitUndefined({
+		path: candidate.path,
+		line: candidate.line as number | undefined,
+		severity: candidate.severity as StoredReviewFinding["severity"],
+		type: candidate.type as StoredReviewFinding["type"],
+		confidence: candidate.confidence as StoredReviewFinding["confidence"] | undefined,
+		title: candidate.title,
+		details: candidate.details as string | undefined,
+		category: candidate.category as string | undefined,
+		externalId: candidate.externalId as string | undefined,
+	}) satisfies StoredReviewFinding;
 }
 
 function getReportFieldValue(
@@ -173,17 +243,10 @@ export function parsePullRequestCommentMetadata(
 				try {
 					const parsed = JSON.parse(decoded);
 					if (Array.isArray(parsed)) {
-						metadata.storedFindings = parsed.filter(
-							(entry): entry is StoredReviewFinding =>
-								Boolean(
-									entry &&
-										typeof entry === "object" &&
-										typeof entry.path === "string" &&
-										typeof entry.severity === "string" &&
-										typeof entry.type === "string" &&
-										typeof entry.title === "string",
-								),
-						);
+						metadata.storedFindings = parsed.flatMap((entry) => {
+							const finding = parseStoredReviewFinding(entry);
+							return finding ? [finding] : [];
+						});
 					}
 				} catch {
 					// Ignore malformed stored finding metadata and fall back to annotations.
