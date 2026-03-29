@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { ReviewerConfig } from "../../config/types.ts";
 import type { GitRepository } from "../../git/repo.ts";
 import type { ChangedFile } from "../../git/types.ts";
@@ -232,11 +234,14 @@ export function toRejectedResult(message: string) {
 	};
 }
 
-export function parseObjectToolArgs<T>(
+export function parseObjectToolArgs<T extends z.ZodType>(
 	args: unknown,
-	schema: { safeParse: (input: unknown) => { success: true; data: T } | { success: false; error: { message: string } } },
+	schema: T,
 	errorPrefix: string,
-): { data?: T; rejection?: ReturnType<typeof toRejectedResult> } {
+): {
+	data?: z.output<T>;
+	rejection?: ReturnType<typeof toRejectedResult>;
+} {
 	if (!isPlainObject(args)) {
 		return {
 			rejection: toRejectedResult(`${errorPrefix}: expected an object payload.`),
