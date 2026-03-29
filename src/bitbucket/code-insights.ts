@@ -46,6 +46,11 @@ function getAnnotationsPageAnnotations(
 function getAnnotationsPageCount(
 	payload: RawBitbucketAnnotationsResponse,
 ): number {
+	const pageAnnotations = getAnnotationsPageAnnotations(payload);
+	if (pageAnnotations.length > 0) {
+		return pageAnnotations.length;
+	}
+
 	if (
 		typeof payload.totalCount === "number" &&
 		Number.isFinite(payload.totalCount)
@@ -53,7 +58,7 @@ function getAnnotationsPageCount(
 		return payload.totalCount;
 	}
 
-	return getAnnotationsPageAnnotations(payload).length;
+	return 0;
 }
 
 function validateInsightReportPayload(payload: InsightReportPayload): void {

@@ -248,6 +248,38 @@ describe("CodeInsightsApi", () => {
 		]);
 	});
 
+	it("does not double-count repeated totalCount values across pages", async () => {
+		const api = new CodeInsightsApi(
+			"PROJ",
+			"repo",
+			logger,
+			async () => "",
+			async (pathname) => {
+				if (pathname.includes("start=0")) {
+					return {
+						totalCount: 3,
+						annotations: [{ id: 1 }, { id: 2 }],
+						isLastPage: false,
+						nextPageStart: 2,
+					} as never;
+				}
+
+				return {
+					totalCount: 3,
+					annotations: [{ id: 3 }],
+					isLastPage: true,
+				} as never;
+			},
+		);
+
+		const result = await api.getCodeInsightsAnnotationCount(
+			"commit-1",
+			"report-key",
+		);
+
+		assert.equal(result, 3);
+	});
+
 	it("uses totalCount when Bitbucket omits annotation bodies", async () => {
 		const api = new CodeInsightsApi(
 			"PROJ",
