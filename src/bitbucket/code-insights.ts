@@ -85,6 +85,13 @@ function chunkInsightAnnotations(
 	let currentBatch: InsightAnnotationPayload[] = [];
 
 	for (const annotation of annotations) {
+		const singleAnnotationSize = getInsightAnnotationsPayloadSize([annotation]);
+		if (singleAnnotationSize > MAX_INSIGHT_ANNOTATIONS_PAYLOAD_CHARS) {
+			throw new Error(
+				`Bitbucket Code Insights annotation payload exceeds ${MAX_INSIGHT_ANNOTATIONS_PAYLOAD_CHARS} characters for ${annotation.externalId}.`,
+			);
+		}
+
 		if (currentBatch.length === 0) {
 			currentBatch = [annotation];
 			continue;

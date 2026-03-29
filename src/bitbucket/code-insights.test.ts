@@ -122,6 +122,28 @@ describe("CodeInsightsApi", () => {
 		}
 	});
 
+	it("rejects a single annotation that exceeds the payload limit", async () => {
+		const api = new CodeInsightsApi(
+			"PROJ",
+			"repo",
+			logger,
+			async () => "",
+			async () => ({}) as never,
+		);
+
+		await assert.rejects(
+			() =>
+				api.addAnnotations("commit-1", "report-key", [
+					{
+						externalId: "finding-1",
+						message: "x".repeat(45_000),
+						severity: "HIGH",
+					},
+				]),
+			/annotation payload exceeds 40000 characters/,
+		);
+	});
+
 	it("rejects report payloads with more than six data fields before sending", async () => {
 		const calls: string[] = [];
 		const api = new CodeInsightsApi(
