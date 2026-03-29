@@ -155,6 +155,7 @@ This file is for agentic coding assistants working in this repository.
 ## Agent checklist before finishing
 
 - Run the smallest useful test command first, then broader tests if needed.
+- Before creating a commit, run `pnpm check` and `pnpm test`, and do not commit while either command is failing.
 - Run `pnpm test` for substantive changes.
 - Run `pnpm typecheck` when types, config, or exported APIs changed.
 - Run `pnpm generate:repo-config-schema` if repo config schema code changed.

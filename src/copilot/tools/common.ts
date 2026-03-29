@@ -1,4 +1,4 @@
-import { z } from "zod";
+import type { z } from "zod";
 
 import type { ReviewerConfig } from "../../config/types.ts";
 import type { GitRepository } from "../../git/repo.ts";
@@ -244,7 +244,9 @@ export function parseObjectToolArgs<T extends z.ZodType>(
 } {
 	if (!isPlainObject(args)) {
 		return {
-			rejection: toRejectedResult(`${errorPrefix}: expected an object payload.`),
+			rejection: toRejectedResult(
+				`${errorPrefix}: expected an object payload.`,
+			),
 		};
 	}
 

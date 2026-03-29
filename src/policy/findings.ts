@@ -29,7 +29,8 @@ function compareFindingPriority(
 	left: Pick<ReviewFinding, "severity" | "confidence">,
 	right: Pick<ReviewFinding, "severity" | "confidence">,
 ): number {
-	const severityDelta = SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity];
+	const severityDelta =
+		SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity];
 	if (severityDelta !== 0) {
 		return severityDelta;
 	}
@@ -143,10 +144,7 @@ export function finalizeFindings(
 			externalId: makeExternalId(normalizedDraft),
 		};
 		const existing = acceptedByKey.get(dedupeKey);
-		if (
-			existing &&
-			compareFindingPriority(candidate, existing) <= 0
-		) {
+		if (existing && compareFindingPriority(candidate, existing) <= 0) {
 			continue;
 		}
 

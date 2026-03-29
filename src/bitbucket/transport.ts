@@ -60,7 +60,8 @@ export class BitbucketTransport {
 		dependencies: BitbucketTransportDependencies = {},
 	) {
 		this.config = config;
-		this.sendRequestImpl = dependencies.sendRequest ?? this.sendRequest.bind(this);
+		this.sendRequestImpl =
+			dependencies.sendRequest ?? this.sendRequest.bind(this);
 	}
 
 	private buildUrl(pathname: string): string {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { describe, it } from "node:test";
 import stream from "node:stream";
+import { describe, it } from "node:test";
 
 import type { Logger } from "../shared/logger.ts";
 import { GitRepository } from "./repo.ts";
@@ -270,7 +270,8 @@ describe("GitRepository.ensureCommitAvailable", () => {
 		const child = new MockChildProcess();
 		const commit = "abcdef12";
 		const repo = new GitRepository("/tmp/repo", logger, "origin", {
-			spawnProcess: (() => child) as unknown as typeof import("node:child_process").spawn,
+			spawnProcess: (() =>
+				child) as unknown as typeof import("node:child_process").spawn,
 		}) as unknown as TestableGitRepository;
 
 		const searchPromise = repo.runGitTextSearch(
@@ -288,8 +289,12 @@ describe("GitRepository.ensureCommitAvailable", () => {
 			1,
 		);
 
-		child.stdout.write(Buffer.from(`${commit}:src/a.ts\u000010\u0000needle\n`, "utf8"));
-		child.stdout.write(Buffer.from(`${commit}:src/b.ts\u000011\u0000needle\n`, "utf8"));
+		child.stdout.write(
+			Buffer.from(`${commit}:src/a.ts\u000010\u0000needle\n`, "utf8"),
+		);
+		child.stdout.write(
+			Buffer.from(`${commit}:src/b.ts\u000011\u0000needle\n`, "utf8"),
+		);
 		child.stdout.end();
 		child.stderr.end();
 		child.emit("close", 0);

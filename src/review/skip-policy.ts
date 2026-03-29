@@ -121,7 +121,10 @@ function getReusableStoredFindings(
 	context: ReviewContext,
 	status: ExistingPublicationStatus,
 ): StoredReviewFinding[] | undefined {
-	if (!status.commentStoredFindings || status.commentStoredFindings.length === 0) {
+	if (
+		!status.commentStoredFindings ||
+		status.commentStoredFindings.length === 0
+	) {
 		return undefined;
 	}
 
@@ -129,7 +132,10 @@ function getReusableStoredFindings(
 		return undefined;
 	}
 
-	if (!status.reportCommit || status.commentReviewedCommit !== status.reportCommit) {
+	if (
+		!status.reportCommit ||
+		status.commentReviewedCommit !== status.reportCommit
+	) {
 		return undefined;
 	}
 

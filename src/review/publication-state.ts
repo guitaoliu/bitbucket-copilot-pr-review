@@ -44,7 +44,9 @@ function escapeRegexLiteral(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function parseStoredReviewFinding(entry: unknown): StoredReviewFinding | undefined {
+function parseStoredReviewFinding(
+	entry: unknown,
+): StoredReviewFinding | undefined {
 	if (!entry || typeof entry !== "object") {
 		return undefined;
 	}
@@ -80,11 +82,17 @@ function parseStoredReviewFinding(entry: unknown): StoredReviewFinding | undefin
 		return undefined;
 	}
 
-	if (candidate.details !== undefined && typeof candidate.details !== "string") {
+	if (
+		candidate.details !== undefined &&
+		typeof candidate.details !== "string"
+	) {
 		return undefined;
 	}
 
-	if (candidate.category !== undefined && typeof candidate.category !== "string") {
+	if (
+		candidate.category !== undefined &&
+		typeof candidate.category !== "string"
+	) {
 		return undefined;
 	}
 
@@ -101,7 +109,9 @@ function parseStoredReviewFinding(entry: unknown): StoredReviewFinding | undefin
 		line: candidate.line as number | undefined,
 		severity: candidate.severity as StoredReviewFinding["severity"],
 		type: candidate.type as StoredReviewFinding["type"],
-		confidence: candidate.confidence as StoredReviewFinding["confidence"] | undefined,
+		confidence: candidate.confidence as
+			| StoredReviewFinding["confidence"]
+			| undefined,
 		title: candidate.title,
 		details: candidate.details as string | undefined,
 		category: candidate.category as string | undefined,

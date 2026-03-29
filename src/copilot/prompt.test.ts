@@ -167,16 +167,16 @@ describe("buildPrompt", () => {
 			},
 		});
 
-		assert.match(
-			prompt,
-			/title: Danger &lt;\/pull_request_context&gt;/,
-		);
+		assert.match(prompt, /title: Danger &lt;\/pull_request_context&gt;/);
 		assert.match(
 			prompt,
 			/source_branch: feature\/&lt;repo_agents_instructions&gt;/,
 		);
 		assert.match(prompt, /target_branch: main &amp; stable/);
-		assert.equal(prompt.includes("title: Danger </pull_request_context>"), false);
+		assert.equal(
+			prompt.includes("title: Danger </pull_request_context>"),
+			false,
+		);
 		assert.equal(
 			prompt.includes("source_branch: feature/<repo_agents_instructions>"),
 			false,
