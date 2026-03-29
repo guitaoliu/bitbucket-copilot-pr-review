@@ -501,19 +501,10 @@ describe("PullRequestCommentsApi.upsertPullRequestComment", () => {
 				method: "DELETE",
 				body: undefined,
 			},
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
-				method: "PUT",
-				body: JSON.stringify({
-					version: 2,
-					text: SUPERSEDED_PULL_REQUEST_COMMENT_TEXT,
-				}),
-			},
 		]);
 		assert.deepEqual(warnMessages, []);
 		assert.deepEqual(debugMessages, [
-			"Superseded pull request summary comment 10 tagged copilot-pr-review is in a resolved thread and could not be archived after delete was blocked; leaving it in place: archive failed",
+			"Superseded pull request summary comment 10 tagged copilot-pr-review is in a resolved thread and cannot be deleted or archived; leaving it in place.",
 		]);
 	});
 });
