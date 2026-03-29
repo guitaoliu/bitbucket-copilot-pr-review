@@ -164,6 +164,9 @@ export function buildPrompt(
 	const perFileSummariesEnabled = shouldCreatePerFileSummaries(
 		context.reviewedFiles.length,
 	);
+	const pullRequestTitle = escapePromptMarkupText(context.pr.title);
+	const sourceBranch = escapePromptMarkupText(context.pr.source.displayId);
+	const targetBranch = escapePromptMarkupText(context.pr.target.displayId);
 	const prDescription = truncatePullRequestDescription(context.pr.description);
 	const prDescriptionSection = prDescription.content
 		? [
@@ -195,9 +198,9 @@ export function buildPrompt(
 		"Please review this Bitbucket Data Center pull request.",
 		"",
 		"<pull_request_context>",
-		`title: ${context.pr.title}`,
-		`source_branch: ${context.pr.source.displayId}`,
-		`target_branch: ${context.pr.target.displayId}`,
+		`title: ${pullRequestTitle}`,
+		`source_branch: ${sourceBranch}`,
+		`target_branch: ${targetBranch}`,
 		`head_commit: ${context.headCommit}`,
 		`merge_base_commit: ${context.mergeBaseCommit}`,
 		`reviewed_files_available_through_tools: ${context.reviewedFiles.length}`,
