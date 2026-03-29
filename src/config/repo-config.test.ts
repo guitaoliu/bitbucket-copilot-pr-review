@@ -278,8 +278,13 @@ describe("getRepoReviewConfigSchema", () => {
 				report?: { properties?: { title?: { maxLength?: number } } };
 				review?: {
 					properties?: {
-						ignorePaths?: { maxItems?: number; items?: { maxLength?: number } };
+						ignorePaths?: {
+							minItems?: number;
+							maxItems?: number;
+							items?: { maxLength?: number };
+						};
 						skipBranchPrefixes?: {
+							minItems?: number;
 							maxItems?: number;
 							items?: { maxLength?: number };
 						};
@@ -312,6 +317,14 @@ describe("getRepoReviewConfigSchema", () => {
 			schema.properties?.review?.properties?.skipBranchPrefixes?.items
 				?.maxLength,
 			128,
+		);
+		assert.equal(
+			schema.properties?.review?.properties?.ignorePaths?.minItems,
+			undefined,
+		);
+		assert.equal(
+			schema.properties?.review?.properties?.skipBranchPrefixes?.minItems,
+			undefined,
 		);
 	});
 
