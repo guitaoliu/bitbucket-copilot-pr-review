@@ -117,12 +117,31 @@ function buildReviewFindingFromStoredFinding(
 	};
 }
 
+function getReusableStoredFindings(
+	context: ReviewContext,
+	status: ExistingPublicationStatus,
+): StoredReviewFinding[] | undefined {
+	if (!status.commentStoredFindings || status.commentStoredFindings.length === 0) {
+		return undefined;
+	}
+
+	if (status.commentRevision !== context.reviewRevision) {
+		return undefined;
+	}
+
+	if (!status.reportCommit || status.commentReviewedCommit !== status.reportCommit) {
+		return undefined;
+	}
+
+	return status.commentStoredFindings;
+}
+
 function buildReviewOutcomeFromArtifacts(
 	context: ReviewContext,
 	status: ExistingPublicationStatus,
 	config: ReviewerConfig,
 ): ReviewOutcome {
-	const storedFindings = status.commentStoredFindings;
+	const storedFindings = getReusableStoredFindings(context, status);
 	if (storedFindings && storedFindings.length > 0) {
 		return {
 			summary: summarizeReportDetails(status.existingReport),
@@ -185,9 +204,11 @@ function canReuseExistingArtifacts(
 		return false;
 	}
 
+	const reusableStoredFindings = getReusableStoredFindings(context, status);
+
 	return (
 		status.existingAnnotations.length === expectedAnnotationCount ||
-		(status.commentStoredFindings?.length ?? 0) === expectedAnnotationCount
+		(reusableStoredFindings?.length ?? 0) === expectedAnnotationCount
 	);
 }
 

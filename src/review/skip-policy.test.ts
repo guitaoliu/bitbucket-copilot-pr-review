@@ -398,6 +398,47 @@ describe("buildReviewReusePlan", () => {
 		);
 	});
 
+	it("does not reuse stored findings from a mismatched reviewed commit", () => {
+		const context = createContext();
+		const oldHead = "head-old";
+		const plan = buildReviewReusePlan(baseConfig, context, {
+			existingReport: createReport(context),
+			storedAnnotationCount: 1,
+			existingAnnotations: [],
+			existingComment: createTaggedComment({
+				reviewedCommit: oldHead,
+				publishedCommit: context.headCommit,
+			}),
+			commentStoredFindings: [
+				{
+					path: "src/example.ts",
+					line: 10,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Null handling is broken",
+					details: "The new branch dereferences a possibly null response.",
+					externalId: "finding-1",
+				},
+			],
+			existingPublicationComplete: false,
+			reportCommit: context.headCommit,
+			reportRevision: context.reviewRevision,
+			reportReviewedCommit: context.headCommit,
+			reportSchema: "2",
+			commentRevision: context.reviewRevision,
+			commentPublishedCommit: context.headCommit,
+			commentReviewedCommit: oldHead,
+			unusableReasons: [
+				`comment reviewed commit ${oldHead} != ${context.headCommit}`,
+				"reusable finding count 0 != findings 1",
+			],
+		});
+
+		assert.equal(plan.action, "review");
+		assert.equal(plan.reusedReview, undefined);
+	});
+
 	it("forces a fresh review when prior artifacts do not match the revision", () => {
 		const context = createContext();
 		const plan = buildReviewReusePlan(baseConfig, context, {
