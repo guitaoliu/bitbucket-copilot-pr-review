@@ -70,6 +70,29 @@ describe("parseCliArgs", () => {
 		assert.deepEqual(parsed, { help: true, commandName: "review" });
 	});
 
+	it("returns help for command help after the positional argument", () => {
+		const parsed = parseCliArgs([
+			"review",
+			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
+			"--help",
+		]);
+
+		assert.deepEqual(parsed, { help: true, commandName: "review" });
+	});
+
+	it("does not parse options after -- as flags", () => {
+		assert.throws(
+			() =>
+				parseCliArgs([
+					"review",
+					"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
+					"--",
+					"--force-review",
+				]),
+			/Unknown argument for review: --force-review/,
+		);
+	});
+
 	it("rejects option values that are actually another flag", () => {
 		assert.throws(
 			() => parseCliArgs(["review", "--repo-root", "--dry-run"]),

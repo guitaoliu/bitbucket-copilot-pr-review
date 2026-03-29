@@ -70,8 +70,63 @@ function parseValueOption(options: {
 	};
 }
 
+function isHelpFlag(arg: string | undefined): boolean {
+	return REVIEW_CLI_OPTION_METADATA.help.flags.includes(arg ?? "");
+}
+
+function parseCommandArgs<TOptions extends CommonCliOptions>(options: {
+	argv: string[];
+	initial: TOptions;
+	parseArgument: (
+		arg: string,
+		index: number,
+		current: TOptions,
+	) => number | true | void;
+	setPositional: (arg: string, current: TOptions) => boolean;
+	missingArgumentMessage: string;
+}): TOptions {
+	let stopParsingOptions = false;
+
+	for (let index = 0; index < options.argv.length; index += 1) {
+		const arg = options.argv[index];
+		if (arg === undefined) {
+			continue;
+		}
+
+		if (!stopParsingOptions && arg === "--") {
+			stopParsingOptions = true;
+			continue;
+		}
+
+		if (!stopParsingOptions && isHelpFlag(arg)) {
+			options.initial.help = true;
+			continue;
+		}
+
+		if (!stopParsingOptions) {
+			const parseResult = options.parseArgument(arg, index, options.initial);
+			if (typeof parseResult === "number") {
+				index = parseResult;
+				continue;
+			}
+
+			if (parseResult === true) {
+				continue;
+			}
+		}
+
+		if (options.setPositional(arg, options.initial)) {
+			continue;
+		}
+
+		throw new CliUserError(options.missingArgumentMessage.replace("{arg}", arg));
+	}
+
+	return options.initial;
+}
+
 function parseReviewCommandArgs(argv: string[]): ReviewCliOptions {
-	const options: ReviewCliOptions = {
+	const initial: ReviewCliOptions = {
 		command: "review",
 		pullRequestUrl: "",
 		dryRun: false,
@@ -79,45 +134,50 @@ function parseReviewCommandArgs(argv: string[]): ReviewCliOptions {
 		confirmRerun: false,
 		help: false,
 	};
+	const options = parseCommandArgs<ReviewCliOptions>({
+		argv,
+		initial,
+		parseArgument: (arg, index, current) => {
+			if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.dryRun)) {
+				current.dryRun = true;
+				return true;
+			}
 
-	for (let index = 0; index < argv.length; index += 1) {
-		const arg = argv[index];
-		if (arg === undefined || arg === "--") {
-			continue;
-		}
+			if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.forceReview)) {
+				current.forceReview = true;
+				return true;
+			}
 
-		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.dryRun)) {
-			options.dryRun = true;
-			continue;
-		}
+			if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.confirmRerun)) {
+				current.confirmRerun = true;
+				return true;
+			}
 
-		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.forceReview)) {
-			options.forceReview = true;
-			continue;
-		}
+			if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.repoRoot)) {
+				const parsed = parseValueOption({
+					argv,
+					index,
+					flag: "--repo-root",
+				});
+				current.repoRoot = parsed.value;
+				return parsed.nextIndex;
+			}
 
-		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.confirmRerun)) {
-			options.confirmRerun = true;
-			continue;
-		}
+			return;
+		},
+		setPositional: (arg, current) => {
+			if (current.pullRequestUrl.length === 0) {
+				current.pullRequestUrl = arg;
+				return true;
+			}
 
-		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.repoRoot)) {
-			const parsed = parseValueOption({
-				argv,
-				index,
-				flag: "--repo-root",
-			});
-			options.repoRoot = parsed.value;
-			index = parsed.nextIndex;
-			continue;
-		}
+			return false;
+		},
+		missingArgumentMessage: "Unknown argument for review: {arg}",
+	});
 
-		if (!arg.startsWith("-") && options.pullRequestUrl.length === 0) {
-			options.pullRequestUrl = arg;
-			continue;
-		}
-
-		throw new CliUserError(`Unknown argument for review: ${arg}`);
+	if (options.help) {
+		return options;
 	}
 
 	if (options.pullRequestUrl.length === 0) {
@@ -128,7 +188,7 @@ function parseReviewCommandArgs(argv: string[]): ReviewCliOptions {
 }
 
 function parseBatchCommandArgs(argv: string[]): BatchCliOptions {
-	const options: BatchCliOptions = {
+	const initial: BatchCliOptions = {
 		command: "batch",
 		repositoryUrl: "",
 		dryRun: false,
@@ -136,56 +196,60 @@ function parseBatchCommandArgs(argv: string[]): BatchCliOptions {
 		keepWorkdirs: false,
 		help: false,
 	};
+	const options = parseCommandArgs<BatchCliOptions>({
+		argv,
+		initial,
+		parseArgument: (arg, index, current) => {
+			if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.dryRun)) {
+				current.dryRun = true;
+				return true;
+			}
 
-	for (let index = 0; index < argv.length; index += 1) {
-		const arg = argv[index];
-		if (arg === undefined || arg === "--") {
-			continue;
-		}
+			if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.forceReview)) {
+				current.forceReview = true;
+				return true;
+			}
 
-		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.dryRun)) {
-			options.dryRun = true;
-			continue;
-		}
+			if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.tempRoot)) {
+				const parsed = parseValueOption({
+					argv,
+					index,
+					flag: "--temp-root",
+				});
+				current.tempRoot = parsed.value;
+				return parsed.nextIndex;
+			}
 
-		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.forceReview)) {
-			options.forceReview = true;
-			continue;
-		}
+			if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.maxParallel)) {
+				const parsed = parseValueOption({
+					argv,
+					index,
+					flag: "--max-parallel",
+				});
+				current.maxParallel = parsePositiveIntegerOption(arg, parsed.value);
+				return parsed.nextIndex;
+			}
 
-		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.tempRoot)) {
-			const parsed = parseValueOption({
-				argv,
-				index,
-				flag: "--temp-root",
-			});
-			options.tempRoot = parsed.value;
-			index = parsed.nextIndex;
-			continue;
-		}
+			if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.keepWorkdirs)) {
+				current.keepWorkdirs = true;
+				return true;
+			}
 
-		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.maxParallel)) {
-			const parsed = parseValueOption({
-				argv,
-				index,
-				flag: "--max-parallel",
-			});
-			options.maxParallel = parsePositiveIntegerOption(arg, parsed.value);
-			index = parsed.nextIndex;
-			continue;
-		}
+			return;
+		},
+		setPositional: (arg, current) => {
+			if (current.repositoryUrl.length === 0) {
+				current.repositoryUrl = arg;
+				return true;
+			}
 
-		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.keepWorkdirs)) {
-			options.keepWorkdirs = true;
-			continue;
-		}
+			return false;
+		},
+		missingArgumentMessage: "Unknown argument for batch: {arg}",
+	});
 
-		if (!arg.startsWith("-") && options.repositoryUrl.length === 0) {
-			options.repositoryUrl = arg;
-			continue;
-		}
-
-		throw new CliUserError(`Unknown argument for batch: ${arg}`);
+	if (options.help) {
+		return options;
 	}
 
 	if (options.repositoryUrl.length === 0) {
@@ -196,14 +260,21 @@ function parseBatchCommandArgs(argv: string[]): BatchCliOptions {
 }
 
 function isTopLevelHelp(argv: string[]): boolean {
-	return (
-		argv.length === 1 &&
-		REVIEW_CLI_OPTION_METADATA.help.flags.includes(argv[0] ?? "")
-	);
+	return argv.length === 1 && isHelpFlag(argv[0]);
 }
 
 function isCommandHelp(argv: string[]): boolean {
-	return isTopLevelHelp(argv);
+	for (const arg of argv) {
+		if (arg === "--") {
+			return false;
+		}
+
+		if (isHelpFlag(arg)) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 function buildOptionLines(options: readonly CliOptionMetadata[]): string[] {
