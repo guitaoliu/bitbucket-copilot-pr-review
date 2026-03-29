@@ -14,6 +14,25 @@ export interface PublishResult {
 	review: ReviewOutcome;
 }
 
+function getStalePublishReason(
+	context: ReviewContext,
+	latestPullRequest: ReviewContext["pr"],
+): string | undefined {
+	if (latestPullRequest.state && latestPullRequest.state !== "OPEN") {
+		return `Skipping publish because pull request #${latestPullRequest.id} is ${latestPullRequest.state}.`;
+	}
+
+	if (latestPullRequest.source.latestCommit !== context.headCommit) {
+		return `Skipping publish because the PR head moved from ${context.headCommit} to ${latestPullRequest.source.latestCommit}`;
+	}
+
+	if (latestPullRequest.target.latestCommit !== context.baseCommit) {
+		return `Skipping publish because the PR base moved from ${context.baseCommit} to ${latestPullRequest.target.latestCommit}`;
+	}
+
+	return undefined;
+}
+
 function createPublicationError(
 	stage: ReviewPublicationError["stage"],
 	error: unknown,
@@ -72,10 +91,9 @@ export async function publishReview(
 	}
 
 	const latestPullRequest = await bitbucket.getPullRequest();
-	if (latestPullRequest.source.latestCommit !== context.headCommit) {
-		logger.warn(
-			`Skipping publish because the PR head moved from ${context.headCommit} to ${latestPullRequest.source.latestCommit}`,
-		);
+	const staleReason = getStalePublishReason(context, latestPullRequest);
+	if (staleReason) {
+		logger.warn(staleReason);
 		return {
 			published: false,
 			publication: {

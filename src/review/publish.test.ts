@@ -129,6 +129,77 @@ describe("publishReview", () => {
 		);
 	});
 
+	it("marks the review stale when the pull request base moves before publish", async () => {
+		const pr = createPullRequest("head-123");
+		const context = createReviewContext(pr);
+		const { logger, warnMessages } = createLoggerSpy();
+		let publishCalled = false;
+		const result = await publishReview(
+			createBitbucketClient({
+				async getPullRequest() {
+					return {
+						...pr,
+						target: {
+							...pr.target,
+							latestCommit: "base-456",
+						},
+					};
+				},
+				async publishCodeInsights() {
+					publishCalled = true;
+				},
+			}),
+			baseReviewerConfig,
+			context,
+			createReviewOutcome(),
+			createReviewArtifacts(),
+			logger,
+		);
+
+		assert.equal(publishCalled, false);
+		assert.equal(result.published, false);
+		assert.equal(result.publication.status, "stale");
+		assert.equal(result.review.stale, true);
+		assert.match(
+			warnMessages[0] ?? "",
+			/Skipping publish because the PR base moved from base-123 to base-456/,
+		);
+	});
+
+	it("marks the review stale when the pull request is no longer open", async () => {
+		const pr = createPullRequest("head-123");
+		const context = createReviewContext(pr);
+		const { logger, warnMessages } = createLoggerSpy();
+		let commentCalled = false;
+		const result = await publishReview(
+			createBitbucketClient({
+				async getPullRequest() {
+					return {
+						...pr,
+						state: "MERGED",
+					};
+				},
+				async upsertPullRequestComment() {
+					commentCalled = true;
+				},
+			}),
+			baseReviewerConfig,
+			context,
+			createReviewOutcome(),
+			createReviewArtifacts(),
+			logger,
+		);
+
+		assert.equal(commentCalled, false);
+		assert.equal(result.published, false);
+		assert.equal(result.publication.status, "stale");
+		assert.equal(result.review.stale, true);
+		assert.match(
+			warnMessages[0] ?? "",
+			/Skipping publish because pull request #123 is MERGED/,
+		);
+	});
+
 	it("publishes insights and updates the tagged comment for the current head", async () => {
 		const pr = createPullRequest();
 		const context = createReviewContext(pr);
