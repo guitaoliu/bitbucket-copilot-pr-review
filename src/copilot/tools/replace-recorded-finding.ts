@@ -1,9 +1,28 @@
 import { defineTool } from "@github/copilot-sdk";
+import { z } from "zod";
 
 import { findingDraftSchema } from "../../policy/findings.ts";
 import type { FindingDraft } from "../../review/types.ts";
-import { toRejectedResult, validateFindingDraftLocation } from "./common.ts";
+import {
+	parseObjectToolArgs,
+	toRejectedResult,
+	validateFindingDraftLocation,
+} from "./common.ts";
 import type { ReviewToolContext } from "./context.ts";
+
+const replaceRecordedFindingArgsSchema = z
+	.object({
+		findingNumber: z.number().int().min(1),
+		path: z.string().min(1),
+		line: z.number().int().min(0),
+		severity: z.enum(["LOW", "MEDIUM", "HIGH"]),
+		type: z.enum(["BUG", "CODE_SMELL", "VULNERABILITY"]),
+		confidence: z.enum(["low", "medium", "high"]),
+		title: z.string(),
+		details: z.string(),
+		category: z.string().optional(),
+	})
+	.strict();
 
 export function createReplaceRecordedFindingTool(
 	toolContext: ReviewToolContext,
@@ -58,14 +77,29 @@ export function createReplaceRecordedFindingTool(
 			],
 		},
 		handler: async (args: FindingDraft & { findingNumber: number }) => {
-			const findingIndex = args.findingNumber - 1;
-			if (findingIndex < 0 || findingIndex >= drafts.length) {
+			const parsedArgs = parseObjectToolArgs(
+				args,
+				replaceRecordedFindingArgsSchema,
+				"Invalid replace-finding payload",
+			);
+			if (parsedArgs.rejection) {
+				return parsedArgs.rejection;
+			}
+			const parsedData = parsedArgs.data;
+			if (!parsedData) {
 				return toRejectedResult(
-					`Finding ${args.findingNumber} does not exist. Recorded findings: ${drafts.length}.`,
+					"Invalid replace-finding payload: expected an object payload.",
 				);
 			}
 
-			const parsed = findingDraftSchema.safeParse(args);
+			const findingIndex = parsedData.findingNumber - 1;
+			if (findingIndex < 0 || findingIndex >= drafts.length) {
+				return toRejectedResult(
+					`Finding ${parsedData.findingNumber} does not exist. Recorded findings: ${drafts.length}.`,
+				);
+			}
+
+			const parsed = findingDraftSchema.safeParse(parsedData);
 			if (!parsed.success) {
 				return toRejectedResult(
 					`Invalid finding payload: ${parsed.error.message}`,
@@ -85,8 +119,8 @@ export function createReplaceRecordedFindingTool(
 					? `${normalizedDraft.path}:${normalizedDraft.line}`
 					: `${normalizedDraft.path}:file`;
 			return location.note
-				? `Replaced finding ${args.findingNumber} with ${locationLabel}; ${location.note}`
-				: `Replaced finding ${args.findingNumber} with ${locationLabel}.`;
+				? `Replaced finding ${parsedData.findingNumber} with ${locationLabel}; ${location.note}`
+				: `Replaced finding ${parsedData.findingNumber} with ${locationLabel}.`;
 		},
 	});
 }

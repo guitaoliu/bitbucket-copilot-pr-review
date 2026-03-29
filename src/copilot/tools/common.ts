@@ -8,6 +8,10 @@ import type { FindingDraft } from "../../review/types.ts";
 import { omitUndefined } from "../../shared/object.ts";
 import { formatFileSlice, truncateText } from "../../shared/text.ts";
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 export function summarizeFile(file: ChangedFile): Record<string, unknown> {
 	return {
 		path: file.path,
@@ -226,6 +230,27 @@ export function toRejectedResult(message: string) {
 		textResultForLlm: message,
 		resultType: "rejected" as const,
 	};
+}
+
+export function parseObjectToolArgs<T>(
+	args: unknown,
+	schema: { safeParse: (input: unknown) => { success: true; data: T } | { success: false; error: { message: string } } },
+	errorPrefix: string,
+): { data?: T; rejection?: ReturnType<typeof toRejectedResult> } {
+	if (!isPlainObject(args)) {
+		return {
+			rejection: toRejectedResult(`${errorPrefix}: expected an object payload.`),
+		};
+	}
+
+	const parsed = schema.safeParse(args);
+	if (!parsed.success) {
+		return {
+			rejection: toRejectedResult(`${errorPrefix}: ${parsed.error.message}`),
+		};
+	}
+
+	return { data: parsed.data };
 }
 
 export function buildFileSliceResult(

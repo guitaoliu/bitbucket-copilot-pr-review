@@ -1303,6 +1303,40 @@ describe("Copilot tools", () => {
 		});
 	});
 
+	it("rejects malformed file diff hunk payloads", async () => {
+		const tool = createGetFileDiffHunkTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = tool.handler as (
+			args: { path: string; hunkIndex: unknown },
+			invocation: {
+				sessionId: string;
+				toolCallId: string;
+				toolName: string;
+				arguments: unknown;
+			},
+		) => Promise<{ resultType: string; textResultForLlm: string }>;
+
+		const result = await handler(
+			{ path: "src/multi-hunk.ts", hunkIndex: "1" },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_file_diff_hunk",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.match(result.textResultForLlm, /Invalid file-diff-hunk payload/);
+	});
+
 	it("lists recorded findings with stable numbering", async () => {
 		const drafts: FindingDraft[] = [
 			{
@@ -1533,6 +1567,52 @@ describe("Copilot tools", () => {
 		]);
 	});
 
+	it("rejects malformed remove finding payloads before mutating drafts", async () => {
+		const drafts: FindingDraft[] = [
+			{
+				path: "src/new-name.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "First issue",
+				details: "First details",
+			},
+		];
+		const tool = createRemoveRecordedFindingTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = tool.handler as (
+			args: { findingNumber: unknown },
+			invocation: {
+				sessionId: string;
+				toolCallId: string;
+				toolName: string;
+				arguments: unknown;
+			},
+		) => Promise<{ resultType: string; textResultForLlm: string }>;
+
+		const result = await handler(
+			{ findingNumber: "1" },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "remove_recorded_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.match(result.textResultForLlm, /Invalid remove-finding payload/);
+		assert.equal(drafts.length, 1);
+	});
+
 	it("rejects removing a missing finding draft", async () => {
 		const drafts: FindingDraft[] = [];
 		const tool = createRemoveRecordedFindingTool(
@@ -1606,6 +1686,64 @@ describe("Copilot tools", () => {
 			result.textResultForLlm,
 			"Finding 1 does not exist. Recorded findings: 0.",
 		);
+	});
+
+	it("rejects malformed replace finding payloads before indexing drafts", async () => {
+		const drafts: FindingDraft[] = [
+			{
+				path: "src/new-name.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Issue",
+				details: "Details",
+			},
+		];
+		const tool = createReplaceRecordedFindingTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = tool.handler as (
+			args: Omit<FindingDraft, "line"> & {
+				line: number;
+				findingNumber: unknown;
+			},
+			invocation: {
+				sessionId: string;
+				toolCallId: string;
+				toolName: string;
+				arguments: unknown;
+			},
+		) => Promise<{ resultType: string; textResultForLlm: string }>;
+
+		const result = await handler(
+			{
+				findingNumber: "1",
+				path: "src/new-name.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Issue",
+				details: "Details",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "replace_recorded_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.match(result.textResultForLlm, /Invalid replace-finding payload/);
+		assert.equal(drafts[0]?.title, "Issue");
 	});
 
 	it("records and replaces a pull request summary", async () => {

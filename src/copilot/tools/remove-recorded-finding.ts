@@ -1,6 +1,13 @@
 import { defineTool } from "@github/copilot-sdk";
-import { toRejectedResult } from "./common.ts";
+import { z } from "zod";
+import { parseObjectToolArgs, toRejectedResult } from "./common.ts";
 import type { ReviewToolContext } from "./context.ts";
+
+const removeRecordedFindingArgsSchema = z
+	.object({
+		findingNumber: z.number().int().min(1),
+	})
+	.strict();
 
 export function createRemoveRecordedFindingTool(
 	toolContext: ReviewToolContext,
@@ -23,21 +30,36 @@ export function createRemoveRecordedFindingTool(
 			required: ["findingNumber"],
 		},
 		handler: async (args: { findingNumber: number }) => {
-			const findingIndex = args.findingNumber - 1;
+			const parsedArgs = parseObjectToolArgs(
+				args,
+				removeRecordedFindingArgsSchema,
+				"Invalid remove-finding payload",
+			);
+			if (parsedArgs.rejection) {
+				return parsedArgs.rejection;
+			}
+			const parsedData = parsedArgs.data;
+			if (!parsedData) {
+				return toRejectedResult(
+					"Invalid remove-finding payload: expected an object payload.",
+				);
+			}
+
+			const findingIndex = parsedData.findingNumber - 1;
 			if (findingIndex < 0 || findingIndex >= drafts.length) {
 				return toRejectedResult(
-					`Finding ${args.findingNumber} does not exist. Recorded findings: ${drafts.length}.`,
+					`Finding ${parsedData.findingNumber} does not exist. Recorded findings: ${drafts.length}.`,
 				);
 			}
 
 			const removed = drafts.splice(findingIndex, 1)[0];
 			if (!removed) {
 				return toRejectedResult(
-					`Finding ${args.findingNumber} could not be removed.`,
+					`Finding ${parsedData.findingNumber} could not be removed.`,
 				);
 			}
 
-			return `Removed finding ${args.findingNumber} for ${removed.path}:${removed.line}. Remaining findings: ${drafts.length}.`;
+			return `Removed finding ${parsedData.findingNumber} for ${removed.path}:${removed.line}. Remaining findings: ${drafts.length}.`;
 		},
 	});
 }
