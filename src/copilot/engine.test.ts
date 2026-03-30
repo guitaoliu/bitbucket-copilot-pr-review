@@ -696,7 +696,7 @@ describe("createReviewSessionHooks", () => {
 		});
 		assert.deepEqual(postUse, {
 			additionalContext:
-				"Keep the PR summary concise and factual. Per-file summaries are disabled for reviews with more than 25 reviewed files, so continue reviewing without recording them.",
+				"Keep the PR summary concise and factual. Use short bullet points when they make separate changes easier to scan. Per-file summaries are disabled for reviews with more than 25 reviewed files, so continue reviewing without recording them.",
 		});
 
 		assert.deepEqual(infoEntries, [

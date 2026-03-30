@@ -211,7 +211,7 @@ describe("buildReviewArtifacts", () => {
 		assert.match(artifacts.commentBody, /- Main risks: 1 bug/);
 		assert.match(
 			artifacts.commentBody,
-			/1\. \[BUG\/HIGH\/high\].*Null handling is broken/s,
+			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\].*Null handling is broken/s,
 		);
 		assert.match(artifacts.commentBody, /Null handling is broken/);
 	});

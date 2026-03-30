@@ -1810,6 +1810,10 @@ describe("Copilot tools", () => {
 			summaryDrafts.prSummary,
 			"Adds stricter validation to the renamed service flow.",
 		);
+		assert.match(
+			JSON.stringify(tool.parameters),
+			/Use short bullet points when that is clearer than one sentence/,
+		);
 	});
 
 	it("records and updates a file summary for a reviewed file", async () => {

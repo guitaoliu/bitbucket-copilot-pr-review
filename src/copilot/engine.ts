@@ -145,8 +145,8 @@ function buildPreToolHint(
 			return "Treat CI output as a prioritization hint, not proof of a reportable issue.";
 		case "record_pr_summary":
 			return perFileSummariesEnabled
-				? "Capture the PR's intended behavior change in one concise, evidence-backed summary once you understand the diff."
-				: `Capture the PR's intended behavior change in one concise, evidence-backed summary once you understand the diff. Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files.`;
+				? "Capture the PR's intended behavior change in one concise, evidence-backed summary once you understand the diff. Use short bullet points when the PR has a few distinct changes."
+				: `Capture the PR's intended behavior change in one concise, evidence-backed summary once you understand the diff. Use short bullet points when the PR has a few distinct changes. Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files.`;
 		case "record_file_summary":
 			return perFileSummariesEnabled
 				? "Record a short, concrete summary of what changed in a reviewed file once you have enough context to describe it accurately."
@@ -194,8 +194,8 @@ function buildPostToolHint(
 			return "CI may explain where to look next, but you still need code-level evidence before reporting anything.";
 		case "record_pr_summary":
 			return perFileSummariesEnabled
-				? "Keep the PR summary concise and factual, then continue until each reviewed file also has a clear file-change summary."
-				: `Keep the PR summary concise and factual. Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files, so continue reviewing without recording them.`;
+				? "Keep the PR summary concise and factual. Use short bullet points when they make separate changes easier to scan, then continue until each reviewed file also has a clear file-change summary."
+				: `Keep the PR summary concise and factual. Use short bullet points when they make separate changes easier to scan. Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files, so continue reviewing without recording them.`;
 		case "record_file_summary":
 			return perFileSummariesEnabled
 				? "Keep file summaries concrete and per-file; continue until all reviewed files have coverage."

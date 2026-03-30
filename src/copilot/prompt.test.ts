@@ -321,8 +321,16 @@ describe("buildSystemMessage", () => {
 			/If you validate more than 3 distinct issues, keep reviewing and preserve or replace the strongest findings instead of stopping early/,
 		);
 		assert.match(
+			systemMessage.sections?.code_change_rules?.content ?? "",
+			/prefer short bullet points for the PR summary/i,
+		);
+		assert.match(
 			systemMessage.sections?.tool_efficiency?.content ?? "",
 			/Call get_pr_overview first to understand the PR, changed-file metadata, and CI context/,
+		);
+		assert.match(
+			systemMessage.sections?.tool_efficiency?.content ?? "",
+			/using short bullet points when they better capture separate changes/i,
 		);
 		assert.match(
 			systemMessage.sections?.last_instructions?.content ?? "",

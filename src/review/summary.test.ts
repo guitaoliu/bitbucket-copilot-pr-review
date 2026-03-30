@@ -108,6 +108,22 @@ describe("finalizeReviewSummary", () => {
 		);
 	});
 
+	it("preserves multiline bullet formatting for the PR summary", () => {
+		const context = createContext(2);
+		const drafts: ReviewSummaryDrafts = {
+			prSummary:
+				"  - Tightens request validation\n\n - Cleans up renamed module handling  ",
+			fileSummaries: [],
+		};
+
+		const result = finalizeReviewSummary(context, drafts);
+
+		assert.equal(
+			result.prSummary,
+			"- Tightens request validation\n- Cleans up renamed module handling",
+		);
+	});
+
 	it("omits per-file summaries for larger reviews while keeping the PR summary", () => {
 		const context = createContext(
 			MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1,

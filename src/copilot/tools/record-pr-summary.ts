@@ -20,7 +20,7 @@ export function createRecordPrSummaryTool(toolContext: ReviewToolContext) {
 				summary: {
 					type: "string",
 					description:
-						"One or two sentences describing the PR's purpose and main behavior change.",
+						"A concise summary of the PR's purpose and main behavior change. Use short bullet points when that is clearer than one sentence.",
 				},
 			},
 			required: ["summary"],

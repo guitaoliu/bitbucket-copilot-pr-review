@@ -107,6 +107,10 @@ function buildFindingBadge(finding: ReviewFinding): string {
 	return `${finding.type}/${finding.severity}/${finding.confidence}`;
 }
 
+function buildCommentFindingMetadata(finding: ReviewFinding): string {
+	return `Type: ${finding.type} | Severity: ${finding.severity} | Confidence: ${finding.confidence}`;
+}
+
 function buildFindingTypeSummary(
 	findings: ReviewFinding[],
 ): string | undefined {
@@ -192,7 +196,7 @@ function buildCommentFindingSummaryLines(
 			locationLabel,
 			buildPullRequestDiffLink(prLink, finding.path, finding.line),
 		);
-		return `${index + 1}. [${buildFindingBadge(finding)}] ${location} - ${finding.title}`;
+		return `${index + 1}. [${buildCommentFindingMetadata(finding)}] ${location} - ${finding.title}`;
 	});
 }
 

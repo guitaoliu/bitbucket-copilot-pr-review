@@ -22,7 +22,7 @@ function collapseWhitespace(value: string): string {
 	return value.trim().replace(/\s+/g, " ");
 }
 
-function normalizeSummaryText(
+function normalizeInlineSummaryText(
 	value: string | undefined,
 	maxChars: number,
 ): string | undefined {
@@ -36,6 +36,27 @@ function normalizeSummaryText(
 	}
 
 	return truncateText(collapsed, maxChars, { preserveMaxLength: true });
+}
+
+function normalizeMultilineSummaryText(
+	value: string | undefined,
+	maxChars: number,
+): string | undefined {
+	if (!value) {
+		return undefined;
+	}
+
+	const normalized = value
+		.replace(/\r\n?/g, "\n")
+		.split("\n")
+		.map((line) => collapseWhitespace(line))
+		.filter((line) => line.length > 0)
+		.join("\n");
+	if (normalized.length === 0) {
+		return undefined;
+	}
+
+	return truncateText(normalized, maxChars, { preserveMaxLength: true });
 }
 
 function pluralize(
@@ -63,8 +84,11 @@ export function summarizeSkippedReason(reason: string): string {
 }
 
 export function buildDefaultPullRequestSummary(context: ReviewContext): string {
-	const title = normalizeSummaryText(context.pr.title, MAX_PR_SUMMARY_LENGTH);
-	const description = normalizeSummaryText(
+	const title = normalizeInlineSummaryText(
+		context.pr.title,
+		MAX_PR_SUMMARY_LENGTH,
+	);
+	const description = normalizeInlineSummaryText(
 		context.pr.description,
 		MAX_PR_SUMMARY_LENGTH,
 	);
@@ -130,7 +154,7 @@ export function finalizeReviewSummary(
 	drafts: ReviewSummaryDrafts,
 ): Pick<ReviewSummaryDrafts, "prSummary" | "fileSummaries"> {
 	const prSummary =
-		normalizeSummaryText(drafts.prSummary, MAX_PR_SUMMARY_LENGTH) ??
+		normalizeMultilineSummaryText(drafts.prSummary, MAX_PR_SUMMARY_LENGTH) ??
 		buildDefaultPullRequestSummary(context);
 
 	if (!shouldCreatePerFileSummaries(context.reviewedFiles.length)) {
@@ -145,7 +169,7 @@ export function finalizeReviewSummary(
 
 	for (const draft of drafts.fileSummaries) {
 		const file = reviewedFileMap.get(draft.path);
-		const summary = normalizeSummaryText(
+		const summary = normalizeInlineSummaryText(
 			draft.summary,
 			MAX_FILE_SUMMARY_LENGTH,
 		);

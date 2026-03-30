@@ -286,11 +286,11 @@ describe("buildPullRequestComment", () => {
 		);
 		assert.match(
 			comment,
-			/1\. \[BUG\/HIGH\/high\] \[src\/service\.ts:42\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fservice\.ts\?t=42\) - Null handling is broken/,
+			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\] \[src\/service\.ts:42\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fservice\.ts\?t=42\) - Null handling is broken/,
 		);
 		assert.match(
 			comment,
-			/2\. \[CODE_SMELL\/MEDIUM\/high\] \[src\/new-name\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fnew-name\.ts\) - Rename lost an import/,
+			/2\. \[Type: CODE_SMELL \| Severity: MEDIUM \| Confidence: high\] \[src\/new-name\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fnew-name\.ts\) - Rename lost an import/,
 		);
 	});
 
@@ -329,9 +329,22 @@ describe("buildPullRequestComment", () => {
 		assert.match(comment, /- `i18n\/locales\/en\.json`: ignored path pattern/);
 		assert.match(
 			comment,
-			/1\. \[BUG\/HIGH\/high\] `src\/service\.ts:42` - Null handling is broken/,
+			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\] `src\/service\.ts:42` - Null handling is broken/,
 		);
 		assert.doesNotMatch(comment, /\[src\/service\.ts:42\]\(/);
+	});
+
+	it("preserves bullet formatting in the What Changed section", () => {
+		const comment = buildPullRequestComment(config, createContext(undefined), {
+			...createOutcome(),
+			prSummary:
+				"- Tightens request validation in the service flow\n- Cleans up renamed module wiring before merge",
+		});
+
+		assert.match(
+			comment,
+			/### What Changed\n- Tightens request validation in the service flow\n- Cleans up renamed module wiring before merge/,
+		);
 	});
 
 	it("adds taxonomy detail to the insight report summary", () => {
