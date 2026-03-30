@@ -354,21 +354,11 @@ describe("Copilot tools", () => {
 			},
 		);
 
-		assert.equal(
-			result,
-			"Recorded finding 1 for src/new-name.ts:file; requested line 9 is not a changed line in src/new-name.ts; stored as a file-level annotation.",
-		);
-		assert.deepEqual(drafts, [
-			{
-				path: "src/new-name.ts",
-				line: 0,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "Wrong line",
-				details: "This line is unchanged.",
-			},
-		]);
+		assert.deepEqual(result, {
+			resultType: "rejected",
+			textResultForLlm: "Line 9 is not a changed line in src/new-name.ts.",
+		});
+		assert.deepEqual(drafts, []);
 	});
 
 	it("normalizes oldPath findings onto the reviewed head path", async () => {
@@ -1501,7 +1491,7 @@ describe("Copilot tools", () => {
 		]);
 	});
 
-	it("replaces an existing finding with a file-level annotation when the line is unchanged", async () => {
+	it("rejects replacing an existing finding when the line is unchanged", async () => {
 		const drafts: FindingDraft[] = [
 			{
 				path: "src/new-name.ts",
@@ -1524,7 +1514,7 @@ describe("Copilot tools", () => {
 		);
 		const handler = getHandler<
 			FindingDraft & { findingNumber: number },
-			string
+			{ resultType: string; textResultForLlm: string }
 		>(tool);
 
 		const result = await handler(
@@ -1546,19 +1536,19 @@ describe("Copilot tools", () => {
 			},
 		);
 
-		assert.equal(
-			result,
-			"Replaced finding 1 with src/new-name.ts:file; requested line 9 is not a changed line in src/new-name.ts; stored as a file-level annotation.",
-		);
+		assert.deepEqual(result, {
+			resultType: "rejected",
+			textResultForLlm: "Line 9 is not a changed line in src/new-name.ts.",
+		});
 		assert.deepEqual(drafts, [
 			{
 				path: "src/new-name.ts",
-				line: 0,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "New issue",
-				details: "New details",
+				line: 10,
+				severity: "MEDIUM",
+				type: "CODE_SMELL",
+				confidence: "medium",
+				title: "Old issue",
+				details: "Old details",
 			},
 		]);
 	});

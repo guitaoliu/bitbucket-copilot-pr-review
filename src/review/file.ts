@@ -72,14 +72,9 @@ export function normalizeFindingDraftLocation(
 		normalizedDraft.line > 0 &&
 		!file.changedLines.includes(normalizedDraft.line)
 	) {
-		const requestedLine = normalizedDraft.line;
-		normalizedDraft = {
-			...normalizedDraft,
-			line: 0,
+		return {
+			error: `Line ${normalizedDraft.line} is not a changed line in ${file.path}.`,
 		};
-		notes.push(
-			`requested line ${requestedLine} is not a changed line in ${file.path}; stored as a file-level annotation`,
-		);
 	}
 
 	if (notes.length > 0) {

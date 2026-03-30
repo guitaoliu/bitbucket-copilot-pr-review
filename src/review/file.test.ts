@@ -5,6 +5,7 @@ import type { ChangedFile } from "../git/types.ts";
 import {
 	createReviewedFileLookup,
 	getReviewedFilePathForVersion,
+	normalizeFindingDraftLocation,
 } from "./file.ts";
 
 describe("getReviewedFilePathForVersion", () => {
@@ -92,5 +93,75 @@ describe("createReviewedFileLookup", () => {
 		assert.equal(lookup.get("src/old-name.ts"), renamedFile);
 		assert.equal(lookup.get("src/copied.ts"), copiedFile);
 		assert.equal(lookup.has("src/original.ts"), false);
+	});
+});
+
+describe("normalizeFindingDraftLocation", () => {
+	it("rejects non-file-level findings on unchanged lines", () => {
+		const reviewedFile: ChangedFile = {
+			path: "src/new-name.ts",
+			status: "modified",
+			patch: "diff --git a/src/new-name.ts b/src/new-name.ts",
+			changedLines: [10, 11],
+			hunks: [],
+			additions: 2,
+			deletions: 0,
+			isBinary: false,
+		};
+
+		const result = normalizeFindingDraftLocation(
+			{
+				path: "src/new-name.ts",
+				line: 9,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Wrong line",
+				details: "This line is unchanged.",
+			},
+			createReviewedFileLookup([reviewedFile]),
+		);
+
+		assert.deepEqual(result, {
+			error: "Line 9 is not a changed line in src/new-name.ts.",
+		});
+	});
+
+	it("preserves explicit file-level findings", () => {
+		const reviewedFile: ChangedFile = {
+			path: "src/new-name.ts",
+			status: "modified",
+			patch: "diff --git a/src/new-name.ts b/src/new-name.ts",
+			changedLines: [10, 11],
+			hunks: [],
+			additions: 2,
+			deletions: 0,
+			isBinary: false,
+		};
+
+		const result = normalizeFindingDraftLocation(
+			{
+				path: "src/new-name.ts",
+				line: 0,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "File issue",
+				details: "This applies to the whole changed file.",
+			},
+			createReviewedFileLookup([reviewedFile]),
+		);
+
+		assert.deepEqual(result, {
+			normalizedDraft: {
+				path: "src/new-name.ts",
+				line: 0,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "File issue",
+				details: "This applies to the whole changed file.",
+			},
+		});
 	});
 });
