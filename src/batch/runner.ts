@@ -132,7 +132,8 @@ function parseWorkerOutput(stdout: string, prId: number): ReviewRunOutput {
 function isFailedReviewOutput(output: ReviewRunOutput): boolean {
 	return (
 		output.skipped === false &&
-		(output.publicationStatus === "partial" ||
+		(output.publicationStatus === "stale" ||
+			output.publicationStatus === "partial" ||
 			output.publicationStatus === "failed")
 	);
 }

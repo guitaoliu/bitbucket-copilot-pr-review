@@ -99,7 +99,8 @@ describe("runBatchReview", () => {
 					displayId: "renovate/eslint-10.x",
 				},
 			},
-			createPullRequest(103, "Failed PR"),
+			createPullRequest(103, "Stale PR"),
+			createPullRequest(104, "Failed PR"),
 		];
 		const mirrorClones: string[] = [];
 		const cleanedRoots: string[] = [];
@@ -193,6 +194,31 @@ describe("runBatchReview", () => {
 					};
 				}
 
+				if (pr.id === 103) {
+					return {
+						context: {
+							prId: 103,
+							title: pr.title,
+							sourceBranch: pr.source.displayId,
+							targetBranch: pr.target.displayId,
+							headCommit: pr.source.latestCommit,
+							mergeBaseCommit: pr.target.latestCommit,
+							reviewedFiles: 1,
+							skippedFiles: 0,
+						},
+						review: { summary: "stale", findings: [], stale: true },
+						report: {
+							title: "Copilot PR Review",
+							result: "PASS",
+							reporter: "GitHub Copilot",
+						},
+						annotations: [],
+						published: false,
+						skipped: false,
+						publicationStatus: "stale",
+					};
+				}
+
 				throw new Error("worker failed");
 			},
 			cleanupBatchWorkspace: async ({ workspaceRoot }) => {
@@ -205,10 +231,10 @@ describe("runBatchReview", () => {
 		assert.deepEqual(mirrorClones, [
 			"https://bitbucket.example.com/scm/proj/my-repo.git",
 		]);
-		assert.equal(output.totalOpenPullRequests, 3);
+		assert.equal(output.totalOpenPullRequests, 4);
 		assert.equal(output.reviewed, 1);
 		assert.equal(output.skipped, 1);
-		assert.equal(output.failed, 1);
+		assert.equal(output.failed, 2);
 		assert.deepEqual(output.metrics.mirror, {
 			path: "/tmp/batch-root/.cache/PROJ-my-repo/mirror.git",
 			action: "refreshed",
@@ -217,11 +243,11 @@ describe("runBatchReview", () => {
 		});
 		assert.equal(output.metrics.workspaces.tempRoot, "/tmp/batch-root");
 		assert.equal(output.metrics.workspaces.runRoot, "/tmp/batch-root/run-1");
-		assert.equal(output.metrics.workspaces.provisioned, 2);
-		assert.equal(output.metrics.workspaces.cleaned, 2);
+		assert.equal(output.metrics.workspaces.provisioned, 3);
+		assert.equal(output.metrics.workspaces.cleaned, 3);
 		assert.equal(output.metrics.workspaces.retained, 0);
-		assert.equal(output.metrics.workspaces.provisionDurationMsTotal, 24);
-		assert.equal(output.metrics.workspaces.workspaceCleanupDurationMsTotal, 4);
+		assert.equal(output.metrics.workspaces.provisionDurationMsTotal, 38);
+		assert.equal(output.metrics.workspaces.workspaceCleanupDurationMsTotal, 8);
 		assert.equal(output.metrics.workspaces.runRootCleanupDurationMs, 0);
 		assert.equal(output.metrics.workspaces.runRootRemoved, true);
 		assert.equal(output.results[0]?.status, "reviewed");
@@ -237,12 +263,15 @@ describe("runBatchReview", () => {
 		);
 		assert.equal(output.results[1]?.workspace, undefined);
 		assert.equal(output.results[2]?.status, "failed");
+		assert.equal(output.results[2]?.output?.publicationStatus, "stale");
+		assert.match(output.results[2]?.error ?? "", /publication status stale/);
 		assert.deepEqual(output.results[2]?.workspace, {
 			provisionDurationMs: 13,
 			cleanupDurationMs: 3,
 			retained: false,
 		});
-		assert.match(output.results[2]?.error ?? "", /worker failed/);
+		assert.equal(output.results[3]?.status, "failed");
+		assert.match(output.results[3]?.error ?? "", /worker failed/);
 		assert.deepEqual(cleanedRoots, ["/tmp/batch-root/run-1"]);
 	});
 

@@ -10,6 +10,7 @@ import {
 } from "./config/args.ts";
 import { isCliUserError } from "./config/errors.ts";
 import { loadBatchConfig, loadConfig } from "./config/load.ts";
+import type { ReviewRunOutput } from "./review/output-types.ts";
 import { runReview } from "./review/runner.ts";
 import { createLogger } from "./shared/logger.ts";
 
@@ -31,6 +32,20 @@ function formatCliError(error: unknown): string {
 	}
 
 	return String(error);
+}
+
+export function shouldExitNonZeroForReview(
+	output: Pick<ReviewRunOutput, "skipped" | "publicationStatus">,
+): boolean {
+	if (output.skipped) {
+		return false;
+	}
+
+	return (
+		output.publicationStatus === "stale" ||
+		output.publicationStatus === "partial" ||
+		output.publicationStatus === "failed"
+	);
 }
 
 async function main(): Promise<void> {
@@ -61,15 +76,14 @@ async function main(): Promise<void> {
 	const output = await runReview(config, logger);
 	delete config.internal;
 	logger.json(`${JSON.stringify(output, null, 2)}\n`);
-	if (
-		output.publicationStatus === "partial" ||
-		output.publicationStatus === "failed"
-	) {
+	if (shouldExitNonZeroForReview(output)) {
 		process.exitCode = 1;
 	}
 }
 
-main().catch((error) => {
-	process.stderr.write(`${formatCliError(error)}\n`);
-	process.exitCode = 1;
-});
+if (import.meta.main) {
+	main().catch((error) => {
+		process.stderr.write(`${formatCliError(error)}\n`);
+		process.exitCode = 1;
+	});
+}
