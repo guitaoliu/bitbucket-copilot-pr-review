@@ -142,11 +142,97 @@ describe("repo path access decisions", () => {
 	it("rejects path traversal and secret-bearing paths", () => {
 		const traversal = getRepoFileAccessDecision("../secrets.txt");
 		const secret = getRepoFileAccessDecision("config/.env.local");
+		const credentials = getRepoFileAccessDecision("config/credentials.json");
+		const privateKey = getRepoFileAccessDecision("infra/id_rsa");
+		const deployKey = getRepoFileAccessDecision("keys/deploy-key.pem");
 
 		assert.equal(traversal.include, false);
 		assert.match(traversal.reason ?? "", /repo-relative/);
 		assert.equal(secret.include, false);
 		assert.equal(secret.reason, "potential secret-bearing path");
+		assert.equal(credentials.include, false);
+		assert.equal(credentials.reason, "potential secret-bearing path");
+		assert.equal(privateKey.include, false);
+		assert.equal(privateKey.reason, "potential secret-bearing path");
+		assert.equal(deployKey.include, false);
+		assert.equal(deployKey.reason, "potential secret-bearing path");
+	});
+
+	it("rejects secret-bearing directories before listing descendants", () => {
+		const decision = getRepoDirectoriesAccessDecision([
+			"config/secrets",
+			"src",
+		]);
+
+		assert.equal(decision.include, false);
+		assert.equal(decision.reason, "potential secret-bearing path");
+	});
+
+	it("rejects files nested under exact secret-bearing directories", () => {
+		const secretChild = getRepoFileAccessDecision("config/secrets/api.txt");
+		const credentialsChild = getRepoFileAccessDecision(
+			"config/credentials/client.json",
+		);
+		const tokensChild = getRepoFileAccessDecision("infra/tokens/client.json");
+
+		assert.equal(secretChild.include, false);
+		assert.equal(secretChild.reason, "potential secret-bearing path");
+		assert.equal(credentialsChild.include, false);
+		assert.equal(credentialsChild.reason, "potential secret-bearing path");
+		assert.equal(tokensChild.include, false);
+		assert.equal(tokensChild.reason, "potential secret-bearing path");
+	});
+
+	it("allows ordinary auth source files and directories", () => {
+		const authFile = getRepoFileAccessDecision("src/auth.ts");
+		const oauthFile = getRepoFileAccessDecision("src/oauth.ts");
+		const authDirectory = getRepoDirectoriesAccessDecision(["src/auth"]);
+
+		assert.equal(authFile.include, true);
+		assert.equal(authFile.normalizedPath, "src/auth.ts");
+		assert.equal(oauthFile.include, true);
+		assert.equal(oauthFile.normalizedPath, "src/oauth.ts");
+		assert.equal(authDirectory.include, true);
+		assert.deepEqual(authDirectory.normalizedPaths, ["src/auth"]);
+	});
+
+	it("allows ordinary source files whose names merely contain secret-like substrings", () => {
+		const tokenFile = getRepoFileAccessDecision("src/token.ts");
+		const tokenizerFile = getRepoFileAccessDecision("src/tokenizer.ts");
+		const credentialsProviderFile = getRepoFileAccessDecision(
+			"src/credentials-provider.ts",
+		);
+		const secretaryFile = getRepoFileAccessDecision("src/secretary.ts");
+		const serviceAccountingFile = getRepoFileAccessDecision(
+			"src/service-accounting.ts",
+		);
+		const tokenDirectory = getRepoDirectoryAccessDecision("src/token");
+		const credentialsDirectory =
+			getRepoDirectoryAccessDecision("src/credentials");
+		const tokensDirectory = getRepoDirectoryAccessDecision("src/tokens");
+
+		assert.equal(tokenFile.include, true);
+		assert.equal(tokenFile.normalizedPath, "src/token.ts");
+		assert.equal(tokenizerFile.include, true);
+		assert.equal(tokenizerFile.normalizedPath, "src/tokenizer.ts");
+		assert.equal(credentialsProviderFile.include, true);
+		assert.equal(
+			credentialsProviderFile.normalizedPath,
+			"src/credentials-provider.ts",
+		);
+		assert.equal(secretaryFile.include, true);
+		assert.equal(secretaryFile.normalizedPath, "src/secretary.ts");
+		assert.equal(serviceAccountingFile.include, true);
+		assert.equal(
+			serviceAccountingFile.normalizedPath,
+			"src/service-accounting.ts",
+		);
+		assert.equal(tokenDirectory.include, true);
+		assert.equal(tokenDirectory.normalizedPath, "src/token");
+		assert.equal(credentialsDirectory.include, true);
+		assert.equal(credentialsDirectory.normalizedPath, "src/credentials");
+		assert.equal(tokensDirectory.include, true);
+		assert.equal(tokensDirectory.normalizedPath, "src/tokens");
 	});
 
 	it("rejects excluded directories for directory listing", () => {
