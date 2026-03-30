@@ -250,6 +250,7 @@ describe("runBatchReview", () => {
 		assert.equal(output.metrics.workspaces.workspaceCleanupDurationMsTotal, 8);
 		assert.equal(output.metrics.workspaces.runRootCleanupDurationMs, 0);
 		assert.equal(output.metrics.workspaces.runRootRemoved, true);
+		assert.deepEqual(output.metrics.workspaces.cleanupErrors, []);
 		assert.equal(output.results[0]?.status, "reviewed");
 		assert.deepEqual(output.results[0]?.workspace, {
 			provisionDurationMs: 11,
@@ -452,10 +453,171 @@ describe("runBatchReview", () => {
 		assert.equal(output.metrics.workspaces.cleaned, 0);
 		assert.equal(output.metrics.workspaces.retained, 1);
 		assert.equal(output.metrics.workspaces.runRootRemoved, false);
+		assert.deepEqual(output.metrics.workspaces.cleanupErrors, []);
 		assert.deepEqual(output.results[0]?.workspace, {
 			provisionDurationMs: 9,
 			retained: true,
 		});
+	});
+
+	it("preserves completed review results when workspace cleanup fails", async () => {
+		const warnMessages: string[] = [];
+		const logSpy: Logger = {
+			...logger,
+			warn(message) {
+				warnMessages.push(message);
+			},
+		};
+
+		const output = await runBatchReview(baseConfig, logSpy, {
+			createRepositoryClient: () => ({
+				async listOpenPullRequests() {
+					return [createPullRequest(301, "Cleanup failure PR")];
+				},
+			}),
+			resolveTempRoot: async () => "/tmp/batch-root",
+			createWorkspace: async () => ({
+				baseRoot: "/tmp/batch-root",
+				runRoot: "/tmp/batch-root/run-1",
+				cacheRoot: "/tmp/batch-root/.cache",
+				repoRoot: "/tmp/batch-root/run-1/workspaces",
+				repoCacheRoot: "/tmp/batch-root/.cache/PROJ-my-repo",
+				mirrorRoot: "/tmp/batch-root/.cache/PROJ-my-repo/mirror.git",
+			}),
+			ensureMirrorClone: async ({ workspace }) => ({
+				path: workspace.mirrorRoot,
+				action: "created",
+				durationMs: 1,
+				lockWaitMs: 0,
+			}),
+			provisionPullRequestWorkspace: async ({ pr }) => ({
+				workspaceRoot: `/tmp/workspaces/${pr.id}`,
+				metrics: {
+					provisionDurationMs: 5,
+					retained: false,
+				},
+				async cleanup() {
+					throw new Error("workspace cleanup failed");
+				},
+			}),
+			runWorkerForPullRequest: async ({ pr }) => ({
+				context: {
+					prId: pr.id,
+					title: pr.title,
+					sourceBranch: pr.source.displayId,
+					targetBranch: pr.target.displayId,
+					headCommit: pr.source.latestCommit,
+					mergeBaseCommit: pr.target.latestCommit,
+					reviewedFiles: 1,
+					skippedFiles: 0,
+				},
+				review: { summary: "ok", findings: [], stale: false },
+				report: {
+					title: "Copilot PR Review",
+					result: "PASS",
+					reporter: "GitHub Copilot",
+				},
+				annotations: [],
+				published: false,
+				skipped: false,
+			}),
+			cleanupBatchWorkspace: async () => 0,
+			loadTrustedBatchReviewConfig: async (config) => config,
+		});
+
+		assert.equal(output.reviewed, 1);
+		assert.equal(output.failed, 0);
+		assert.equal(output.results[0]?.status, "reviewed");
+		assert.equal(output.results[0]?.cleanupError, "workspace cleanup failed");
+		assert.equal(output.metrics.workspaces.cleaned, 0);
+		assert.deepEqual(output.cleanupErrors, [
+			"PR #301: workspace cleanup failed",
+		]);
+		assert.ok(
+			warnMessages.includes(
+				"[PROJ/my-repo#301] Failed to remove workspace at /tmp/workspaces/301: workspace cleanup failed",
+			),
+		);
+	});
+
+	it("preserves batch output when run-root cleanup fails", async () => {
+		const warnMessages: string[] = [];
+		const logSpy: Logger = {
+			...logger,
+			warn(message) {
+				warnMessages.push(message);
+			},
+		};
+
+		const output = await runBatchReview(baseConfig, logSpy, {
+			createRepositoryClient: () => ({
+				async listOpenPullRequests() {
+					return [createPullRequest(302, "Run root cleanup failure")];
+				},
+			}),
+			resolveTempRoot: async () => "/tmp/batch-root",
+			createWorkspace: async () => ({
+				baseRoot: "/tmp/batch-root",
+				runRoot: "/tmp/batch-root/run-1",
+				cacheRoot: "/tmp/batch-root/.cache",
+				repoRoot: "/tmp/batch-root/run-1/workspaces",
+				repoCacheRoot: "/tmp/batch-root/.cache/PROJ-my-repo",
+				mirrorRoot: "/tmp/batch-root/.cache/PROJ-my-repo/mirror.git",
+			}),
+			ensureMirrorClone: async ({ workspace }) => ({
+				path: workspace.mirrorRoot,
+				action: "created",
+				durationMs: 1,
+				lockWaitMs: 0,
+			}),
+			provisionPullRequestWorkspace: async ({ pr }) => ({
+				workspaceRoot: `/tmp/workspaces/${pr.id}`,
+				metrics: {
+					provisionDurationMs: 4,
+					cleanupDurationMs: 1,
+					retained: false,
+				},
+				async cleanup() {},
+			}),
+			runWorkerForPullRequest: async ({ pr }) => ({
+				context: {
+					prId: pr.id,
+					title: pr.title,
+					sourceBranch: pr.source.displayId,
+					targetBranch: pr.target.displayId,
+					headCommit: pr.source.latestCommit,
+					mergeBaseCommit: pr.target.latestCommit,
+					reviewedFiles: 1,
+					skippedFiles: 0,
+				},
+				review: { summary: "ok", findings: [], stale: false },
+				report: {
+					title: "Copilot PR Review",
+					result: "PASS",
+					reporter: "GitHub Copilot",
+				},
+				annotations: [],
+				published: false,
+				skipped: false,
+			}),
+			cleanupBatchWorkspace: async () => {
+				throw new Error("run root cleanup failed");
+			},
+			loadTrustedBatchReviewConfig: async (config) => config,
+		});
+
+		assert.equal(output.totalOpenPullRequests, 1);
+		assert.equal(output.reviewed, 1);
+		assert.deepEqual(output.cleanupErrors, [
+			"batch run workspace: run root cleanup failed",
+		]);
+		assert.equal(output.metrics.workspaces.runRootRemoved, false);
+		assert.equal(output.metrics.workspaces.runRootCleanupDurationMs, 0);
+		assert.ok(
+			warnMessages.includes(
+				"Failed to clean up batch run workspace at /tmp/batch-root/run-1: run root cleanup failed",
+			),
+		);
 	});
 
 	it("logs batch progress milestones", async () => {

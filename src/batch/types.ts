@@ -59,6 +59,7 @@ export interface BatchWorkspaceLifecycleMetrics {
 	workspaceCleanupDurationMsTotal: number;
 	runRootCleanupDurationMs: number;
 	runRootRemoved: boolean;
+	cleanupErrors: string[];
 }
 
 export interface BatchReviewMetrics {
@@ -78,6 +79,7 @@ export interface BatchReviewResult {
 	output?: ReviewRunOutput | undefined;
 	skipReason?: string | undefined;
 	error?: string | undefined;
+	cleanupError?: string | undefined;
 }
 
 export interface BatchReviewOutput {
@@ -92,4 +94,5 @@ export interface BatchReviewOutput {
 	failed: number;
 	metrics: BatchReviewMetrics;
 	results: BatchReviewResult[];
+	cleanupErrors?: string[] | undefined;
 }

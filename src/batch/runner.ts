@@ -150,6 +150,7 @@ function createWorkspaceLifecycleMetrics(
 		workspaceCleanupDurationMsTotal: 0,
 		runRootCleanupDurationMs: 0,
 		runRootRemoved: false,
+		cleanupErrors: [],
 	};
 }
 
@@ -270,6 +271,8 @@ async function executePullRequestReview(options: {
 	const startedAt = Date.now();
 	let provisioned: ProvisionedWorkspaceLike | undefined;
 	let effectiveConfig = options.config;
+	let cleanupError: string | undefined;
+	let result: BatchReviewResult | undefined;
 	const prLogger = buildPrefixedLogger(
 		options.logger,
 		`[${options.config.repoId}#${options.pr.id}]`,
@@ -299,13 +302,14 @@ async function executePullRequestReview(options: {
 		);
 		if (branchSkipReason) {
 			prLogger.info(branchSkipReason);
-			return {
+			result = {
 				prId: options.pr.id,
 				title: options.pr.title,
 				status: "skipped",
 				durationMs: Date.now() - startedAt,
 				skipReason: branchSkipReason,
 			};
+			return result;
 		}
 
 		const cloneUrl = options.pr.target.cloneUrl ?? options.pr.source.cloneUrl;
@@ -344,7 +348,7 @@ async function executePullRequestReview(options: {
 			logger: options.logger,
 		});
 
-		return {
+		result = {
 			prId: options.pr.id,
 			title: options.pr.title,
 			status: output.skipped
@@ -366,11 +370,12 @@ async function executePullRequestReview(options: {
 					}
 				: {}),
 		};
+		return result;
 	} catch (error) {
 		prLogger.error(
 			`Review failed after ${Date.now() - startedAt}ms: ${error instanceof Error ? error.message : String(error)}`,
 		);
-		return {
+		result = {
 			prId: options.pr.id,
 			title: options.pr.title,
 			status: "failed",
@@ -381,6 +386,7 @@ async function executePullRequestReview(options: {
 			workspace: provisioned?.metrics,
 			error: error instanceof Error ? error.message : String(error),
 		};
+		return result;
 	} finally {
 		if (effectiveConfig.keepWorkdirs && provisioned?.metrics) {
 			provisioned.metrics.retained = true;
@@ -389,17 +395,31 @@ async function executePullRequestReview(options: {
 		}
 
 		if (!effectiveConfig.keepWorkdirs && provisioned) {
-			await provisioned.cleanup();
-			if (provisioned.metrics) {
-				options.workspaceMetrics.cleaned += 1;
-				options.workspaceMetrics.workspaceCleanupDurationMsTotal +=
-					provisioned.metrics.cleanupDurationMs ?? 0;
-				prLogger.info(
-					`Removed workspace in ${provisioned.metrics.cleanupDurationMs ?? 0}ms`,
+			try {
+				await provisioned.cleanup();
+				if (provisioned.metrics) {
+					options.workspaceMetrics.cleaned += 1;
+					options.workspaceMetrics.workspaceCleanupDurationMsTotal +=
+						provisioned.metrics.cleanupDurationMs ?? 0;
+					prLogger.info(
+						`Removed workspace in ${provisioned.metrics.cleanupDurationMs ?? 0}ms`,
+					);
+				} else {
+					prLogger.info("Removed workspace");
+				}
+			} catch (error) {
+				cleanupError = error instanceof Error ? error.message : String(error);
+				options.workspaceMetrics.cleanupErrors.push(
+					`PR #${options.pr.id}: ${cleanupError}`,
 				);
-			} else {
-				prLogger.info("Removed workspace");
+				prLogger.warn(
+					`Failed to remove workspace at ${provisioned.workspaceRoot}: ${cleanupError}`,
+				);
 			}
+		}
+
+		if (cleanupError && result) {
+			result.cleanupError = cleanupError;
 		}
 	}
 }
@@ -455,6 +475,9 @@ function summarizeBatchResults(
 		failed: results.filter((result) => result.status === "failed").length,
 		metrics,
 		results,
+		...(metrics.workspaces.cleanupErrors.length > 0
+			? { cleanupErrors: metrics.workspaces.cleanupErrors }
+			: {}),
 	};
 }
 
@@ -506,6 +529,8 @@ export async function runBatchReview(
 		);
 	}
 
+	let results: BatchReviewResult[] = [];
+
 	try {
 		logger.info(`Preparing mirror cache at ${workspace.mirrorRoot}`);
 		metrics.mirror = await ensureMirrorCloneFn({ workspace, cloneUrl, logger });
@@ -516,7 +541,7 @@ export async function runBatchReview(
 			`Starting batch review of ${pullRequests.length} pull requests with concurrency ${config.maxParallel}`,
 		);
 		let completedCount = 0;
-		const results = await runWithConcurrency({
+		results = await runWithConcurrency({
 			items: pullRequests,
 			maxParallel: config.maxParallel,
 			worker: async (pr, index) => {
@@ -546,26 +571,37 @@ export async function runBatchReview(
 		logger.info(
 			`Batch review complete: ${results.filter((result) => result.status === "reviewed").length} reviewed, ${results.filter((result) => result.status === "skipped").length} skipped, ${results.filter((result) => result.status === "failed").length} failed`,
 		);
-		return summarizeBatchResults(config, metrics, results);
 	} finally {
 		if (config.keepWorkdirs) {
 			logger.info(`Keeping batch run workspace at ${workspace.runRoot}`);
 		} else {
 			logger.info(`Removing batch run workspace at ${workspace.runRoot}`);
 		}
-		metrics.workspaces.runRootCleanupDurationMs = await cleanupBatchWorkspaceFn(
-			{
-				workspaceRoot: workspace.runRoot,
-				removeRoot: !config.keepWorkdirs,
-			},
-		);
-		metrics.workspaces.runRootRemoved = !config.keepWorkdirs;
-		if (config.keepWorkdirs) {
-			logger.info("Batch run workspace retained for inspection");
-		} else {
-			logger.info(
-				`Removed batch run workspace in ${metrics.workspaces.runRootCleanupDurationMs}ms`,
+		try {
+			metrics.workspaces.runRootCleanupDurationMs =
+				await cleanupBatchWorkspaceFn({
+					workspaceRoot: workspace.runRoot,
+					removeRoot: !config.keepWorkdirs,
+				});
+			metrics.workspaces.runRootRemoved = !config.keepWorkdirs;
+			if (config.keepWorkdirs) {
+				logger.info("Batch run workspace retained for inspection");
+			} else {
+				logger.info(
+					`Removed batch run workspace in ${metrics.workspaces.runRootCleanupDurationMs}ms`,
+				);
+			}
+		} catch (error) {
+			const cleanupError =
+				error instanceof Error ? error.message : String(error);
+			metrics.workspaces.cleanupErrors.push(
+				`batch run workspace: ${cleanupError}`,
+			);
+			logger.warn(
+				`Failed to clean up batch run workspace at ${workspace.runRoot}: ${cleanupError}`,
 			);
 		}
 	}
+
+	return summarizeBatchResults(config, metrics, results);
 }
