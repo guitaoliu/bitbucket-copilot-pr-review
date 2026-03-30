@@ -7,6 +7,7 @@ import type {
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import type { Logger } from "../shared/logger.ts";
+import type { PreparedReviewContext } from "./context.ts";
 import type { ReviewContext, ReviewOutcome } from "./types.ts";
 
 export interface ReviewBitbucketClient {
@@ -52,15 +53,16 @@ export interface ReviewRunnerDependencies {
 		config: ReviewerConfig["bitbucket"],
 		logger: Logger,
 	) => ReviewBitbucketClient;
-	buildReviewContext?: (
+	prepareReviewContext?: (
 		config: ReviewerConfig,
 		logger: Logger,
 		pr: PullRequestInfo,
-	) => Promise<{
-		config: ReviewerConfig;
-		context: ReviewContext;
-		git: GitRepository;
-	}>;
+	) => Promise<PreparedReviewContext>;
+	buildReviewContext?: (
+		prepared: PreparedReviewContext,
+		logger: Logger,
+		pr: PullRequestInfo,
+	) => Promise<ReviewContext>;
 	runCopilotReview?: (
 		config: ReviewerConfig,
 		context: ReviewContext,

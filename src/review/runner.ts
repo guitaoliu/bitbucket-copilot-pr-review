@@ -1,10 +1,13 @@
 import { BitbucketClient } from "../bitbucket/client.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import { runCopilotReview } from "../copilot/engine.ts";
-import { getPullRequestSkipReason } from "../policy/pull-requests.ts";
+import {
+	getPullRequestBranchSkipReason,
+	getPullRequestDraftSkipReason,
+} from "../policy/pull-requests.ts";
 import type { Logger } from "../shared/logger.ts";
 import { confirmRerun } from "./confirm.ts";
-import { buildReviewContext } from "./context.ts";
+import { buildReviewContext, prepareReviewContext } from "./context.ts";
 import type { ReviewRunOutput } from "./output-types.ts";
 import { publishReview } from "./publish.ts";
 import {
@@ -26,6 +29,8 @@ export async function runReview(
 	const bitbucket =
 		dependencies.createBitbucketClient?.(config.bitbucket, logger) ??
 		new BitbucketClient(config.bitbucket, logger);
+	const prepareContext =
+		dependencies.prepareReviewContext ?? prepareReviewContext;
 	const buildContext = dependencies.buildReviewContext ?? buildReviewContext;
 	const reviewWithCopilot = dependencies.runCopilotReview ?? runCopilotReview;
 	const confirmRerunPrompt = dependencies.confirmRerun ?? confirmRerun;
@@ -35,16 +40,13 @@ export async function runReview(
 		`Loaded pull request #${initialPullRequest.id} (${initialPullRequest.source.displayId} -> ${initialPullRequest.target.displayId})`,
 	);
 
-	const initialBranchSkipReason = getPullRequestSkipReason(
-		initialPullRequest,
-		config.review.skipBranchPrefixes,
-	);
-	if (initialBranchSkipReason) {
-		logger.info(initialBranchSkipReason);
+	const draftSkipReason = getPullRequestDraftSkipReason(initialPullRequest);
+	if (draftSkipReason) {
+		logger.info(draftSkipReason);
 		return buildSkippedReviewOutput(
 			config,
 			initialPullRequest,
-			initialBranchSkipReason,
+			draftSkipReason,
 		);
 	}
 
@@ -54,12 +56,9 @@ export async function runReview(
 		return buildSkippedReviewOutput(config, initialPullRequest, skipReason);
 	}
 
-	const {
-		config: effectiveConfig,
-		context,
-		git,
-	} = await buildContext(config, logger, initialPullRequest);
-	const branchSkipReason = getPullRequestSkipReason(
+	const prepared = await prepareContext(config, logger, initialPullRequest);
+	const effectiveConfig = prepared.config;
+	const branchSkipReason = getPullRequestBranchSkipReason(
 		initialPullRequest,
 		effectiveConfig.review.skipBranchPrefixes,
 	);
@@ -69,10 +68,12 @@ export async function runReview(
 			effectiveConfig,
 			initialPullRequest,
 			branchSkipReason,
-			context.reviewRevision,
-			context.mergeBaseCommit,
+			undefined,
+			prepared.mergeBaseCommit,
 		);
 	}
+	const context = await buildContext(prepared, logger, initialPullRequest);
+	const git = prepared.git;
 	logger.info(
 		`Review scope after file filtering: ${context.reviewedFiles.length} reviewed, ${context.skippedFiles.length} skipped out of ${context.diffStats.fileCount} changed files (REVIEW_MAX_FILES=${effectiveConfig.review.maxFiles}).`,
 	);

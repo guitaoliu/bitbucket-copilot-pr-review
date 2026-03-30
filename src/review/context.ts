@@ -12,6 +12,12 @@ import { loadTrustedRepoConfig } from "./repo-config.ts";
 import { buildReviewRevision } from "./revision.ts";
 import type { RepoAgentsInstructions, ReviewContext } from "./types.ts";
 
+export interface PreparedReviewContext {
+	config: ReviewerConfig;
+	git: GitRepository;
+	mergeBaseCommit: string;
+}
+
 async function loadCiSummary(
 	filePath: string | undefined,
 	logger: Logger,
@@ -119,15 +125,11 @@ export async function loadRepoAgentsInstructions(
 	}
 }
 
-export async function buildReviewContext(
+export async function prepareReviewContext(
 	config: ReviewerConfig,
 	logger: Logger,
 	pr: PullRequestInfo,
-): Promise<{
-	config: ReviewerConfig;
-	context: ReviewContext;
-	git: GitRepository;
-}> {
+): Promise<PreparedReviewContext> {
 	const git = new GitRepository(config.repoRoot, logger, config.gitRemoteName);
 
 	await git.ensurePullRequestCommits(pr);
@@ -141,6 +143,20 @@ export async function buildReviewContext(
 		pr.target.latestCommit,
 		logger,
 	);
+
+	return {
+		config: effectiveConfig,
+		git,
+		mergeBaseCommit,
+	};
+}
+
+export async function buildReviewContext(
+	prepared: PreparedReviewContext,
+	logger: Logger,
+	pr: PullRequestInfo,
+): Promise<ReviewContext> {
+	const { config, git, mergeBaseCommit } = prepared;
 	const rawDiff = await git.diff(mergeBaseCommit, pr.source.latestCommit);
 	const parsedDiff = parseUnifiedDiff(rawDiff);
 	const reviewRevision = buildReviewRevision({
@@ -150,8 +166,8 @@ export async function buildReviewContext(
 	});
 	const filtered = filterChangedFiles(
 		parsedDiff.files,
-		effectiveConfig.review.maxFiles,
-		effectiveConfig.review.ignorePaths,
+		config.review.maxFiles,
+		config.review.ignorePaths,
 	);
 	const ciSummary = await loadCiSummary(config.ciSummaryPath, logger);
 	const repoAgentsInstructions = await loadRepoAgentsInstructions(
@@ -161,22 +177,18 @@ export async function buildReviewContext(
 		logger,
 	);
 
-	return {
-		config: effectiveConfig,
-		git,
-		context: omitUndefined({
-			repoRoot: effectiveConfig.repoRoot,
-			pr,
-			headCommit: pr.source.latestCommit,
-			baseCommit: pr.target.latestCommit,
-			mergeBaseCommit,
-			reviewRevision,
-			rawDiff,
-			diffStats: parsedDiff.stats,
-			reviewedFiles: filtered.reviewedFiles,
-			skippedFiles: filtered.skippedFiles,
-			repoAgentsInstructions,
-			ciSummary,
-		}) satisfies ReviewContext,
-	};
+	return omitUndefined({
+		repoRoot: config.repoRoot,
+		pr,
+		headCommit: pr.source.latestCommit,
+		baseCommit: pr.target.latestCommit,
+		mergeBaseCommit,
+		reviewRevision,
+		rawDiff,
+		diffStats: parsedDiff.stats,
+		reviewedFiles: filtered.reviewedFiles,
+		skippedFiles: filtered.skippedFiles,
+		repoAgentsInstructions,
+		ciSummary,
+	}) satisfies ReviewContext;
 }

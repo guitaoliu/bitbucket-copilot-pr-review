@@ -152,11 +152,12 @@ describe("runReview", () => {
 
 		await runReview(baseConfig, logSpy, {
 			createBitbucketClient: () => client as never,
-			buildReviewContext: async () => ({
+			prepareReviewContext: async () => ({
 				config: baseConfig,
-				context,
 				git: createGitStub(),
+				mergeBaseCommit: context.mergeBaseCommit,
 			}),
+			buildReviewContext: async () => context,
 			runCopilotReview: async () => createReviewOutcome(),
 		});
 
@@ -210,11 +211,12 @@ describe("runReview", () => {
 
 		const result = await runReview(baseConfig, logger, {
 			createBitbucketClient: () => client as never,
-			buildReviewContext: async () => ({
+			prepareReviewContext: async () => ({
 				config: baseConfig,
-				context,
 				git: createGitStub(),
+				mergeBaseCommit: context.mergeBaseCommit,
 			}),
+			buildReviewContext: async () => context,
 		});
 
 		assert.equal(result.skipped, true);
@@ -255,11 +257,12 @@ describe("runReview", () => {
 
 		const result = await runReview(baseConfig, logger, {
 			createBitbucketClient: () => client as never,
-			buildReviewContext: async () => ({
+			prepareReviewContext: async () => ({
 				config: baseConfig,
-				context: createReviewContext(firstPr),
 				git: createGitStub(),
+				mergeBaseCommit: firstPr.target.latestCommit,
 			}),
+			buildReviewContext: async () => createReviewContext(firstPr),
 			runCopilotReview: async () => createReviewOutcome(),
 		});
 
@@ -299,11 +302,12 @@ describe("runReview", () => {
 
 		const result = await runReview(baseConfig, logger, {
 			createBitbucketClient: () => client as never,
-			buildReviewContext: async () => ({
+			prepareReviewContext: async () => ({
 				config: baseConfig,
-				context: createReviewContext(pr),
 				git: createGitStub(),
+				mergeBaseCommit: pr.target.latestCommit,
 			}),
+			buildReviewContext: async () => createReviewContext(pr),
 			runCopilotReview: async () => createReviewOutcome(),
 		});
 
@@ -356,13 +360,14 @@ describe("runReview", () => {
 
 		const result = await runReview(baseConfig, logger, {
 			createBitbucketClient: () => client as never,
+			prepareReviewContext: async () => ({
+				config: baseConfig,
+				git: createGitStub(),
+				mergeBaseCommit: pr.target.latestCommit,
+			}),
 			buildReviewContext: async () => {
 				buildContextCalled = true;
-				return {
-					config: baseConfig,
-					context: createReviewContext(pr),
-					git: createGitStub(),
-				};
+				return createReviewContext(pr);
 			},
 		});
 
@@ -408,13 +413,14 @@ describe("runReview", () => {
 
 		const result = await runReview(baseConfig, logger, {
 			createBitbucketClient: () => client as never,
+			prepareReviewContext: async () => ({
+				config: baseConfig,
+				git: createGitStub(),
+				mergeBaseCommit: pr.target.latestCommit,
+			}),
 			buildReviewContext: async () => {
 				buildContextCalled = true;
-				return {
-					config: baseConfig,
-					context: createReviewContext(pr),
-					git: createGitStub(),
-				};
+				return createReviewContext(pr);
 			},
 		});
 
@@ -456,19 +462,80 @@ describe("runReview", () => {
 
 		const result = await runReview(baseConfig, logger, {
 			createBitbucketClient: () => client as never,
+			prepareReviewContext: async () => ({
+				config: baseConfig,
+				git: createGitStub(),
+				mergeBaseCommit: pr.target.latestCommit,
+			}),
 			buildReviewContext: async () => {
 				buildContextCalled = true;
-				return {
-					config: baseConfig,
-					context: createReviewContext(pr),
-					git: createGitStub(),
-				};
+				return createReviewContext(pr);
 			},
 		});
 
 		assert.equal(buildContextCalled, false);
 		assert.equal(result.skipped, true);
 		assert.match(result.skipReason ?? "", /is a draft/);
+	});
+
+	it("uses trusted repo config before applying branch-prefix skips", async () => {
+		const basePr = createPullRequest();
+		const pr = {
+			...basePr,
+			source: {
+				...basePr.source,
+				displayId: "renovate/typescript-5.x",
+			},
+		};
+		let buildContextCalled = false;
+		let copilotCalled = false;
+
+		const client: FakeBitbucketClient = {
+			async getPullRequest() {
+				return pr;
+			},
+			async getCodeInsightsReport() {
+				return undefined;
+			},
+			async listCodeInsightsAnnotations() {
+				return [];
+			},
+			async getCodeInsightsAnnotationCount() {
+				return 0;
+			},
+			async findPullRequestCommentByTag() {
+				return undefined;
+			},
+			async publishCodeInsights() {},
+			async upsertPullRequestComment() {},
+		};
+
+		const result = await runReview(baseConfig, logger, {
+			createBitbucketClient: () => client as never,
+			prepareReviewContext: async () => ({
+				config: {
+					...baseConfig,
+					review: {
+						...baseConfig.review,
+						skipBranchPrefixes: [],
+					},
+				},
+				git: createGitStub(),
+				mergeBaseCommit: pr.target.latestCommit,
+			}),
+			buildReviewContext: async () => {
+				buildContextCalled = true;
+				return createReviewContext(pr);
+			},
+			runCopilotReview: async () => {
+				copilotCalled = true;
+				return createReviewOutcome();
+			},
+		});
+
+		assert.equal(buildContextCalled, true);
+		assert.equal(copilotCalled, true);
+		assert.equal(result.skipped, false);
 	});
 
 	it("uses repo-configured branch prefixes when deciding skips", async () => {
@@ -507,7 +574,7 @@ describe("runReview", () => {
 
 		const result = await runReview(baseConfig, logger, {
 			createBitbucketClient: () => client as never,
-			buildReviewContext: async () => ({
+			prepareReviewContext: async () => ({
 				config: {
 					...baseConfig,
 					review: {
@@ -515,9 +582,10 @@ describe("runReview", () => {
 						skipBranchPrefixes: ["deps/"],
 					},
 				},
-				context: createReviewContext(pr),
 				git: createGitStub(),
+				mergeBaseCommit: pr.target.latestCommit,
 			}),
+			buildReviewContext: async () => createReviewContext(pr),
 			runCopilotReview: async () => {
 				copilotCalled = true;
 				return createReviewOutcome();
@@ -574,13 +642,20 @@ describe("runReview", () => {
 							throw new Error("should not update comment");
 						},
 					}) as never,
+				prepareReviewContext: async () => ({
+					config: {
+						...baseConfig,
+						review: {
+							...baseConfig.review,
+							skipBranchPrefixes: ["deps/"],
+						},
+					},
+					git: createGitStub(),
+					mergeBaseCommit: pr.target.latestCommit,
+				}),
 				buildReviewContext: async () => {
 					buildContextCalled = true;
-					return {
-						config: baseConfig,
-						context: createReviewContext(pr),
-						git: createGitStub(),
-					};
+					return createReviewContext(pr);
 				},
 			},
 		);
@@ -650,11 +725,12 @@ describe("runReview", () => {
 			logSpy,
 			{
 				createBitbucketClient: () => client as never,
-				buildReviewContext: async () => ({
+				prepareReviewContext: async () => ({
 					config: baseConfig,
-					context,
 					git: createGitStub(),
+					mergeBaseCommit: context.mergeBaseCommit,
 				}),
+				buildReviewContext: async () => context,
 				runCopilotReview: async () => {
 					copilotCalled = true;
 					return createReviewOutcome();
@@ -743,11 +819,12 @@ describe("runReview", () => {
 			logSpy,
 			{
 				createBitbucketClient: () => client as never,
-				buildReviewContext: async () => ({
+				prepareReviewContext: async () => ({
 					config: baseConfig,
-					context,
 					git: createGitStub(),
+					mergeBaseCommit: context.mergeBaseCommit,
 				}),
+				buildReviewContext: async () => context,
 				runCopilotReview: async () => {
 					copilotCalled = true;
 					return createReviewOutcome();
