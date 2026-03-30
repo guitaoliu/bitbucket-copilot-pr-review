@@ -233,7 +233,8 @@ export const CONFIG_FIELD_METADATA = {
 	bitbucketInsecureTls: {
 		path: "bitbucket.tls.insecureSkipVerify",
 		env: "BITBUCKET_INSECURE_TLS",
-		description: "Skip strict TLS verification for Bitbucket.",
+		description:
+			"Disable TLS certificate verification for Bitbucket (not recommended).",
 		...envParser({ kind: "boolean" }),
 		...envDoc(14, {
 			defaultValuePath: ["bitbucket", "tls", "insecureSkipVerify"],

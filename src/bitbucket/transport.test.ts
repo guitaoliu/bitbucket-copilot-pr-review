@@ -19,6 +19,32 @@ const baseConfig: ReviewerConfig["bitbucket"] = {
 };
 
 describe("BitbucketTransport", () => {
+	it("includes trusted TLS guidance for certificate errors", async () => {
+		const transport = new BitbucketTransport(baseConfig, {
+			sendRequest: async () => {
+				const error = new Error(
+					"self-signed certificate in certificate chain",
+				) as Error & {
+					code?: string;
+				};
+				error.code = "SELF_SIGNED_CERT_IN_CHAIN";
+				throw error;
+			},
+		});
+
+		await assert.rejects(
+			() => transport.request("/rest/api/latest/test"),
+			(error: unknown) => {
+				assert.match(
+					String(error),
+					/Set BITBUCKET_CA_CERT_PATH to your corporate CA PEM file, or run Node with NODE_USE_SYSTEM_CA=1 so it trusts your system CA store\./,
+				);
+				assert.doesNotMatch(String(error), /BITBUCKET_INSECURE_TLS/);
+				return true;
+			},
+		);
+	});
+
 	it("merges caller headers into authenticated requests", async () => {
 		let recordedHeaders: Record<string, string> | undefined;
 		const transport = new BitbucketTransport(baseConfig, {

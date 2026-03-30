@@ -31,6 +31,10 @@ describe("buildConfigReferenceMarkdown", () => {
 		assert.doesNotMatch(markdown, /`BITBUCKET_REPO_SLUG`/);
 		assert.doesNotMatch(markdown, /`BITBUCKET_PR_ID`/);
 		assert.match(markdown, /`REPORT_COMMENT_STRATEGY`/);
+		assert.match(
+			markdown,
+			/`BITBUCKET_INSECURE_TLS` \| `false` \| Disable TLS certificate verification for Bitbucket \(not recommended\)\./,
+		);
 		assert.doesNotMatch(markdown, /`COPILOT_GITHUB_TOKEN`/);
 		assert.match(markdown, /Argument: `<pull-request-url>`/);
 		assert.match(markdown, /Argument: `<repository-url>`/);

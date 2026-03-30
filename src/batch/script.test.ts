@@ -25,5 +25,21 @@ describe("run-local-batch-review.sh", () => {
 		assert.match(scriptText, /node "\$REVIEWER_ROOT\/src\/cli\.ts"/);
 		assert.match(scriptText, /MAX_PARALLEL/);
 		assert.match(scriptText, /KEEP_WORKDIRS/);
+		assert.match(
+			scriptText,
+			/NODE_USE_SYSTEM_CA=1\s+Use the Node\.js system CA store \(default\)/,
+		);
+		assert.match(
+			scriptText,
+			/export NODE_USE_SYSTEM_CA="\$\{NODE_USE_SYSTEM_CA:-1\}"/,
+		);
+		assert.match(
+			scriptText,
+			/BITBUCKET_INSECURE_TLS=1\s+Disable Bitbucket TLS certificate verification \(not recommended\)/,
+		);
+		assert.match(
+			scriptText,
+			/Bitbucket TLS verification: disabled \(not recommended\)/,
+		);
 	});
 });

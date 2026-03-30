@@ -26,9 +26,9 @@ Optional environment:
   FORCE_REVIEW=1               Force a rerun even if this commit already has the report key
   CONFIRM_RERUN=1              Prompt only when rerunning unusable cached artifacts for the current unchanged PR head and revision
   CI_SUMMARY_PATH=/tmp/ci.txt  Include CI context in the review
-  NODE_USE_SYSTEM_CA=0         Override the default system CA loading for Node.js
+  NODE_USE_SYSTEM_CA=1         Use the Node.js system CA store (default)
   BITBUCKET_CA_CERT_PATH=/path/to/corp-ca.pem
-  BITBUCKET_INSECURE_TLS=0     Re-enable strict TLS verification after trust is configured
+  BITBUCKET_INSECURE_TLS=1     Disable Bitbucket TLS certificate verification (not recommended)
   COPILOT_MODEL=gpt-5.4
   COPILOT_REASONING_EFFORT=xhigh
   LOG_LEVEL=debug
@@ -110,10 +110,10 @@ printf 'Confirm rerun: %s\n' "$( [[ "${CONFIRM_RERUN:-0}" == "1" ]] && printf 'e
 if [[ -n "${BITBUCKET_CA_CERT_PATH:-}" ]]; then
   printf 'Bitbucket CA cert: %s\n' "$BITBUCKET_CA_CERT_PATH"
 fi
-if [[ "${BITBUCKET_INSECURE_TLS:-1}" == "0" ]]; then
-  printf 'Bitbucket TLS verification: strict\n'
+if [[ "${BITBUCKET_INSECURE_TLS:-0}" == "1" ]]; then
+  printf 'Bitbucket TLS verification: disabled (not recommended)\n'
 else
-  printf 'Bitbucket TLS verification: insecure skip verify enabled\n'
+  printf 'Bitbucket TLS verification: strict\n'
 fi
 
 declare -a REVIEW_COMMAND=(node "$REVIEWER_ROOT/src/cli.ts")

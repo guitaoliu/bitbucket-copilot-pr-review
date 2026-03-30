@@ -160,7 +160,7 @@ export class BitbucketTransport {
 			].includes(errorCode)
 		) {
 			lines.push(
-				"Hint: this looks like a TLS certificate trust problem. Set BITBUCKET_CA_CERT_PATH to your corporate CA PEM file, or set BITBUCKET_INSECURE_TLS=0 to require strict TLS verification once trust is configured.",
+				"Hint: this looks like a TLS certificate trust problem. Set BITBUCKET_CA_CERT_PATH to your corporate CA PEM file, or run Node with NODE_USE_SYSTEM_CA=1 so it trusts your system CA store.",
 			);
 		}
 
