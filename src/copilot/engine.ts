@@ -410,13 +410,11 @@ function buildToolResultLogFields(
 		case "search_symbol_name":
 			return [
 				field("matches", record.totalMatches),
-				field("filtered", record.filteredMatchCount),
 				field("truncated", record.truncated),
 			].filter((entry): entry is string => entry !== undefined);
 		case "get_file_list_by_directory":
 			return [
 				field("files", record.totalFiles),
-				field("filtered", record.filteredFileCount),
 				field("truncated", record.truncated),
 			].filter((entry): entry is string => entry !== undefined);
 		case "list_changed_files":
@@ -489,22 +487,6 @@ function getToolResultDurationMs(
 	return undefined;
 }
 
-function getFilteredResultCount(toolResult: ToolResultObject): number {
-	const record = getToolResultRecord(toolResult);
-	for (const key of [
-		"filteredMatchCount",
-		"filteredFileCount",
-		"filteredCount",
-	]) {
-		const value = record[key];
-		if (typeof value === "number" && Number.isFinite(value)) {
-			return value;
-		}
-	}
-
-	return 0;
-}
-
 function getTruncatedResult(toolResult: ToolResultObject): boolean {
 	const record = getToolResultRecord(toolResult);
 	return record.truncated === true;
@@ -541,7 +523,6 @@ function createEmptyToolTelemetryCounter(): ReviewToolTelemetryCounter {
 		totalInputChars: 0,
 		totalOutputChars: 0,
 		truncatedResponses: 0,
-		filteredResultCount: 0,
 	};
 }
 
@@ -680,7 +661,6 @@ export function createReviewSessionHooks(
 			if (getTruncatedResult(input.toolResult)) {
 				counter.truncatedResponses += 1;
 			}
-			counter.filteredResultCount += getFilteredResultCount(input.toolResult);
 			const resultType = input.toolResult.resultType;
 			counter.resultCounts[resultType] =
 				(counter.resultCounts[resultType] ?? 0) + 1;

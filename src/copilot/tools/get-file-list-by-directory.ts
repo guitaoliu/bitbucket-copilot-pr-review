@@ -108,9 +108,8 @@ export function createGetFileListByDirectoryTool(
 			return {
 				directories: describeDirectoryScope(decision.normalizedPaths),
 				version: parsedArgs.data.version,
-				filteredFileCount: filtered.filteredCount,
 				files: preview.files,
-				truncated: preview.truncated || filtered.filteredCount > 0,
+				truncated: preview.truncated,
 				totalFiles: preview.totalFiles,
 			};
 		},

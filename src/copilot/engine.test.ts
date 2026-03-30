@@ -373,7 +373,6 @@ describe("createReviewSessionHooks", () => {
 			true,
 		);
 		assert.equal(telemetry.byTool.get_pr_overview?.truncatedResponses, 0);
-		assert.equal(telemetry.byTool.get_pr_overview?.filteredResultCount, 0);
 		assert.deepEqual(telemetry.byTool.bash, {
 			requested: 1,
 			allowed: 0,
@@ -385,7 +384,6 @@ describe("createReviewSessionHooks", () => {
 			totalInputChars: 0,
 			totalOutputChars: 0,
 			truncatedResponses: 0,
-			filteredResultCount: 0,
 		});
 	});
 

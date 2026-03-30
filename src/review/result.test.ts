@@ -399,7 +399,6 @@ describe("buildReviewRunOutput", () => {
 						totalInputChars: 2,
 						totalOutputChars: 18,
 						truncatedResponses: 0,
-						filteredResultCount: 0,
 					},
 				},
 			},

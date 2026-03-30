@@ -24,7 +24,6 @@ export interface ReviewToolTelemetryCounter {
 	totalInputChars: number;
 	totalOutputChars: number;
 	truncatedResponses: number;
-	filteredResultCount: number;
 }
 
 export interface ReviewToolTelemetry {

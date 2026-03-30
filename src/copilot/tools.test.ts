@@ -548,9 +548,6 @@ describe("Copilot tools", () => {
 			matches: [{ path: "src/new-name.ts", line: 10, text: "needle" }],
 			truncated: false,
 			totalMatches: 1,
-			unfilteredMatchCount: 1,
-			filteredMatchCount: 0,
-			safeTotalMatches: 1,
 		});
 	});
 
@@ -681,11 +678,8 @@ describe("Copilot tools", () => {
 			matches: [
 				{ path: "src/new-name.ts", line: 10, text: "PasswordChallenge" },
 			],
-			truncated: true,
+			truncated: false,
 			totalMatches: 1,
-			unfilteredMatchCount: 2,
-			filteredMatchCount: 1,
-			safeTotalMatches: 1,
 		});
 	});
 
@@ -736,9 +730,6 @@ describe("Copilot tools", () => {
 			matches: [{ path: "src/new-name.ts", line: 10, text: "needle" }],
 			truncated: true,
 			totalMatches: 1,
-			unfilteredMatchCount: 2,
-			filteredMatchCount: 0,
-			safeTotalMatches: 2,
 		});
 	});
 
@@ -946,11 +937,11 @@ describe("Copilot tools", () => {
 		assert.deepEqual(result, {
 			directories: ["src", "test"],
 			version: "head",
-			filteredFileCount: 1,
 			files: ["src/new-name.ts", "test/review.test.ts"],
-			truncated: true,
+			truncated: false,
 			totalFiles: 2,
 		});
+		assert.equal("filteredCount" in (result as Record<string, unknown>), false);
 	});
 
 	it("rejects reversed file-content line ranges", async () => {

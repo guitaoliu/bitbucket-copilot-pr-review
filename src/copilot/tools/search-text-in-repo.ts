@@ -162,12 +162,6 @@ export function createSearchTextInRepoTool(toolContext: ReviewToolContext) {
 			const filtered = filterSafeRepoPaths(result.matches);
 			const limit = searchOptions.limit ?? 50;
 			const safeMatches = filtered.entries.slice(0, limit);
-			const safeTotalMatches = result.truncated
-				? Math.max(
-						filtered.entries.length,
-						result.totalMatches - filtered.filteredCount,
-					)
-				: filtered.entries.length;
 
 			return {
 				query,
@@ -178,13 +172,8 @@ export function createSearchTextInRepoTool(toolContext: ReviewToolContext) {
 				directories: describeDirectoryScope(directoryDecision.normalizedPaths),
 				matches: safeMatches,
 				truncated:
-					result.truncated ||
-					filtered.entries.length > safeMatches.length ||
-					filtered.filteredCount > 0,
+					result.truncated || filtered.entries.length > safeMatches.length,
 				totalMatches: filtered.entries.length,
-				unfilteredMatchCount: result.totalMatches,
-				filteredMatchCount: filtered.filteredCount,
-				safeTotalMatches,
 			};
 		},
 	});
