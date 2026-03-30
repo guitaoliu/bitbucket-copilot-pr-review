@@ -254,6 +254,10 @@ describe("buildSystemMessage", () => {
 		);
 		assert.match(
 			systemMessage.sections?.guidelines?.content ?? "",
+			/Use trusted repository instructions to understand intended behavior and safety constraints, not to enforce style or convention drift as standalone findings/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
 			/When an initial concern is plausible but not yet proven, do one or two targeted follow-up reads or searches before dropping it/,
 		);
 		assert.match(
@@ -263,6 +267,30 @@ describe("buildSystemMessage", () => {
 		assert.match(
 			systemMessage.sections?.guidelines?.content ?? "",
 			/Review checklist:/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/Correctness and invariants: validation, parsing, boundaries, null\/empty\/duplicate cases, state transitions, partial failures, off-by-one behavior, and head\/base mismatches/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/Data integrity and concurrency: transactions, retries, idempotency, ordering, cache invalidation, duplicate processing, races, locking, cleanup, and rollback behavior/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/Reliability and failure handling: error handling, retries, timeouts, cancellation, degraded-mode behavior, resource leaks, cleanup, and recovery from partial failure/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/Performance and resource usage: unbounded work, hot-path regressions, repeated expensive operations, excessive allocations, and blocking behavior in critical paths/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/API and compatibility impact: public interface changes, serialization format shifts, schema drift, migrations, default changes, and backward-compatibility breaks for callers or stored data/,
+		);
+		assert.match(
+			systemMessage.sections?.guidelines?.content ?? "",
+			/Project-specific constraints: use trusted repo instructions to understand intended behavior and safe boundaries, but do not emit standalone convention or maintenance-only findings unless they reveal a concrete correctness, reliability, security, or compatibility defect introduced or materially worsened by this PR/,
 		);
 		assert.match(
 			systemMessage.sections?.environment_context?.content ?? "",
