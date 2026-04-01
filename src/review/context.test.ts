@@ -3,7 +3,11 @@ import { describe, it } from "node:test";
 
 import type { GitReadTextFileResult, GitRepository } from "../git/repo.ts";
 import type { Logger } from "../shared/logger.ts";
-import { loadRepoAgentsInstructions } from "./context.ts";
+import {
+	loadRepoAgentsInstructions,
+	loadRepoReviewInstructions,
+	REPO_REVIEW_INSTRUCTIONS_PATH,
+} from "./context.ts";
 
 const logger: Logger = {
 	debug() {},
@@ -64,5 +68,36 @@ describe("loadRepoAgentsInstructions", () => {
 				content: "ui instructions",
 			},
 		]);
+	});
+});
+
+describe("loadRepoReviewInstructions", () => {
+	it("loads repo-wide review instructions from the trusted base commit", async () => {
+		const git = createGitStub({
+			readTextFileAtCommit: async (_commit, filePath) =>
+				filePath === REPO_REVIEW_INSTRUCTIONS_PATH
+					? { status: "ok", content: "  review instructions\n" }
+					: { status: "not_found" },
+		});
+
+		const instructions = await loadRepoReviewInstructions(
+			git,
+			"base-123",
+			logger,
+		);
+
+		assert.equal(instructions, "review instructions");
+	});
+
+	it("returns undefined when repo-wide instructions are missing", async () => {
+		const git = createGitStub();
+
+		const instructions = await loadRepoReviewInstructions(
+			git,
+			"base-123",
+			logger,
+		);
+
+		assert.equal(instructions, undefined);
 	});
 });

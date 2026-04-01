@@ -18,6 +18,8 @@ export interface PreparedReviewContext {
 	mergeBaseCommit: string;
 }
 
+export const REPO_REVIEW_INSTRUCTIONS_PATH = "REPO_REVIEW_INSTRUCTIONS.md";
+
 async function loadCiSummary(
 	filePath: string | undefined,
 	logger: Logger,
@@ -125,6 +127,39 @@ export async function loadRepoAgentsInstructions(
 	}
 }
 
+export async function loadRepoReviewInstructions(
+	git: GitRepository,
+	baseCommit: string,
+	logger: Logger,
+): Promise<string | undefined> {
+	try {
+		const contentResult = await git.readTextFileAtCommit(
+			baseCommit,
+			REPO_REVIEW_INSTRUCTIONS_PATH,
+		);
+		if (contentResult.status !== "ok") {
+			return undefined;
+		}
+
+		const trimmed = contentResult.content.trim();
+		if (!trimmed) {
+			return undefined;
+		}
+
+		logger.info(
+			`Loaded ${REPO_REVIEW_INSTRUCTIONS_PATH} from base commit ${baseCommit}`,
+		);
+
+		return truncateText(trimmed, 12_000, { suffix: "\n... truncated ..." });
+	} catch (error) {
+		logger.warn(
+			`Unable to read ${REPO_REVIEW_INSTRUCTIONS_PATH} from base commit ${baseCommit}`,
+			error,
+		);
+		return undefined;
+	}
+}
+
 export async function prepareReviewContext(
 	config: ReviewerConfig,
 	logger: Logger,
@@ -171,10 +206,15 @@ export async function buildReviewContext(
 	);
 	const ciSummary = await loadCiSummary(config.ciSummaryPath, logger);
 	const repoInstructions =
-		config.review.repoInstructions &&
-		truncateText(config.review.repoInstructions, 12000, {
-			suffix: "\n... truncated ...",
-		});
+		(await loadRepoReviewInstructions(
+			git,
+			pr.target.latestCommit,
+			logger,
+		)) ??
+		(config.review.repoInstructions &&
+			truncateText(config.review.repoInstructions, 12_000, {
+				suffix: "\n... truncated ...",
+			}));
 	const repoAgentsInstructions = await loadRepoAgentsInstructions(
 		git,
 		pr.target.latestCommit,
