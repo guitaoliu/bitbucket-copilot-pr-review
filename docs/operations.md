@@ -206,6 +206,8 @@ For local helper-script runs, Node system CA loading is enabled by default with 
 
 When the target repository contains `AGENTS.md` files in the root or in directories that contain reviewed files, the reviewer reads the matching files from the trusted base commit and appends them to the Copilot review prompt. Root instructions apply repo-wide, and deeper `AGENTS.md` files apply only to reviewed files under that subtree.
 
+You can also provide repo-wide instructions without committing an `AGENTS.md` by setting `review.repoInstructions` in the trusted `copilot-code-review.json` or the `REVIEW_REPO_INSTRUCTIONS` environment variable. These instructions are appended to the Copilot prompt for every review in the repository.
+
 When the target repository contains a root-level `copilot-code-review.json`, the reviewer loads it from the trusted base commit and uses it for repo-scoped review configuration such as ignored paths, review limits, and selected Copilot or report overrides. Environment variables and CLI flags still take precedence. The JSON schema is published at `schemas/copilot-code-review.schema.json`.
 
 By default, the reviewer inspects up to 300 changed files after filtering. When more than 25 files remain in scope, it still runs the review but skips per-file changed-file summaries in the tagged PR comment.

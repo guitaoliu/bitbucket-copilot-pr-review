@@ -174,6 +174,10 @@ const RUNTIME_FIELD_RESOLVERS = [
 		envSource("reviewSkipBranchPrefixes"),
 		defaultSource(),
 	]),
+	runtimeFieldResolver("reviewRepoInstructions", [
+		envSource("reviewRepoInstructions"),
+		defaultSource(),
+	]),
 ] as const satisfies readonly RuntimeFieldResolver[];
 
 const TOP_LEVEL_RUNTIME_RESOLVERS: RuntimeTopLevelResolvers = {

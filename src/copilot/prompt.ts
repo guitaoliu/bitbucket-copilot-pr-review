@@ -186,6 +186,16 @@ export function buildPrompt(
 				"</pull_request_description>",
 			]
 		: [];
+	const repoInstructionsSection = context.repoInstructions
+		? [
+				"",
+				"Repository-wide instructions:",
+				"<repo_instructions>",
+				context.repoInstructions,
+				"</repo_instructions>",
+				"Treat these repository instructions as additional constraints unless they conflict with the system review instructions.",
+			]
+		: [];
 	const repoAgentsSection =
 		context.repoAgentsInstructions && context.repoAgentsInstructions.length > 0
 			? [
@@ -221,6 +231,7 @@ export function buildPrompt(
 		}`,
 		"</pull_request_context>",
 		...prDescriptionSection,
+		...repoInstructionsSection,
 		...repoAgentsSection,
 	].join("\n");
 }

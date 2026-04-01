@@ -81,7 +81,8 @@ describe("parseRepoReviewConfig", () => {
 		  "review": {
 		    "ignorePaths": ["i18n/locales/**/*.json"],
 		    "maxFiles": 150,
-		    "skipBranchPrefixes": ["renovate/", "deps/"]
+		    "skipBranchPrefixes": ["renovate/", "deps/"],
+		    "repoInstructions": "  Prefer contract tests for auth changes. "
 		  },
 		  "copilot": {
 		    "model": "gpt-5.4"
@@ -91,6 +92,10 @@ describe("parseRepoReviewConfig", () => {
 		assert.deepEqual(config.review?.ignorePaths, ["i18n/locales/**/*.json"]);
 		assert.equal(config.review?.maxFiles, 150);
 		assert.deepEqual(config.review?.skipBranchPrefixes, ["renovate/", "deps/"]);
+		assert.equal(
+			config.review?.repoInstructions,
+			"Prefer contract tests for auth changes.",
+		);
 		assert.equal(config.copilot?.model, "gpt-5.4");
 	});
 
@@ -150,6 +155,15 @@ describe("parseRepoReviewConfig", () => {
 				),
 			/at most 128 characters/,
 		);
+		assert.throws(
+			() =>
+				parseRepoReviewConfig(
+					JSON.stringify({
+						review: { repoInstructions: "x".repeat(12_001) },
+					}),
+				),
+			/at most 12000 characters/,
+		);
 	});
 
 	it("allows clearing list-based review overrides with empty arrays", () => {
@@ -172,7 +186,8 @@ describe("mergeRepoReviewConfig", () => {
 			parseRepoReviewConfig(`{
 			  "review": {
 			    "ignorePaths": ["i18n/locales/**/*.json"],
-			    "maxFiles": 150
+			    "maxFiles": 150,
+			    "repoInstructions": "Use staging data for integration tests."
 			  },
 			  "report": {
 			    "commentStrategy": "update"
@@ -182,6 +197,10 @@ describe("mergeRepoReviewConfig", () => {
 
 		assert.equal(merged.review.maxFiles, 150);
 		assert.deepEqual(merged.review.ignorePaths, ["i18n/locales/**/*.json"]);
+		assert.equal(
+			merged.review.repoInstructions,
+			"Use staging data for integration tests.",
+		);
 		assert.equal(merged.report.commentStrategy, "update");
 	});
 
@@ -214,6 +233,7 @@ describe("mergeRepoReviewConfig", () => {
 				review: {
 					...baseConfig.review,
 					maxFiles: 300,
+					repoInstructions: "Env instructions",
 				},
 				copilot: {
 					...baseConfig.copilot,
@@ -229,16 +249,18 @@ describe("mergeRepoReviewConfig", () => {
 						review: {
 							...baseConfig.internal?.envRepoOverrides.review,
 							maxFiles: 300,
+							repoInstructions: "Env instructions",
 						},
 					},
 				},
 			},
 			parseRepoReviewConfig(
-				'{"review":{"maxFiles":150},"copilot":{"model":"repo-model"}}',
+				'{"review":{"maxFiles":150,"repoInstructions":"Repo instructions"},"copilot":{"model":"repo-model"}}',
 			),
 		);
 
 		assert.equal(merged.review.maxFiles, 300);
+		assert.equal(merged.review.repoInstructions, "Env instructions");
 		assert.equal(merged.copilot.model, "env-model");
 		assert.deepEqual(merged.review.skipBranchPrefixes, ["renovate/"]);
 	});

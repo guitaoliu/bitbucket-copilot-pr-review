@@ -18,6 +18,7 @@ export const REPO_CONFIG_LIMITS = {
 	maxFileSliceLines: { min: 1, max: 1_000 },
 	ignorePaths: { maxItems: 200, maxPatternLength: 512 },
 	skipBranchPrefixes: { maxItems: 50, maxPrefixLength: 128 },
+	repoInstructionsMaxLength: 12_000,
 } as const;
 
 export function boundedInteger(
@@ -171,6 +172,18 @@ export function createReviewOverrideSchema(options?: {
 			})
 				.describe(
 					"Source branch prefixes that should always be skipped during review.",
+				)
+				.optional(),
+			repoInstructions: z
+				.string()
+				.trim()
+				.min(1, "review.repoInstructions must not be empty.")
+				.max(
+					REPO_CONFIG_LIMITS.repoInstructionsMaxLength,
+					`review.repoInstructions must be at most ${REPO_CONFIG_LIMITS.repoInstructionsMaxLength} characters.`,
+				)
+				.describe(
+					"Additional repository-wide instructions to append to the review prompt.",
 				)
 				.optional(),
 		})

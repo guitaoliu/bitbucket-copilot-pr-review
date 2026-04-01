@@ -83,6 +83,7 @@ export interface ReviewContext {
 	reviewedFiles: ChangedFile[];
 	skippedFiles: SkippedFile[];
 	repoAgentsInstructions?: RepoAgentsInstructions[];
+	repoInstructions?: string;
 	ciSummary?: string;
 }
 

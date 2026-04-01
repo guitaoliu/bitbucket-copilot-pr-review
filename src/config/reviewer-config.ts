@@ -17,6 +17,7 @@ import {
 	createCopilotOverrideSchema,
 	createReportOverrideSchema,
 	createReviewOverrideSchema,
+	REPO_CONFIG_LIMITS,
 } from "./repo-override-schema.ts";
 import type { ReviewerConfig, ReviewerConfigRepoOverrides } from "./types.ts";
 
@@ -136,6 +137,15 @@ export const reviewerConfigSchema = z
 				maxFileSliceLines: z.number().int().positive(),
 				ignorePaths: z.array(z.string().min(1)),
 				skipBranchPrefixes: z.array(z.string().min(1)),
+				repoInstructions: z
+					.string()
+					.trim()
+					.min(1, "review.repoInstructions must not be empty.")
+					.max(
+						REPO_CONFIG_LIMITS.repoInstructionsMaxLength,
+						`review.repoInstructions must be at most ${REPO_CONFIG_LIMITS.repoInstructionsMaxLength} characters.`,
+					)
+					.optional(),
 			})
 			.strict(),
 		ciSummaryPath: z.string().min(1).optional(),

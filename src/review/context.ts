@@ -170,6 +170,11 @@ export async function buildReviewContext(
 		config.review.ignorePaths,
 	);
 	const ciSummary = await loadCiSummary(config.ciSummaryPath, logger);
+	const repoInstructions =
+		config.review.repoInstructions &&
+		truncateText(config.review.repoInstructions, 12000, {
+			suffix: "\n... truncated ...",
+		});
 	const repoAgentsInstructions = await loadRepoAgentsInstructions(
 		git,
 		pr.target.latestCommit,
@@ -188,6 +193,7 @@ export async function buildReviewContext(
 		diffStats: parsedDiff.stats,
 		reviewedFiles: filtered.reviewedFiles,
 		skippedFiles: filtered.skippedFiles,
+		repoInstructions,
 		repoAgentsInstructions,
 		ciSummary,
 	}) satisfies ReviewContext;
