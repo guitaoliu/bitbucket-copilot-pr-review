@@ -205,16 +205,11 @@ export async function buildReviewContext(
 		config.review.ignorePaths,
 	);
 	const ciSummary = await loadCiSummary(config.ciSummaryPath, logger);
-	const repoInstructions =
-		(await loadRepoReviewInstructions(
-			git,
-			pr.target.latestCommit,
-			logger,
-		)) ??
-		(config.review.repoInstructions &&
-			truncateText(config.review.repoInstructions, 12_000, {
-				suffix: "\n... truncated ...",
-			}));
+	const repoInstructions = await loadRepoReviewInstructions(
+		git,
+		pr.target.latestCommit,
+		logger,
+	);
 	const repoAgentsInstructions = await loadRepoAgentsInstructions(
 		git,
 		pr.target.latestCommit,

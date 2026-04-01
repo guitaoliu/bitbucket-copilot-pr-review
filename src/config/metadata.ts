@@ -395,15 +395,6 @@ export const CONFIG_FIELD_METADATA = {
 		...repoOverride(),
 		...envDoc(33, { defaultValuePath: ["review", "skipBranchPrefixes"] }),
 	},
-	reviewRepoInstructions: {
-		path: "review.repoInstructions",
-		env: "REVIEW_REPO_INSTRUCTIONS",
-		description:
-			"Optional repository-wide instructions appended to the review prompt.",
-		...envParser({ kind: "string" }),
-		...repoOverride(),
-		...envDoc(34, { defaultText: "-" }),
-	},
 	ciSummaryPath: {
 		path: "ciSummaryPath",
 		env: "CI_SUMMARY_PATH",

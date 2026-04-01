@@ -117,12 +117,6 @@
             "maxLength": 128
           },
           "description": "Source branch prefixes that should always be skipped during review."
-        },
-        "repoInstructions": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 12000,
-          "description": "Additional repository-wide instructions to append to the review prompt."
         }
       },
       "additionalProperties": false
