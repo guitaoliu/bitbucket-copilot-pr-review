@@ -56,12 +56,12 @@ function normalizePathname(pathname: string): string {
 
 function parsePositiveInteger(rawValue: string, label: string): number {
 	if (!/^\d+$/.test(rawValue)) {
-		throw new CliUserError(`${label} must end with a numeric pull request id.`);
+		throw new CliUserError(`${label} must include a numeric pull request id.`);
 	}
 
 	const parsed = Number.parseInt(rawValue, 10);
 	if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-		throw new CliUserError(`${label} must end with a numeric pull request id.`);
+		throw new CliUserError(`${label} must include a numeric pull request id.`);
 	}
 
 	return parsed;
@@ -127,11 +127,7 @@ function parseRepositoryPathSegments(options: {
 
 	const pullRequestsSegment = segments[projectsIndex + 4];
 	const prIdSegment = segments[projectsIndex + 5];
-	if (
-		pullRequestsSegment !== "pull-requests" ||
-		prIdSegment === undefined ||
-		segments.length !== projectsIndex + 6
-	) {
+	if (pullRequestsSegment !== "pull-requests" || prIdSegment === undefined) {
 		throw new CliUserError(
 			`${options.label} must point to a pull request page like https://host/projects/PROJ/repos/repo/pull-requests/123.`,
 		);

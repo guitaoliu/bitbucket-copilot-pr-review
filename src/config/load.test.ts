@@ -158,6 +158,28 @@ describe("parseBitbucketPullRequestUrl", () => {
 		});
 	});
 
+	it("parses pull request urls from Bitbucket PR tabs", () => {
+		const tabUrls = [
+			"https://bitbucket.example.com:8443/projects/PROJ/repos/repo/pull-requests/13616/overview",
+			"https://bitbucket.example.com:8443/projects/PROJ/repos/repo/pull-requests/13616/diff#src%2Fcomponents%2FPermissionsEditor.tsx",
+			"https://bitbucket.example.com:8443/projects/PROJ/repos/repo/pull-requests/13616/commits",
+			"https://bitbucket.example.com:8443/projects/PROJ/repos/repo/pull-requests/13616/builds",
+		];
+
+		for (const tabUrl of tabUrls) {
+			assert.deepEqual(parseBitbucketPullRequestUrl(tabUrl), {
+				baseUrl: "https://bitbucket.example.com:8443",
+				projectKey: "PROJ",
+				repoSlug: "repo",
+				prId: 13616,
+				repositoryUrl:
+					"https://bitbucket.example.com:8443/projects/PROJ/repos/repo",
+				pullRequestUrl:
+					"https://bitbucket.example.com:8443/projects/PROJ/repos/repo/pull-requests/13616",
+			});
+		}
+	});
+
 	it("parses pull request urls under a path prefix", () => {
 		const parsed = parseBitbucketPullRequestUrl(
 			"https://host.example.com:8443/bitbucket/projects/PROJ/repos/repo/pull-requests/123",

@@ -63,7 +63,7 @@ Usage: `bitbucket-copilot-pr-review review <pull-request-url> [options]`
 
 Argument: `<pull-request-url>`
 
-Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pull-requests/123.
+Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pull-requests/123 or a PR tab URL like /overview, /diff, /commits, or /builds.
 
 ### Batch command
 

@@ -415,7 +415,7 @@ export const CLI_COMMAND_METADATA = {
 		description: "Review one pull request from an explicit Bitbucket URL",
 		argumentLabel: "<pull-request-url>",
 		argumentDescription:
-			"Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pull-requests/123.",
+			"Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pull-requests/123 or a PR tab URL like /overview, /diff, /commits, or /builds.",
 	},
 	batch: {
 		usage: "batch <repository-url> [options]",
