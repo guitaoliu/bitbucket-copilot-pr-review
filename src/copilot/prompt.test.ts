@@ -258,7 +258,7 @@ describe("buildSystemMessage", () => {
 		);
 		assert.match(
 			systemMessage.sections?.guidelines?.content ?? "",
-			/When an initial concern is plausible but not yet proven, do one or two targeted follow-up reads or searches before dropping it/,
+			/When an initial concern is plausible but not yet proven, keep following it with targeted reads or searches until it is validated, disproven, or reduced to a clearly weaker alternative/,
 		);
 		assert.match(
 			systemMessage.sections?.guidelines?.content ?? "",
@@ -294,7 +294,15 @@ describe("buildSystemMessage", () => {
 		);
 		assert.match(
 			systemMessage.sections?.environment_context?.content ?? "",
+			/page through changed-file metadata with get_pr_overview or list_changed_files using reviewed-file offsets\/limits/,
+		);
+		assert.match(
+			systemMessage.sections?.environment_context?.content ?? "",
 			/Heuristic search tools are directional only: no related tests found or no repo search matches is not proof/,
+		);
+		assert.match(
+			systemMessage.sections?.environment_context?.content ?? "",
+			/Lack of quick evidence is not evidence that the changed path is safe/,
 		);
 		assert.match(
 			systemMessage.sections?.environment_context?.content ?? "",
@@ -318,11 +326,15 @@ describe("buildSystemMessage", () => {
 		);
 		assert.match(
 			systemMessage.sections?.code_change_rules?.content ?? "",
-			/If you validate more than 3 distinct issues, keep reviewing and preserve or replace the strongest findings instead of stopping early/,
+			/If you validate more than 3 distinct issues, keep reviewing and preserve or replace the strongest published findings instead of stopping early\. The publish cap is not a signal to stop searching/,
 		);
 		assert.match(
 			systemMessage.sections?.code_change_rules?.content ?? "",
-			/prefer short bullet points for the PR summary/i,
+			/Before finishing, make sure no reviewed file or major risk area still appears unchecked/,
+		);
+		assert.match(
+			systemMessage.sections?.code_change_rules?.content ?? "",
+			/After the main review coverage is complete, record exactly one PR-purpose summary with record_pr_summary/i,
 		);
 		assert.match(
 			systemMessage.sections?.tool_efficiency?.content ?? "",
@@ -330,7 +342,11 @@ describe("buildSystemMessage", () => {
 		);
 		assert.match(
 			systemMessage.sections?.tool_efficiency?.content ?? "",
-			/using short bullet points when they better capture separate changes/i,
+			/continue paging through changed-file metadata with get_pr_overview or list_changed_files until the reviewed-file set is covered in manageable batches/,
+		);
+		assert.match(
+			systemMessage.sections?.tool_efficiency?.content ?? "",
+			/After the main review coverage is complete, call record_pr_summary once/i,
 		);
 		assert.match(
 			systemMessage.sections?.last_instructions?.content ?? "",
@@ -338,7 +354,7 @@ describe("buildSystemMessage", () => {
 		);
 		assert.match(
 			systemMessage.sections?.identity?.content ?? "",
-			/find distinct reportable issues introduced or materially worsened by this PR, prioritize the strongest ones first, and still cover the other meaningful risk areas/,
+			/prioritize the strongest ones for publication, and still cover the other meaningful risk areas before finishing/,
 		);
 	});
 

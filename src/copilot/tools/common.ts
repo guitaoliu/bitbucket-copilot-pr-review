@@ -34,6 +34,44 @@ export function summarizeFile(file: ChangedFile): Record<string, unknown> {
 	};
 }
 
+export const DEFAULT_REVIEWED_FILES_PAGE_SIZE = 10;
+export const MAX_REVIEWED_FILES_PAGE_SIZE = 25;
+
+export function buildReviewedFilePage(
+	reviewedFiles: ChangedFile[],
+	options: {
+		offset?: number;
+		limit?: number;
+	},
+) {
+	const offset = Math.max(0, options.offset ?? 0);
+	const limit = Math.min(
+		MAX_REVIEWED_FILES_PAGE_SIZE,
+		Math.max(1, options.limit ?? DEFAULT_REVIEWED_FILES_PAGE_SIZE),
+	);
+	const pagedReviewedFiles = reviewedFiles
+		.slice(offset, offset + limit)
+		.map((file) => summarizeFile(file));
+	const reviewedFilesTruncated =
+		offset + pagedReviewedFiles.length < reviewedFiles.length;
+	const pagingActive =
+		reviewedFilesTruncated || offset > 0 || options.limit !== undefined;
+
+	return omitUndefined({
+		reviewedFiles: pagedReviewedFiles,
+		reviewedFilesOffset: pagingActive ? offset : undefined,
+		reviewedFilesLimit: pagingActive ? limit : undefined,
+		returnedReviewedFileCount: pagingActive
+			? pagedReviewedFiles.length
+			: undefined,
+		totalReviewedFiles: pagingActive ? reviewedFiles.length : undefined,
+		reviewedFilesTruncated: reviewedFilesTruncated ? true : undefined,
+		nextReviewedFilesOffset: reviewedFilesTruncated
+			? offset + pagedReviewedFiles.length
+			: undefined,
+	});
+}
+
 export function extractPatchHunk(
 	file: ChangedFile,
 	hunkIndex: number,

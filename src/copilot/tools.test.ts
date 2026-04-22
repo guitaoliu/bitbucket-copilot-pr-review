@@ -1125,7 +1125,7 @@ describe("Copilot tools", () => {
 
 		assert.equal(
 			overviewTool.description,
-			"Get pull request metadata, changed-file metadata, and CI summary.",
+			"Get pull request metadata, changed-file metadata, and CI summary. Use reviewedFilesOffset and reviewedFilesLimit to page through large reviews.",
 		);
 		assert.equal(
 			emitFindingParameters.properties?.category?.description,
@@ -1150,7 +1150,10 @@ describe("Copilot tools", () => {
 				createSummaryDrafts(),
 			),
 		);
-		const handler = getHandler<unknown, unknown>(tool);
+		const handler = getHandler<
+			{ reviewedFilesOffset?: number; reviewedFilesLimit?: number },
+			unknown
+		>(tool);
 
 		const result = await handler(
 			{},
@@ -1203,6 +1206,186 @@ describe("Copilot tools", () => {
 		});
 	});
 
+	it("pages reviewed files in the overview response for large reviews", async () => {
+		const largeReviewContext: ReviewContext = {
+			...reviewContext,
+			reviewedFiles: Array.from({ length: 12 }, (_, index) => ({
+				path: `src/example-${index}.ts`,
+				status: "modified",
+				patch: `diff --git a/src/example-${index}.ts b/src/example-${index}.ts`,
+				changedLines: [index + 1],
+				hunks: [
+					{
+						oldStart: index + 1,
+						oldLines: 1,
+						newStart: index + 1,
+						newLines: 1,
+						header: "",
+						changedLines: [index + 1],
+					},
+				],
+				additions: 1,
+				deletions: 0,
+				isBinary: false,
+			})),
+			diffStats: { fileCount: 12, additions: 12, deletions: 0 },
+		};
+		const tool = createGetPrOverviewTool(
+			createReviewToolContext(
+				config,
+				largeReviewContext,
+				createGitStub(),
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{ reviewedFilesOffset?: number; reviewedFilesLimit?: number },
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{ reviewedFilesOffset: 5, reviewedFilesLimit: 3 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "get_pr_overview",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			title: "Test PR",
+			sourceBranch: "feature",
+			targetBranch: "main",
+			headCommit: "head-123",
+			mergeBaseCommit: "base-123",
+			diffStats: { fileCount: 12, additions: 12, deletions: 0 },
+			reviewedFiles: [
+				{
+					path: "src/example-5.ts",
+					oldPath: undefined,
+					status: "modified",
+					additions: 1,
+					deletions: 0,
+					changedLineCount: 1,
+					changedLineRanges: "6",
+					hunks: [{ newStart: 6, newEnd: 6, header: "" }],
+				},
+				{
+					path: "src/example-6.ts",
+					oldPath: undefined,
+					status: "modified",
+					additions: 1,
+					deletions: 0,
+					changedLineCount: 1,
+					changedLineRanges: "7",
+					hunks: [{ newStart: 7, newEnd: 7, header: "" }],
+				},
+				{
+					path: "src/example-7.ts",
+					oldPath: undefined,
+					status: "modified",
+					additions: 1,
+					deletions: 0,
+					changedLineCount: 1,
+					changedLineRanges: "8",
+					hunks: [{ newStart: 8, newEnd: 8, header: "" }],
+				},
+			],
+			reviewedFilesOffset: 5,
+			reviewedFilesLimit: 3,
+			returnedReviewedFileCount: 3,
+			totalReviewedFiles: 12,
+			reviewedFilesTruncated: true,
+			nextReviewedFilesOffset: 8,
+			skippedFiles: [],
+			ciSummary: {
+				status: "missing",
+				message: "No CI summary was provided.",
+			},
+		});
+	});
+
+	it("pages changed files in list_changed_files", async () => {
+		const largeReviewContext: ReviewContext = {
+			...reviewContext,
+			reviewedFiles: Array.from({ length: 12 }, (_, index) => ({
+				path: `src/example-${index}.ts`,
+				status: "modified",
+				patch: `diff --git a/src/example-${index}.ts b/src/example-${index}.ts`,
+				changedLines: [index + 1],
+				hunks: [
+					{
+						oldStart: index + 1,
+						oldLines: 1,
+						newStart: index + 1,
+						newLines: 1,
+						header: "",
+						changedLines: [index + 1],
+					},
+				],
+				additions: 1,
+				deletions: 0,
+				isBinary: false,
+			})),
+		};
+		const tool = createListChangedFilesTool(
+			createReviewToolContext(
+				config,
+				largeReviewContext,
+				createGitStub(),
+				[],
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			{ includeSkipped?: boolean; offset?: number; limit?: number },
+			unknown
+		>(tool);
+
+		const result = await handler(
+			{ offset: 4, limit: 2 },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "list_changed_files",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			reviewedFiles: [
+				{
+					path: "src/example-4.ts",
+					oldPath: undefined,
+					status: "modified",
+					additions: 1,
+					deletions: 0,
+					changedLineCount: 1,
+					changedLineRanges: "5",
+					hunks: [{ newStart: 5, newEnd: 5, header: "" }],
+				},
+				{
+					path: "src/example-5.ts",
+					oldPath: undefined,
+					status: "modified",
+					additions: 1,
+					deletions: 0,
+					changedLineCount: 1,
+					changedLineRanges: "6",
+					hunks: [{ newStart: 6, newEnd: 6, header: "" }],
+				},
+			],
+			reviewedFilesOffset: 4,
+			reviewedFilesLimit: 2,
+			returnedReviewedFileCount: 2,
+			totalReviewedFiles: 12,
+			reviewedFilesTruncated: true,
+			nextReviewedFilesOffset: 6,
+		});
+	});
+
 	it("truncates oversized PR descriptions in the overview response", async () => {
 		const description = `intro ${"x".repeat(2500)}`;
 		const tool = createGetPrOverviewTool(
@@ -1220,7 +1403,10 @@ describe("Copilot tools", () => {
 				createSummaryDrafts(),
 			),
 		);
-		const handler = getHandler<unknown, unknown>(tool);
+		const handler = getHandler<
+			{ reviewedFilesOffset?: number; reviewedFilesLimit?: number },
+			unknown
+		>(tool);
 
 		const result = (await handler(
 			{},
