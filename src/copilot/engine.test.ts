@@ -23,6 +23,13 @@ import {
 	TEST_COVERAGE_HINT,
 } from "./review-guidance.ts";
 
+type ReviewProgressState = NonNullable<
+	Parameters<typeof createReviewSessionHooks>[3]
+>;
+type HookToolResult = Parameters<
+	ReturnType<typeof createReviewSessionHooks>["onPostToolUse"]
+>[0]["toolResult"];
+
 const config: ReviewerConfig = {
 	repoRoot: "/tmp/repo",
 	gitRemoteName: "origin",
@@ -163,18 +170,73 @@ function createReviewContext(): ReviewContext {
 function createProgressState(
 	overrides: Partial<ReviewSummaryDrafts> = {},
 	reviewedFileCount = 4,
-) {
-	return {
+	options: {
+		reviewedFilePaths?: string[];
+		reviewedFileMetadataSeenPaths?: string[];
+		directlyInspectedReviewedFilePaths?: string[];
+		truncatedDiffReviewedFilePaths?: string[];
+		toolTelemetry?: ReturnType<typeof createEmptyReviewToolTelemetry>;
+	} = {},
+): ReviewProgressState {
+	const progressState: ReviewProgressState = {
 		reviewedFileCount,
 		summaryDrafts: {
 			fileSummaries: [],
 			...overrides,
 		},
 	};
+
+	if (options.reviewedFilePaths) {
+		progressState.reviewedFilePaths = new Set(options.reviewedFilePaths);
+	}
+
+	if (options.toolTelemetry) {
+		progressState.toolTelemetry = options.toolTelemetry;
+	}
+
+	if (options.reviewedFileMetadataSeenPaths) {
+		progressState.reviewedFileMetadataSeenPaths = new Set(
+			options.reviewedFileMetadataSeenPaths,
+		);
+	}
+
+	if (options.directlyInspectedReviewedFilePaths) {
+		progressState.directlyInspectedReviewedFilePaths = new Set(
+			options.directlyInspectedReviewedFilePaths,
+		);
+	}
+
+	if (options.truncatedDiffReviewedFilePaths) {
+		progressState.truncatedDiffReviewedFilePaths = new Set(
+			options.truncatedDiffReviewedFilePaths,
+		);
+	}
+
+	return progressState;
+}
+
+function createToolResult<T extends object>(result: T): T & HookToolResult {
+	return result as T & HookToolResult;
+}
+
+function createSdkToolResult(result: Record<string, unknown>): HookToolResult {
+	return {
+		textResultForLlm: JSON.stringify(result),
+		resultType: "success",
+	};
+}
+
+function createReminderReviewedFilePaths(): string[] {
+	return [
+		"src/example.ts",
+		"src/example-1.ts",
+		"src/example-2.ts",
+		"src/file.ts",
+	];
 }
 
 describe("createReviewSessionHooks", () => {
-	it("returns a session-start hint that reinforces high-signal review behavior", async () => {
+	it("returns a session-start hint that reinforces thorough review coverage", async () => {
 		const hooks = createReviewSessionHooks(
 			config,
 			createLoggerSpy().logger,
@@ -184,7 +246,11 @@ describe("createReviewSessionHooks", () => {
 
 		assert.match(
 			result.additionalContext,
-			/reportable, merge-relevant, material issues introduced or materially worsened by this pull request/,
+			/all distinct validated issues introduced or materially worsened by this pull request that are strong enough to publish under the configured threshold/,
+		);
+		assert.match(
+			result.additionalContext,
+			/The review is not complete until the reviewed files and their main risk areas have been checked/,
 		);
 		assert.match(
 			result.additionalContext,
@@ -226,11 +292,11 @@ describe("createReviewSessionHooks", () => {
 		);
 		assert.match(
 			result.additionalContext,
-			/If more than 3 distinct issues exist, keep reviewing and preserve or replace the strongest ones instead of stopping early/,
+			/If more than 3 distinct issues exist, keep reviewing and preserve or replace the strongest published set instead of stopping early\. The publish cap is not a signal to stop searching/,
 		);
 		assert.match(
 			result.additionalContext,
-			/high confidence or better, up to 3 total/,
+			/high confidence or better for publication, up to 3 total published findings/,
 		);
 	});
 
@@ -256,6 +322,416 @@ describe("createReviewSessionHooks", () => {
 		assert.deepEqual(infoEntries, [
 			{
 				message: "Copilot requested tool get_file_content path=src/file.ts",
+				details: [],
+			},
+		]);
+	});
+
+	it("returns overview paging guidance for large changed-file sets", async () => {
+		const hooks = createReviewSessionHooks(
+			config,
+			createLoggerSpy().logger,
+			[],
+		);
+		const result = await hooks.onPreToolUse({
+			toolName: "get_pr_overview",
+			toolArgs: { reviewedFilesOffset: 10, reviewedFilesLimit: 10 },
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(result, {
+			permissionDecision: "allow",
+			additionalContext:
+				"Use the overview to scope the review, find the highest-risk files, and page through reviewed-file metadata in manageable batches when the changed-file list is large.",
+		});
+	});
+
+	it("returns changed-file paging guidance for list_changed_files", async () => {
+		const hooks = createReviewSessionHooks(
+			config,
+			createLoggerSpy().logger,
+			[],
+		);
+		const result = await hooks.onPreToolUse({
+			toolName: "list_changed_files",
+			toolArgs: { offset: 10, limit: 10 },
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(result, {
+			permissionDecision: "allow",
+			additionalContext:
+				"Use this when you need a refreshed file list, skipped-file details, or another changed-file page beyond get_pr_overview; then keep moving through the reviewed files in batches until meaningful reviewed changes are covered.",
+		});
+	});
+
+	it("denies record_pr_summary until all reviewed-file metadata has been seen", async () => {
+		const telemetry = createEmptyReviewToolTelemetry();
+		const hooks = createReviewSessionHooks(
+			config,
+			createLoggerSpy().logger,
+			[],
+			createProgressState({}, 4, {
+				reviewedFileMetadataSeenPaths: ["src/first.ts"],
+				toolTelemetry: telemetry,
+			}),
+		);
+
+		const result = await hooks.onPreToolUse({
+			toolName: "record_pr_summary",
+			toolArgs: { summary: "done" },
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(result, {
+			permissionDecision: "deny",
+			permissionDecisionReason:
+				"Record the PR summary only after paging through all changed-file metadata. Seen reviewed-file metadata for 1/4 files so far; request the next changed-file batch first.",
+		});
+		assert.equal(telemetry.totalRequested, 1);
+		assert.equal(telemetry.totalAllowed, 0);
+		assert.equal(telemetry.totalDenied, 1);
+		assert.equal(telemetry.byTool.record_pr_summary?.requested, 1);
+		assert.equal(telemetry.byTool.record_pr_summary?.allowed, 0);
+		assert.equal(telemetry.byTool.record_pr_summary?.denied, 1);
+	});
+
+	it("denies record_pr_summary until all reviewed files have been directly inspected", async () => {
+		const telemetry = createEmptyReviewToolTelemetry();
+		const hooks = createReviewSessionHooks(
+			config,
+			createLoggerSpy().logger,
+			[],
+			createProgressState({}, 4, {
+				reviewedFilePaths: [
+					"src/first.ts",
+					"src/second.ts",
+					"src/third.ts",
+					"src/fourth.ts",
+				],
+				reviewedFileMetadataSeenPaths: [
+					"src/first.ts",
+					"src/second.ts",
+					"src/third.ts",
+					"src/fourth.ts",
+				],
+				directlyInspectedReviewedFilePaths: ["src/first.ts", "src/second.ts"],
+				toolTelemetry: telemetry,
+			}),
+		);
+
+		const result = await hooks.onPreToolUse({
+			toolName: "record_pr_summary",
+			toolArgs: { summary: "done" },
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(result, {
+			permissionDecision: "deny",
+			permissionDecisionReason:
+				"Record the PR summary only after directly inspecting every reviewed file. Directly inspected reviewed files: 2/4. 2 reviewed files still lack direct inspection. Unchecked reviewed files include src/third.ts, src/fourth.ts. Inspect their diffs or file content first.",
+		});
+		assert.equal(telemetry.totalRequested, 1);
+		assert.equal(telemetry.totalAllowed, 0);
+		assert.equal(telemetry.totalDenied, 1);
+		assert.equal(telemetry.byTool.record_pr_summary?.requested, 1);
+		assert.equal(telemetry.byTool.record_pr_summary?.allowed, 0);
+		assert.equal(telemetry.byTool.record_pr_summary?.denied, 1);
+	});
+
+	it("tracks reviewed-file metadata coverage across paged changed-file tools", async () => {
+		const reviewedFilePaths = [
+			"src/first.ts",
+			"src/second.ts",
+			"src/third.ts",
+			"src/fourth.ts",
+		];
+		const { logger, infoEntries } = createLoggerSpy();
+		const hooks = createReviewSessionHooks(
+			config,
+			logger,
+			[],
+			createProgressState({}, reviewedFilePaths.length, {
+				reviewedFilePaths,
+			}),
+		);
+
+		const firstResult = await hooks.onPostToolUse({
+			toolName: "get_pr_overview",
+			toolArgs: { reviewedFilesOffset: 0, reviewedFilesLimit: 2 },
+			toolResult: createToolResult({
+				textResultForLlm: "ok",
+				resultType: "success",
+				reviewedFiles: [{ path: "src/first.ts" }, { path: "src/second.ts" }],
+			}),
+			cwd: "/tmp/repo",
+		});
+		assert.deepEqual(firstResult, {
+			additionalContext:
+				"Changed-file metadata seen: 2/4. Choose the most suspicious files from the current overview batch, inspect their diffs, and page to the next changed-file batch before recording the PR summary.",
+		});
+
+		const secondResult = await hooks.onPostToolUse({
+			toolName: "list_changed_files",
+			toolArgs: { offset: 2, limit: 2 },
+			toolResult: createToolResult({
+				textResultForLlm: "ok",
+				resultType: "success",
+				reviewedFiles: [{ path: "src/third.ts" }, { path: "src/fourth.ts" }],
+			}),
+			cwd: "/tmp/repo",
+		});
+		assert.deepEqual(secondResult, {
+			additionalContext:
+				"Changed-file metadata seen: 4/4. Prioritize files touching validation, auth, persistence, async flow, serialization, and public interfaces; keep moving through unchecked reviewed files directly. Do not wrap up yet. Directly inspected reviewed files: 0/4. 4 reviewed files still lack direct inspection. Unchecked reviewed files include src/first.ts, src/second.ts, src/third.ts (+1 more). Inspect their diffs or file content before finishing.",
+		});
+		assert.deepEqual(infoEntries, [
+			{
+				message:
+					"Copilot completed tool get_pr_overview result=success reviewed_files=2 findings=0/3 reviewed_file_metadata=2/4 inspected_reviewed_files=0/4 file_summaries=0/4 pr_summary=missing",
+				details: [],
+			},
+			{
+				message:
+					"Copilot completed tool list_changed_files result=success reviewed_files=2 findings=0/3 reviewed_file_metadata=4/4 inspected_reviewed_files=0/4 file_summaries=0/4 pr_summary=missing",
+				details: [],
+			},
+		]);
+	});
+
+	it("allows record_pr_summary after metadata and direct inspection coverage are complete", async () => {
+		const reviewedFilePaths = [
+			"src/first.ts",
+			"src/second.ts",
+			"src/third.ts",
+			"src/fourth.ts",
+		];
+		const hooks = createReviewSessionHooks(
+			config,
+			createLoggerSpy().logger,
+			[],
+			createProgressState({}, reviewedFilePaths.length, {
+				reviewedFilePaths,
+				reviewedFileMetadataSeenPaths: reviewedFilePaths,
+				directlyInspectedReviewedFilePaths: reviewedFilePaths,
+			}),
+		);
+
+		const result = await hooks.onPreToolUse({
+			toolName: "record_pr_summary",
+			toolArgs: { summary: "done" },
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(result, {
+			permissionDecision: "allow",
+			additionalContext:
+				"Capture the PR's intended behavior change in one concise, evidence-backed summary after the main review coverage is complete. Use short bullet points when the PR has a few distinct changes.",
+		});
+	});
+
+	it("requires truncated diff output to be followed by complete inspection", async () => {
+		const reviewedFilePaths = ["src/first.ts"];
+		const { logger, infoEntries } = createLoggerSpy();
+		const hooks = createReviewSessionHooks(
+			config,
+			logger,
+			[],
+			createProgressState({}, reviewedFilePaths.length, {
+				reviewedFilePaths,
+				reviewedFileMetadataSeenPaths: reviewedFilePaths,
+			}),
+		);
+
+		const truncatedDiffResult = await hooks.onPostToolUse({
+			toolName: "get_file_diff",
+			toolArgs: { path: "src/first.ts" },
+			toolResult: createSdkToolResult({
+				truncated: true,
+				returnedPatchChars: 12000,
+				totalHunks: 4,
+			}),
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(truncatedDiffResult, {
+			additionalContext:
+				"Directly inspected reviewed files: 0/1. This full diff is truncated, so this file does not count as fully inspected yet. Continue with get_file_diff_hunk or targeted file content until the changed behavior is clear before deciding whether an issue exists. Do not wrap up yet. 1 reviewed file still lack direct inspection. Unchecked reviewed files include src/first.ts. Inspect their diffs or file content before finishing.",
+		});
+
+		const deniedSummary = await hooks.onPreToolUse({
+			toolName: "record_pr_summary",
+			toolArgs: { summary: "done" },
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(deniedSummary, {
+			permissionDecision: "deny",
+			permissionDecisionReason:
+				"Record the PR summary only after directly inspecting every reviewed file. Directly inspected reviewed files: 0/1. 1 reviewed file still lack direct inspection. Unchecked reviewed files include src/first.ts. Some unchecked reviewed file still only has truncated diff output: src/first.ts. Use get_file_diff_hunk when a whole-file diff was truncated, or targeted file content when a hunk is still truncated, before considering it fully inspected. Inspect their diffs or file content first.",
+		});
+
+		const hunkResult = await hooks.onPostToolUse({
+			toolName: "get_file_diff_hunk",
+			toolArgs: { path: "src/first.ts", hunkIndex: 1 },
+			toolResult: createSdkToolResult({
+				truncated: true,
+				returnedPatchChars: 12000,
+				totalHunks: 4,
+			}),
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(hunkResult, {
+			additionalContext:
+				"Directly inspected reviewed files: 0/1. This diff hunk is truncated, so this file does not count as fully inspected yet. Use targeted file content for the changed lines, and inspect additional relevant hunks if needed, until the changed behavior is clear before deciding whether an issue exists. Do not wrap up yet. 1 reviewed file still lack direct inspection. Unchecked reviewed files include src/first.ts. Inspect their diffs or file content before finishing.",
+		});
+
+		const deniedSummaryAfterTruncatedHunk = await hooks.onPreToolUse({
+			toolName: "record_pr_summary",
+			toolArgs: { summary: "done" },
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(deniedSummaryAfterTruncatedHunk, {
+			permissionDecision: "deny",
+			permissionDecisionReason:
+				"Record the PR summary only after directly inspecting every reviewed file. Directly inspected reviewed files: 0/1. 1 reviewed file still lack direct inspection. Unchecked reviewed files include src/first.ts. Some unchecked reviewed file still only has truncated diff output: src/first.ts. Use get_file_diff_hunk when a whole-file diff was truncated, or targeted file content when a hunk is still truncated, before considering it fully inspected. Inspect their diffs or file content first.",
+		});
+
+		const contentResult = await hooks.onPostToolUse({
+			toolName: "get_file_content",
+			toolArgs: {
+				path: "src/first.ts",
+				version: "head",
+				startLine: 1,
+				endLine: 40,
+			},
+			toolResult: createSdkToolResult({
+				returnedEndLine: 40,
+				status: "ok",
+			}),
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(contentResult, {
+			additionalContext:
+				"Directly inspected reviewed files: 1/1. Do not emit a finding unless the inspected code supports a concrete, material issue introduced or materially worsened by the PR. If the changed file touches shared behavior or critical boundaries, inspect the most relevant nearby path before closing the hypothesis.",
+		});
+
+		const allowedSummary = await hooks.onPreToolUse({
+			toolName: "record_pr_summary",
+			toolArgs: { summary: "done" },
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(allowedSummary, {
+			permissionDecision: "allow",
+			additionalContext:
+				"Capture the PR's intended behavior change in one concise, evidence-backed summary after the main review coverage is complete. Use short bullet points when the PR has a few distinct changes.",
+		});
+		assert.deepEqual(infoEntries, [
+			{
+				message:
+					"Copilot completed tool get_file_diff result=success path=src/first.ts truncated=true patch_chars=12000 total_hunks=4 findings=0/3 reviewed_file_metadata=1/1 inspected_reviewed_files=0/1 file_summaries=0/1 pr_summary=missing",
+				details: [],
+			},
+			{
+				message: "Copilot requested tool record_pr_summary summary_chars=4",
+				details: [],
+			},
+			{
+				message:
+					"Copilot completed tool get_file_diff_hunk result=success path=src/first.ts hunk=1 truncated=true patch_chars=12000 total_hunks=4 findings=0/3 reviewed_file_metadata=1/1 inspected_reviewed_files=0/1 file_summaries=0/1 pr_summary=missing",
+				details: [],
+			},
+			{
+				message: "Copilot requested tool record_pr_summary summary_chars=4",
+				details: [],
+			},
+			{
+				message:
+					"Copilot completed tool get_file_content result=success path=src/first.ts version=head start=1 end=40 lines=40 status=ok findings=0/3 reviewed_file_metadata=1/1 inspected_reviewed_files=1/1 file_summaries=0/1 pr_summary=missing",
+				details: [],
+			},
+			{
+				message: "Copilot requested tool record_pr_summary summary_chars=4",
+				details: [],
+			},
+		]);
+	});
+
+	it("adds a direct-inspection reminder after paging is complete but files remain unchecked", async () => {
+		const reviewedFilePaths = [
+			"src/first.ts",
+			"src/second.ts",
+			"src/third.ts",
+			"src/fourth.ts",
+		];
+		const { logger, infoEntries } = createLoggerSpy();
+		const hooks = createReviewSessionHooks(
+			config,
+			logger,
+			[],
+			createProgressState({}, reviewedFilePaths.length, {
+				reviewedFilePaths,
+				reviewedFileMetadataSeenPaths: reviewedFilePaths,
+				directlyInspectedReviewedFilePaths: ["src/first.ts"],
+			}),
+		);
+
+		const result = await hooks.onPostToolUse({
+			toolName: "list_changed_files",
+			toolArgs: { offset: 2, limit: 2 },
+			toolResult: createSdkToolResult({
+				reviewedFiles: [{ path: "src/third.ts" }, { path: "src/fourth.ts" }],
+			}),
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(result, {
+			additionalContext:
+				"Changed-file metadata seen: 4/4. Prioritize files touching validation, auth, persistence, async flow, serialization, and public interfaces; keep moving through unchecked reviewed files directly. Do not wrap up yet. Directly inspected reviewed files: 1/4. 3 reviewed files still lack direct inspection. Unchecked reviewed files include src/second.ts, src/third.ts, src/fourth.ts. Inspect their diffs or file content before finishing.",
+		});
+		assert.deepEqual(infoEntries, [
+			{
+				message:
+					"Copilot completed tool list_changed_files result=success reviewed_files=2 findings=0/3 reviewed_file_metadata=4/4 inspected_reviewed_files=1/4 file_summaries=0/4 pr_summary=missing",
+				details: [],
+			},
+		]);
+	});
+
+	it("tracks reviewed-file metadata from real SDK JSON-wrapped tool results", async () => {
+		const reviewedFilePaths = ["src/first.ts", "src/second.ts", "src/third.ts"];
+		const { logger, infoEntries } = createLoggerSpy();
+		const hooks = createReviewSessionHooks(
+			config,
+			logger,
+			[],
+			createProgressState({}, reviewedFilePaths.length, {
+				reviewedFilePaths,
+			}),
+		);
+
+		const overviewResult = await hooks.onPostToolUse({
+			toolName: "get_pr_overview",
+			toolArgs: { reviewedFilesOffset: 0, reviewedFilesLimit: 2 },
+			toolResult: createSdkToolResult({
+				reviewedFiles: [{ path: "src/first.ts" }, { path: "src/second.ts" }],
+				skippedFiles: [],
+			}),
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(overviewResult, {
+			additionalContext:
+				"Changed-file metadata seen: 2/3. Choose the most suspicious files from the current overview batch, inspect their diffs, and page to the next changed-file batch before recording the PR summary.",
+		});
+		assert.deepEqual(infoEntries, [
+			{
+				message:
+					"Copilot completed tool get_pr_overview result=success reviewed_files=2 skipped_files=0 findings=0/3 reviewed_file_metadata=2/3 inspected_reviewed_files=0/3 file_summaries=0/3 pr_summary=missing",
 				details: [],
 			},
 		]);
@@ -394,7 +870,9 @@ describe("createReviewSessionHooks", () => {
 			config,
 			logger,
 			drafts,
-			createProgressState({ prSummary: "done", fileSummaries: [] }),
+			createProgressState({ prSummary: "done", fileSummaries: [] }, 4, {
+				reviewedFilePaths: createReminderReviewedFilePaths(),
+			}),
 		);
 		const result = await hooks.onPostToolUse({
 			toolName: "emit_finding",
@@ -405,12 +883,12 @@ describe("createReviewSessionHooks", () => {
 
 		assert.deepEqual(result, {
 			additionalContext:
-				"Findings recorded: 1/3. Keep findings distinct and evidence-backed, then continue searching for additional validated issues.",
+				"Findings recorded: 1/3. Keep findings distinct and evidence-backed, then continue with unchecked reviewed files, interfaces, and tests. Do not wrap up yet. Directly inspected reviewed files: 0/4. 4 reviewed files still lack direct inspection. Unchecked reviewed files include src/example.ts, src/example-1.ts, src/example-2.ts (+1 more). Inspect their diffs or file content before finishing.",
 		});
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool emit_finding result=success path=src/file.ts findings=1/3 file_summaries=0/4 pr_summary=recorded",
+					"Copilot completed tool emit_finding result=success path=src/file.ts findings=1/3 reviewed_file_metadata=0/4 inspected_reviewed_files=0/4 file_summaries=0/4 pr_summary=recorded",
 				details: [],
 			},
 		]);
@@ -454,17 +932,19 @@ describe("createReviewSessionHooks", () => {
 
 		assert.deepEqual(result, {
 			additionalContext:
-				"You have reached the configured maximum of 3 findings. Do not add more unless a clearly stronger issue replaces a weaker one.",
+				"You have reached the configured maximum of 3 published findings. Do not add more unless a clearly stronger issue replaces a weaker one, but continue reviewing for any unchecked risky areas.",
 		});
 	});
 
-	it("returns narrow exploration guidance after repo search tools", async () => {
+	it("returns iterative exploration guidance after repo search tools", async () => {
 		const { logger, infoEntries } = createLoggerSpy();
 		const hooks = createReviewSessionHooks(
 			config,
 			logger,
 			[],
-			createProgressState(),
+			createProgressState({}, 4, {
+				reviewedFilePaths: createReminderReviewedFilePaths(),
+			}),
 		);
 		const result = await hooks.onPostToolUse({
 			toolName: "search_text_in_repo",
@@ -475,12 +955,12 @@ describe("createReviewSessionHooks", () => {
 
 		assert.deepEqual(result, {
 			additionalContext:
-				"Use this context to confirm or reject a specific hypothesis. If the first pass is inconclusive and the changed code touches auth, validation, persistence, serialization, async flow, or public interfaces, run one or two more targeted follow-up reads or searches before moving on. Stop once extra exploration stops sharpening the hypothesis.",
+				"Use this context to confirm or reject a specific hypothesis. If the first pass is inconclusive and the changed code touches auth, validation, persistence, serialization, async flow, or public interfaces, keep iterating with targeted follow-up reads or searches until the main risky paths are resolved or ruled out. Do not wrap up yet. Directly inspected reviewed files: 0/4. 4 reviewed files still lack direct inspection. Unchecked reviewed files include src/example.ts, src/example-1.ts, src/example-2.ts (+1 more). Inspect their diffs or file content before finishing.",
 		});
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool search_text_in_repo result=success query_chars=3 version=head directories=src findings=0/3 file_summaries=0/4 pr_summary=missing",
+					"Copilot completed tool search_text_in_repo result=success query_chars=3 version=head directories=src findings=0/3 reviewed_file_metadata=0/4 inspected_reviewed_files=0/4 file_summaries=0/4 pr_summary=missing",
 				details: [],
 			},
 		]);
@@ -501,7 +981,7 @@ describe("createReviewSessionHooks", () => {
 		assert.deepEqual(result, {
 			permissionDecision: "allow",
 			additionalContext:
-				"Use this to find likely nearby automated tests for a reviewed file before resorting to broader repository search.",
+				"Use this to find likely nearby automated tests for a reviewed file and verify whether positive, negative, and edge-case coverage exists before resorting to broader repository search.",
 		});
 	});
 
@@ -521,7 +1001,7 @@ describe("createReviewSessionHooks", () => {
 
 		assert.deepEqual(result, {
 			additionalContext:
-				"Recorded findings: 2/3. Avoid duplicates, but continue looking if reviewed risky areas remain unchecked.",
+				"Recorded findings: 2/3. Avoid duplicates, use this list to spot coverage gaps, and continue looking if reviewed risky areas remain unchecked.",
 		});
 	});
 
@@ -550,7 +1030,7 @@ describe("createReviewSessionHooks", () => {
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool remove_recorded_finding result=success finding=1 findings=1/3 file_summaries=1/4 pr_summary=missing",
+					"Copilot completed tool remove_recorded_finding result=success finding=1 findings=1/3 reviewed_file_metadata=0/4 inspected_reviewed_files=0/4 file_summaries=1/4 pr_summary=missing",
 				details: [],
 			},
 		]);
@@ -603,10 +1083,12 @@ describe("createReviewSessionHooks", () => {
 			config,
 			logger,
 			[],
-			createProgressState({ prSummary: "done", fileSummaries: [] }),
+			createProgressState({ prSummary: "done", fileSummaries: [] }, 4, {
+				reviewedFilePaths: createReminderReviewedFilePaths(),
+			}),
 		);
 
-		await hooks.onPostToolUse({
+		const result = await hooks.onPostToolUse({
 			toolName: "get_file_content",
 			toolArgs: { path: "src/file.ts", version: "head" },
 			toolResult: {
@@ -618,10 +1100,15 @@ describe("createReviewSessionHooks", () => {
 			cwd: "/tmp/repo",
 		});
 
+		assert.deepEqual(result, {
+			additionalContext:
+				"Directly inspected reviewed files: 1/4. Do not emit a finding unless the inspected code supports a concrete, material issue introduced or materially worsened by the PR. If the changed file touches shared behavior or critical boundaries, inspect the most relevant nearby path before closing the hypothesis. Do not wrap up yet. 3 reviewed files still lack direct inspection. Unchecked reviewed files include src/example.ts, src/example-1.ts, src/example-2.ts. Inspect their diffs or file content before finishing.",
+		});
+
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool get_file_content result=success duration_ms=25 path=src/file.ts version=head findings=0/3 file_summaries=0/4 pr_summary=recorded",
+					"Copilot completed tool get_file_content result=success duration_ms=25 path=src/file.ts version=head findings=0/3 reviewed_file_metadata=0/4 inspected_reviewed_files=1/4 file_summaries=0/4 pr_summary=recorded",
 				details: [],
 			},
 		]);
@@ -652,7 +1139,7 @@ describe("createReviewSessionHooks", () => {
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool record_file_summary result=success path=src/third.ts findings=0/3 file_summaries=2/4 pr_summary=recorded",
+					"Copilot completed tool record_file_summary result=success path=src/third.ts findings=0/3 reviewed_file_metadata=0/4 inspected_reviewed_files=0/4 file_summaries=2/4 pr_summary=recorded",
 				details: [],
 			},
 		]);
@@ -706,7 +1193,7 @@ describe("createReviewSessionHooks", () => {
 			},
 			{
 				message:
-					"Copilot completed tool record_pr_summary result=success summary_chars=2 findings=0/3 file_summaries=disabled pr_summary=recorded",
+					"Copilot completed tool record_pr_summary result=success summary_chars=2 findings=0/3 reviewed_file_metadata=0/26 inspected_reviewed_files=0/26 file_summaries=disabled pr_summary=recorded",
 				details: [],
 			},
 		]);

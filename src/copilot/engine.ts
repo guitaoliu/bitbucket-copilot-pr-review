@@ -61,9 +61,13 @@ export interface CopilotSessionLike {
 
 type ReviewProgressState = {
 	reviewedFileCount: number;
+	reviewedFilePaths?: Set<string>;
 	summaryDrafts: ReviewSummaryDrafts;
 	toolTelemetry?: ReviewToolTelemetry;
 	toolStartedAtMsByName?: Map<string, number[]>;
+	reviewedFileMetadataSeenPaths?: Set<string>;
+	directlyInspectedReviewedFilePaths?: Set<string>;
+	truncatedDiffReviewedFilePaths?: Set<string>;
 };
 
 export interface RunCopilotReviewDependencies {
@@ -84,6 +88,270 @@ function isReviewToolName(toolName: string): toolName is ReviewToolName {
 	return REVIEW_TOOL_NAMES.includes(toolName as ReviewToolName);
 }
 
+function getReviewedFileMetadataSeenPaths(
+	progressState: ReviewProgressState,
+): Set<string> {
+	if (progressState.reviewedFileMetadataSeenPaths) {
+		return progressState.reviewedFileMetadataSeenPaths;
+	}
+
+	const seenPaths = new Set<string>();
+	progressState.reviewedFileMetadataSeenPaths = seenPaths;
+	return seenPaths;
+}
+
+function getDirectlyInspectedReviewedFilePaths(
+	progressState: ReviewProgressState,
+): Set<string> {
+	if (progressState.directlyInspectedReviewedFilePaths) {
+		return progressState.directlyInspectedReviewedFilePaths;
+	}
+
+	const inspectedPaths = new Set<string>();
+	progressState.directlyInspectedReviewedFilePaths = inspectedPaths;
+	return inspectedPaths;
+}
+
+function getTruncatedDiffReviewedFilePaths(
+	progressState: ReviewProgressState,
+): Set<string> {
+	if (progressState.truncatedDiffReviewedFilePaths) {
+		return progressState.truncatedDiffReviewedFilePaths;
+	}
+
+	const truncatedPaths = new Set<string>();
+	progressState.truncatedDiffReviewedFilePaths = truncatedPaths;
+	return truncatedPaths;
+}
+
+function isTrackedReviewedFilePath(
+	progressState: ReviewProgressState,
+	path: string,
+): boolean {
+	return progressState.reviewedFilePaths
+		? progressState.reviewedFilePaths.has(path)
+		: true;
+}
+
+function getReviewedFileMetadataSeenCount(
+	progressState: ReviewProgressState,
+): number {
+	return getReviewedFileMetadataSeenPaths(progressState).size;
+}
+
+function getDirectlyInspectedReviewedFileCount(
+	progressState: ReviewProgressState,
+): number {
+	return getDirectlyInspectedReviewedFilePaths(progressState).size;
+}
+
+function markReviewedFileAsDirectlyInspected(
+	progressState: ReviewProgressState,
+	path: string,
+): void {
+	getDirectlyInspectedReviewedFilePaths(progressState).add(path);
+	getTruncatedDiffReviewedFilePaths(progressState).delete(path);
+}
+
+function markReviewedFileAsPendingTruncatedDiffFollowUp(
+	progressState: ReviewProgressState,
+	path: string,
+): void {
+	if (getDirectlyInspectedReviewedFilePaths(progressState).has(path)) {
+		return;
+	}
+
+	getTruncatedDiffReviewedFilePaths(progressState).add(path);
+}
+
+function shouldEnforceDirectInspectionCoverage(
+	progressState: ReviewProgressState,
+): boolean {
+	return progressState.reviewedFilePaths !== undefined;
+}
+
+function hasDirectlyInspectedAllReviewedFiles(
+	progressState: ReviewProgressState,
+): boolean {
+	return (
+		!shouldEnforceDirectInspectionCoverage(progressState) ||
+		progressState.reviewedFileCount === 0 ||
+		getDirectlyInspectedReviewedFileCount(progressState) >=
+			progressState.reviewedFileCount
+	);
+}
+
+function getUncheckedReviewedFilePaths(
+	progressState: ReviewProgressState,
+): string[] {
+	if (!progressState.reviewedFilePaths) {
+		return [];
+	}
+
+	const directlyInspectedPaths =
+		getDirectlyInspectedReviewedFilePaths(progressState);
+	const uncheckedPaths: string[] = [];
+	for (const path of progressState.reviewedFilePaths) {
+		if (!directlyInspectedPaths.has(path)) {
+			uncheckedPaths.push(path);
+		}
+	}
+
+	return uncheckedPaths;
+}
+
+const MAX_UNCHECKED_REVIEWED_FILE_HINTS = 3;
+
+function buildTruncatedDiffFollowUpSentence(
+	progressState: ReviewProgressState,
+): string | undefined {
+	const directlyInspectedPaths =
+		getDirectlyInspectedReviewedFilePaths(progressState);
+	const pendingPaths: string[] = [];
+	for (const path of getTruncatedDiffReviewedFilePaths(progressState)) {
+		if (
+			isTrackedReviewedFilePath(progressState, path) &&
+			!directlyInspectedPaths.has(path)
+		) {
+			pendingPaths.push(path);
+		}
+	}
+
+	if (pendingPaths.length === 0) {
+		return undefined;
+	}
+
+	const previewPaths = pendingPaths
+		.slice(0, MAX_UNCHECKED_REVIEWED_FILE_HINTS)
+		.map((path) => normalizeToolLogString(path));
+	const remainingCount = pendingPaths.length - previewPaths.length;
+	const preview =
+		remainingCount > 0
+			? `${previewPaths.join(", ")} (+${remainingCount} more)`
+			: previewPaths.join(", ");
+
+	return pendingPaths.length === 1
+		? `Some unchecked reviewed file still only has truncated diff output: ${preview}. Use get_file_diff_hunk when a whole-file diff was truncated, or targeted file content when a hunk is still truncated, before considering it fully inspected.`
+		: `Some unchecked reviewed files still only have truncated diff output: ${preview}. Use get_file_diff_hunk when a whole-file diff was truncated, or targeted file content when a hunk is still truncated, before considering them fully inspected.`;
+}
+
+function buildUncheckedReviewedFilePreview(
+	progressState: ReviewProgressState,
+): string | undefined {
+	const uncheckedPaths = getUncheckedReviewedFilePaths(progressState);
+	if (uncheckedPaths.length === 0) {
+		return undefined;
+	}
+
+	const previewPaths = uncheckedPaths
+		.slice(0, MAX_UNCHECKED_REVIEWED_FILE_HINTS)
+		.map((path) => normalizeToolLogString(path));
+	const remainingCount = uncheckedPaths.length - previewPaths.length;
+	return remainingCount > 0
+		? `Unchecked reviewed files include ${previewPaths.join(", ")} (+${remainingCount} more).`
+		: `Unchecked reviewed files include ${previewPaths.join(", ")}.`;
+}
+
+function buildDirectInspectionGapSentence(
+	progressState: ReviewProgressState,
+	includeCount = true,
+): string | undefined {
+	if (hasDirectlyInspectedAllReviewedFiles(progressState)) {
+		return undefined;
+	}
+
+	const directlyInspectedCount =
+		getDirectlyInspectedReviewedFileCount(progressState);
+	const remainingCount = Math.max(
+		0,
+		progressState.reviewedFileCount - directlyInspectedCount,
+	);
+	const parts = [
+		includeCount
+			? `Directly inspected reviewed files: ${directlyInspectedCount}/${progressState.reviewedFileCount}.`
+			: undefined,
+		`${remainingCount} reviewed file${remainingCount === 1 ? "" : "s"} still lack direct inspection.`,
+		buildUncheckedReviewedFilePreview(progressState),
+	].filter((part): part is string => part !== undefined);
+
+	return parts.join(" ");
+}
+
+function buildDirectInspectionReminder(
+	progressState: ReviewProgressState,
+	includeCount = true,
+): string | undefined {
+	const gapSentence = buildDirectInspectionGapSentence(
+		progressState,
+		includeCount,
+	);
+	if (!gapSentence) {
+		return undefined;
+	}
+
+	return `Do not wrap up yet. ${gapSentence} Inspect their diffs or file content before finishing.`;
+}
+
+function appendDirectInspectionReminder(
+	message: string,
+	progressState: ReviewProgressState,
+	includeCount = true,
+): string {
+	const reminder = buildDirectInspectionReminder(progressState, includeCount);
+	return reminder ? `${message} ${reminder}` : message;
+}
+
+function hasSeenAllReviewedFileMetadata(
+	progressState: ReviewProgressState,
+): boolean {
+	return (
+		progressState.reviewedFileCount === 0 ||
+		getReviewedFileMetadataSeenCount(progressState) >=
+			progressState.reviewedFileCount
+	);
+}
+
+function buildPendingPrSummaryReason(
+	progressState: ReviewProgressState,
+): string {
+	if (
+		!hasSeenAllReviewedFileMetadata(progressState) &&
+		hasDirectlyInspectedAllReviewedFiles(progressState)
+	) {
+		return `Record the PR summary only after paging through all changed-file metadata. Seen reviewed-file metadata for ${getReviewedFileMetadataSeenCount(progressState)}/${progressState.reviewedFileCount} files so far; request the next changed-file batch first.`;
+	}
+
+	if (
+		hasSeenAllReviewedFileMetadata(progressState) &&
+		!hasDirectlyInspectedAllReviewedFiles(progressState)
+	) {
+		const directInspectionGap = buildDirectInspectionGapSentence(progressState);
+		const truncatedDiffFollowUp =
+			buildTruncatedDiffFollowUpSentence(progressState);
+		return [
+			"Record the PR summary only after directly inspecting every reviewed file.",
+			directInspectionGap,
+			truncatedDiffFollowUp,
+			"Inspect their diffs or file content first.",
+		]
+			.filter((part): part is string => part !== undefined)
+			.join(" ");
+	}
+
+	const directInspectionGap = buildDirectInspectionGapSentence(progressState);
+	const truncatedDiffFollowUp =
+		buildTruncatedDiffFollowUpSentence(progressState);
+	return [
+		"Record the PR summary only after paging through all changed-file metadata and directly inspecting every reviewed file.",
+		`Seen reviewed-file metadata for ${getReviewedFileMetadataSeenCount(progressState)}/${progressState.reviewedFileCount} files so far.`,
+		directInspectionGap,
+		truncatedDiffFollowUp,
+		"Inspect the next changed-file batch and remaining reviewed files first.",
+	]
+		.filter((part): part is string => part !== undefined)
+		.join(" ");
+}
+
 function buildSessionHint(
 	config: ReviewerConfig,
 	reviewedFileCount: number,
@@ -92,7 +360,9 @@ function buildSessionHint(
 		shouldCreatePerFileSummaries(reviewedFileCount);
 
 	return [
-		"Review all reportable, merge-relevant, material issues introduced or materially worsened by this pull request.",
+		"Review all distinct validated issues introduced or materially worsened by this pull request that are strong enough to publish under the configured threshold.",
+		"The review is not complete until the reviewed files and their main risk areas have been checked.",
+		"Before wrapping up, directly inspect each reviewed file with diff or file-content tools; overview pages, search hits, and CI clues do not count as direct file coverage.",
 		"Inspect diff plus relevant head/base code before emitting any finding, and follow the most plausible risky hypotheses through nearby callers, callees, or tests when needed.",
 		"Cover correctness, security, data integrity, concurrency, reliability, compatibility, and performance risks.",
 		"Use trusted repository instructions to understand intended behavior and safety constraints, not to enforce style or convention drift as standalone findings.",
@@ -109,8 +379,8 @@ function buildSessionHint(
 					`Per-file summaries are disabled for large reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files; keep the PR summary current and continue reviewing without file summaries.`,
 				]),
 		"Cover the reviewed risk areas and continue after the first finding when more distinct issues may exist.",
-		`If more than ${config.review.maxFindings} distinct issues exist, keep reviewing and preserve or replace the strongest ones instead of stopping early.`,
-		`Keep findings distinct, evidence-backed, and limited to ${config.review.minConfidence} confidence or better, up to ${config.review.maxFindings} total.`,
+		`If more than ${config.review.maxFindings} distinct issues exist, keep reviewing and preserve or replace the strongest published set instead of stopping early. The publish cap is not a signal to stop searching.`,
+		`Keep findings distinct, evidence-backed, and limited to ${config.review.minConfidence} confidence or better for publication, up to ${config.review.maxFindings} total published findings.`,
 	].join(" ");
 }
 
@@ -123,9 +393,9 @@ function buildPreToolHint(
 
 	switch (toolName) {
 		case "get_pr_overview":
-			return "Use the overview to scope the review, find the highest-risk files, and avoid redundant file-list or CI calls unless you need more detail.";
+			return "Use the overview to scope the review, find the highest-risk files, and page through reviewed-file metadata in manageable batches when the changed-file list is large.";
 		case "list_changed_files":
-			return "Use this only when you need a refreshed file list or skipped-file details beyond get_pr_overview; then start with the riskiest reviewed files and continue until meaningful reviewed changes are covered.";
+			return "Use this when you need a refreshed file list, skipped-file details, or another changed-file page beyond get_pr_overview; then keep moving through the reviewed files in batches until meaningful reviewed changes are covered.";
 		case "get_file_diff":
 			return "Study the exact changed lines and look for removed guards, altered control flow, or contract shifts.";
 		case "get_file_diff_hunk":
@@ -137,19 +407,19 @@ function buildPreToolHint(
 		case "get_related_file_content":
 			return "Read nearby files to confirm concrete hypotheses about impact, invariants, call paths, shared contracts, or additional affected paths.";
 		case "get_related_tests":
-			return "Use this to find likely nearby automated tests for a reviewed file before resorting to broader repository search.";
+			return "Use this to find likely nearby automated tests for a reviewed file and verify whether positive, negative, and edge-case coverage exists before resorting to broader repository search.";
 		case "search_text_in_repo":
 		case "search_symbol_name":
-			return "Search narrowly at first to validate suspected code paths, impacted call sites, shared contracts, or nearby tests. For auth, validation, persistence, serialization, async flow, or public interface changes, broaden with one or two more targeted searches if the first pass is inconclusive.";
+			return "Search to validate suspected code paths, impacted call sites, shared contracts, or nearby tests. For auth, validation, persistence, serialization, async flow, or public interface changes, keep iterating with additional targeted searches while critical paths remain unresolved.";
 		case "get_ci_summary":
 			return "Treat CI output as a prioritization hint, not proof of a reportable issue.";
 		case "record_pr_summary":
 			return perFileSummariesEnabled
-				? "Capture the PR's intended behavior change in one concise, evidence-backed summary once you understand the diff. Use short bullet points when the PR has a few distinct changes."
-				: `Capture the PR's intended behavior change in one concise, evidence-backed summary once you understand the diff. Use short bullet points when the PR has a few distinct changes. Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files.`;
+				? "Capture the PR's intended behavior change in one concise, evidence-backed summary after the main review coverage is complete. Use short bullet points when the PR has a few distinct changes."
+				: `Capture the PR's intended behavior change in one concise, evidence-backed summary after the main review coverage is complete. Use short bullet points when the PR has a few distinct changes. Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files.`;
 		case "record_file_summary":
 			return perFileSummariesEnabled
-				? "Record a short, concrete summary of what changed in a reviewed file once you have enough context to describe it accurately."
+				? "Record a short, concrete summary of what changed in a reviewed file after you have covered the main review work for that file."
 				: `Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files; do not use this tool.`;
 		case "list_recorded_findings":
 			return "Check recorded findings before adding more to avoid duplicates and confirm whether important reviewed areas still lack coverage.";
@@ -166,30 +436,79 @@ function buildPreToolHint(
 
 function buildPostToolHint(
 	toolName: ReviewToolName,
+	toolResult: ToolResultObject,
 	findingCount: number,
 	config: ReviewerConfig["review"],
-	reviewedFileCount: number,
+	progressState: ReviewProgressState,
 ): string {
+	const reviewedFileCount = progressState.reviewedFileCount;
 	const perFileSummariesEnabled =
 		shouldCreatePerFileSummaries(reviewedFileCount);
+	const reviewedFileMetadataProgress = `${getReviewedFileMetadataSeenCount(progressState)}/${reviewedFileCount}`;
+	const directlyInspectedReviewedFileProgress = `${getDirectlyInspectedReviewedFileCount(progressState)}/${reviewedFileCount}`;
 
 	switch (toolName) {
 		case "get_pr_overview":
-			return "Choose the most suspicious files from the overview, inspect their diffs, and only call list_changed_files or get_ci_summary if the overview left a concrete gap.";
+			if (!hasSeenAllReviewedFileMetadata(progressState)) {
+				return `Changed-file metadata seen: ${reviewedFileMetadataProgress}. Choose the most suspicious files from the current overview batch, inspect their diffs, and page to the next changed-file batch before recording the PR summary.`;
+			}
+
+			return appendDirectInspectionReminder(
+				`Changed-file metadata seen: ${reviewedFileMetadataProgress}. Choose the most suspicious files from the current overview batch and inspect unchecked reviewed files directly.`,
+				progressState,
+			);
 		case "list_changed_files":
-			return "Prioritize files touching validation, auth, persistence, async flow, serialization, and public interfaces; do not stop after one risky file.";
+			if (!hasSeenAllReviewedFileMetadata(progressState)) {
+				return `Changed-file metadata seen: ${reviewedFileMetadataProgress}. Prioritize files touching validation, auth, persistence, async flow, serialization, and public interfaces; keep paging until the full reviewed-file set has been seen before recording the PR summary.`;
+			}
+
+			return appendDirectInspectionReminder(
+				`Changed-file metadata seen: ${reviewedFileMetadataProgress}. Prioritize files touching validation, auth, persistence, async flow, serialization, and public interfaces; keep moving through unchecked reviewed files directly.`,
+				progressState,
+			);
 		case "get_file_diff":
-			return "If the diff looks risky, confirm the exact behavior in head/base code before deciding whether an issue exists.";
+			if (getTruncatedResult(toolResult)) {
+				return appendDirectInspectionReminder(
+					`Directly inspected reviewed files: ${directlyInspectedReviewedFileProgress}. This full diff is truncated, so this file does not count as fully inspected yet. Continue with get_file_diff_hunk or targeted file content until the changed behavior is clear before deciding whether an issue exists.`,
+					progressState,
+					false,
+				);
+			}
+
+			return appendDirectInspectionReminder(
+				`Directly inspected reviewed files: ${directlyInspectedReviewedFileProgress}. If the diff looks risky, confirm the exact behavior in head/base code before deciding whether an issue exists.`,
+				progressState,
+				false,
+			);
 		case "get_file_diff_hunk":
-			return "Continue with the next relevant hunk or matching code context until the file's meaningful changed behavior is covered; do not scan the repo unnecessarily.";
+			if (getTruncatedResult(toolResult)) {
+				return appendDirectInspectionReminder(
+					`Directly inspected reviewed files: ${directlyInspectedReviewedFileProgress}. This diff hunk is truncated, so this file does not count as fully inspected yet. Use targeted file content for the changed lines, and inspect additional relevant hunks if needed, until the changed behavior is clear before deciding whether an issue exists.`,
+					progressState,
+					false,
+				);
+			}
+
+			return appendDirectInspectionReminder(
+				`Directly inspected reviewed files: ${directlyInspectedReviewedFileProgress}. Continue with the next relevant hunk or matching code context until the file's meaningful changed behavior is covered; do not scan the repo unnecessarily.`,
+				progressState,
+				false,
+			);
 		case "get_file_content":
-			return "Do not emit a finding unless the inspected code supports a concrete, material issue introduced or materially worsened by the PR. If the changed file touches shared behavior or critical boundaries, inspect the most relevant nearby path before closing the hypothesis.";
+			return appendDirectInspectionReminder(
+				`Directly inspected reviewed files: ${directlyInspectedReviewedFileProgress}. Do not emit a finding unless the inspected code supports a concrete, material issue introduced or materially worsened by the PR. If the changed file touches shared behavior or critical boundaries, inspect the most relevant nearby path before closing the hypothesis.`,
+				progressState,
+				false,
+			);
 		case "get_file_list_by_directory":
 		case "get_related_file_content":
 		case "get_related_tests":
 		case "search_text_in_repo":
 		case "search_symbol_name":
-			return "Use this context to confirm or reject a specific hypothesis. If the first pass is inconclusive and the changed code touches auth, validation, persistence, serialization, async flow, or public interfaces, run one or two more targeted follow-up reads or searches before moving on. Stop once extra exploration stops sharpening the hypothesis.";
+			return appendDirectInspectionReminder(
+				"Use this context to confirm or reject a specific hypothesis. If the first pass is inconclusive and the changed code touches auth, validation, persistence, serialization, async flow, or public interfaces, keep iterating with targeted follow-up reads or searches until the main risky paths are resolved or ruled out.",
+				progressState,
+			);
 		case "get_ci_summary":
 			return "CI may explain where to look next, but you still need code-level evidence before reporting anything.";
 		case "record_pr_summary":
@@ -201,15 +520,30 @@ function buildPostToolHint(
 				? "Keep file summaries concrete and per-file; continue until all reviewed files have coverage."
 				: `Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files; continue reviewing without recording them.`;
 		case "list_recorded_findings":
-			return `Recorded findings: ${findingCount}/${config.maxFindings}. Avoid duplicates, but continue looking if reviewed risky areas remain unchecked.`;
+			return appendDirectInspectionReminder(
+				`Recorded findings: ${findingCount}/${config.maxFindings}. Avoid duplicates, use this list to spot coverage gaps, and continue looking if reviewed risky areas remain unchecked.`,
+				progressState,
+			);
 		case "remove_recorded_finding":
-			return `Recorded findings: ${findingCount}/${config.maxFindings}. Keep only distinct issues, then continue covering remaining risky reviewed changes.`;
+			return appendDirectInspectionReminder(
+				`Recorded findings: ${findingCount}/${config.maxFindings}. Keep only distinct issues, then continue covering remaining risky reviewed changes.`,
+				progressState,
+			);
 		case "replace_recorded_finding":
-			return `Recorded findings: ${findingCount}/${config.maxFindings}. Keep the strongest distinct set without stopping the review early.`;
+			return appendDirectInspectionReminder(
+				`Recorded findings: ${findingCount}/${config.maxFindings}. Keep the strongest distinct set without stopping the review early.`,
+				progressState,
+			);
 		case "emit_finding":
 			return findingCount >= config.maxFindings
-				? `You have reached the configured maximum of ${config.maxFindings} findings. Do not add more unless a clearly stronger issue replaces a weaker one.`
-				: `Findings recorded: ${findingCount}/${config.maxFindings}. Keep findings distinct and evidence-backed, then continue searching for additional validated issues.`;
+				? appendDirectInspectionReminder(
+						`You have reached the configured maximum of ${config.maxFindings} published findings. Do not add more unless a clearly stronger issue replaces a weaker one, but continue reviewing for any unchecked risky areas.`,
+						progressState,
+					)
+				: appendDirectInspectionReminder(
+						`Findings recorded: ${findingCount}/${config.maxFindings}. Keep findings distinct and evidence-backed, then continue with unchecked reviewed files, interfaces, and tests.`,
+						progressState,
+					);
 		default:
 			return "Keep findings distinct, evidence-backed, and continue until the reviewed risky changes have been covered.";
 	}
@@ -282,7 +616,99 @@ function getToolResultRecord(
 		return {};
 	}
 
+	const rawTextResult = toolResult.textResultForLlm;
+	if (typeof rawTextResult === "string" && rawTextResult.length > 0) {
+		try {
+			const parsed = JSON.parse(rawTextResult);
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				return parsed as Record<string, unknown>;
+			}
+		} catch {
+			// Non-JSON tool results are expected for string-returning tools.
+		}
+	}
+
 	return toolResult as Record<string, unknown>;
+}
+
+function getToolArgPath(toolArgs: unknown): string | undefined {
+	const record = getToolArgsRecord(toolArgs);
+	return typeof record.path === "string" ? record.path : undefined;
+}
+
+function getReviewedFilePathsFromToolResult(
+	toolResult: ToolResultObject,
+): string[] {
+	const record = getToolResultRecord(toolResult);
+	if (!Array.isArray(record.reviewedFiles)) {
+		return [];
+	}
+
+	return record.reviewedFiles.flatMap((entry) => {
+		if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+			return [];
+		}
+
+		const path = (entry as { path?: unknown }).path;
+		return typeof path === "string" ? [path] : [];
+	});
+}
+
+function updateReviewCoverageProgress(
+	input: PostToolUseInput,
+	progressState: ReviewProgressState,
+): void {
+	if (
+		!isReviewToolName(input.toolName) ||
+		input.toolResult.resultType !== "success"
+	) {
+		return;
+	}
+
+	switch (input.toolName) {
+		case "get_pr_overview":
+		case "list_changed_files": {
+			const seenPaths = getReviewedFileMetadataSeenPaths(progressState);
+			for (const path of getReviewedFilePathsFromToolResult(input.toolResult)) {
+				if (isTrackedReviewedFilePath(progressState, path)) {
+					seenPaths.add(path);
+				}
+			}
+			return;
+		}
+		case "get_file_diff": {
+			const path = getToolArgPath(input.toolArgs);
+			if (path && isTrackedReviewedFilePath(progressState, path)) {
+				if (getTruncatedResult(input.toolResult)) {
+					markReviewedFileAsPendingTruncatedDiffFollowUp(progressState, path);
+				} else {
+					markReviewedFileAsDirectlyInspected(progressState, path);
+				}
+			}
+			return;
+		}
+		case "get_file_diff_hunk": {
+			const path = getToolArgPath(input.toolArgs);
+			if (path && isTrackedReviewedFilePath(progressState, path)) {
+				if (getTruncatedResult(input.toolResult)) {
+					markReviewedFileAsPendingTruncatedDiffFollowUp(progressState, path);
+				} else {
+					markReviewedFileAsDirectlyInspected(progressState, path);
+				}
+			}
+			return;
+		}
+		case "get_file_content":
+		case "get_related_file_content": {
+			const path = getToolArgPath(input.toolArgs);
+			if (path && isTrackedReviewedFilePath(progressState, path)) {
+				markReviewedFileAsDirectlyInspected(progressState, path);
+			}
+			return;
+		}
+		default:
+			return;
+	}
 }
 
 function describeLoggedDirectories(value: unknown): string | undefined {
@@ -452,6 +878,8 @@ function buildProgressFields(
 
 	return [
 		`findings=${drafts.length}/${config.review.maxFindings}`,
+		`reviewed_file_metadata=${getReviewedFileMetadataSeenCount(progressState)}/${progressState.reviewedFileCount}`,
+		`inspected_reviewed_files=${getDirectlyInspectedReviewedFileCount(progressState)}/${progressState.reviewedFileCount}`,
 		fileSummaryProgress,
 		`pr_summary=${progressState.summaryDrafts.prSummary ? "recorded" : "missing"}`,
 	];
@@ -595,6 +1023,9 @@ export function createReviewSessionHooks(
 		summaryDrafts: { fileSummaries: [] },
 		toolTelemetry: createEmptyReviewToolTelemetry(),
 		toolStartedAtMsByName: new Map(),
+		reviewedFileMetadataSeenPaths: new Set(),
+		directlyInspectedReviewedFilePaths: new Set(),
+		truncatedDiffReviewedFilePaths: new Set(),
 	},
 ) {
 	return {
@@ -618,6 +1049,19 @@ export function createReviewSessionHooks(
 				return {
 					permissionDecision: "deny" as const,
 					permissionDecisionReason: `Tool ${input.toolName} is not allowed in CI review mode.`,
+				};
+			}
+
+			if (
+				input.toolName === "record_pr_summary" &&
+				(!hasSeenAllReviewedFileMetadata(progressState) ||
+					!hasDirectlyInspectedAllReviewedFiles(progressState))
+			) {
+				toolTelemetry.totalDenied += 1;
+				getToolTelemetryCounter(toolTelemetry, input.toolName).denied += 1;
+				return {
+					permissionDecision: "deny" as const,
+					permissionDecisionReason: buildPendingPrSummaryReason(progressState),
 				};
 			}
 
@@ -664,6 +1108,7 @@ export function createReviewSessionHooks(
 			const resultType = input.toolResult.resultType;
 			counter.resultCounts[resultType] =
 				(counter.resultCounts[resultType] ?? 0) + 1;
+			updateReviewCoverageProgress(input, progressState);
 
 			logger.info(
 				buildPostToolLogMessage(input, config, drafts, progressState),
@@ -678,9 +1123,10 @@ export function createReviewSessionHooks(
 			return {
 				additionalContext: buildPostToolHint(
 					input.toolName,
+					input.toolResult,
 					drafts.length,
 					config.review,
-					progressState.reviewedFileCount,
+					progressState,
 				),
 			};
 		},
@@ -765,6 +1211,9 @@ export async function runCopilotReview(
 		},
 		hooks: createReviewSessionHooks(config, logger, drafts, {
 			reviewedFileCount: context.reviewedFiles.length,
+			reviewedFilePaths: new Set(
+				context.reviewedFiles.map((file) => file.path),
+			),
 			summaryDrafts,
 			toolTelemetry,
 		}),
