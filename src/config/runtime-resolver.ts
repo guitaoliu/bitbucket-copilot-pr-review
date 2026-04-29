@@ -21,6 +21,7 @@ type RuntimeTopLevelKey =
 	| "repoRoot"
 	| "gitRemoteName"
 	| "logLevel"
+	| "githubHost"
 	| "ciSummaryPath";
 type RuntimeEnvFieldKey = {
 	[K in keyof typeof CONFIG_FIELD_METADATA]: (typeof CONFIG_FIELD_METADATA)[K] extends {
@@ -183,6 +184,7 @@ const TOP_LEVEL_RUNTIME_RESOLVERS: RuntimeTopLevelResolvers = {
 		parsedEnv.GIT_REMOTE_NAME ?? REVIEWER_CONFIG_DEFAULTS.gitRemoteName,
 	logLevel: (parsedEnv) =>
 		parsedEnv.LOG_LEVEL ?? REVIEWER_CONFIG_DEFAULTS.logLevel,
+	githubHost: (parsedEnv) => parsedEnv.GH_HOST,
 	ciSummaryPath: (parsedEnv) => parsedEnv.CI_SUMMARY_PATH,
 };
 
@@ -323,7 +325,7 @@ function resolveTopLevelConfig(
 	cliOptions: ReviewCliOptions,
 ): Pick<
 	ReviewerConfig,
-	"repoRoot" | "gitRemoteName" | "logLevel" | "ciSummaryPath"
+	"repoRoot" | "gitRemoteName" | "logLevel" | "githubHost" | "ciSummaryPath"
 > {
 	const repoRoot = TOP_LEVEL_RUNTIME_RESOLVERS.repoRoot(parsedEnv, cliOptions);
 	const gitRemoteName = TOP_LEVEL_RUNTIME_RESOLVERS.gitRemoteName(
@@ -331,6 +333,10 @@ function resolveTopLevelConfig(
 		cliOptions,
 	);
 	const logLevel = TOP_LEVEL_RUNTIME_RESOLVERS.logLevel(parsedEnv, cliOptions);
+	const githubHost = TOP_LEVEL_RUNTIME_RESOLVERS.githubHost(
+		parsedEnv,
+		cliOptions,
+	);
 	const ciSummaryPath = TOP_LEVEL_RUNTIME_RESOLVERS.ciSummaryPath(
 		parsedEnv,
 		cliOptions,
@@ -340,6 +346,7 @@ function resolveTopLevelConfig(
 		repoRoot,
 		gitRemoteName,
 		logLevel,
+		...(githubHost !== undefined ? { githubHost } : {}),
 		...(ciSummaryPath !== undefined ? { ciSummaryPath } : {}),
 	};
 }
@@ -350,7 +357,7 @@ export function resolveRuntimeConfigGroups(
 ): Pick<ReviewerConfig, "bitbucket" | "copilot" | "report" | "review"> &
 	Pick<
 		ReviewerConfig,
-		"repoRoot" | "gitRemoteName" | "logLevel" | "ciSummaryPath"
+		"repoRoot" | "gitRemoteName" | "logLevel" | "githubHost" | "ciSummaryPath"
 	> {
 	const groups: Record<RuntimeGroup, Record<string, unknown>> = {
 		bitbucket: {},

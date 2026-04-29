@@ -53,6 +53,7 @@ export interface ReviewerConfig {
 	repoRoot: string;
 	gitRemoteName: string;
 	logLevel: LogLevel;
+	githubHost?: string | undefined;
 	bitbucket: {
 		baseUrl: string;
 		projectKey: string;

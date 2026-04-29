@@ -96,7 +96,7 @@ function buildWorkerEnvironment(
 	config: BatchReviewConfig,
 	workspaceRoot: string,
 ): NodeJS.ProcessEnv {
-	return {
+	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		REPO_ROOT: workspaceRoot,
 		GIT_REMOTE_NAME: config.gitRemoteName,
@@ -104,6 +104,14 @@ function buildWorkerEnvironment(
 		REVIEW_FORCE: config.review.forceReview ? "1" : "0",
 		BITBUCKET_INSECURE_TLS: config.bitbucket.tls.insecureSkipVerify ? "1" : "0",
 	};
+
+	if (config.githubHost !== undefined) {
+		env.GH_HOST = config.githubHost;
+	} else {
+		delete env.GH_HOST;
+	}
+
+	return env;
 }
 
 function appendTruncatedBuffer(
@@ -256,7 +264,7 @@ async function runWorkerForPullRequest(
 	return output;
 }
 
-export { runWorkerForPullRequest };
+export { buildWorkerEnvironment, runWorkerForPullRequest };
 
 async function executePullRequestReview(options: {
 	config: BatchReviewConfig;

@@ -66,6 +66,15 @@ describe("parseEnvironment", () => {
 		assert.deepEqual(env.REVIEW_IGNORE_PATHS, ["a/**", "b/**"]);
 	});
 
+	it("normalizes GH_HOST from a GitHub Enterprise Cloud URL", () => {
+		const env = parseEnvironment({
+			BITBUCKET_TOKEN: "token",
+			GH_HOST: "https://tenant.ghe.com",
+		});
+
+		assert.equal(env.GH_HOST, "tenant.ghe.com");
+	});
+
 	it("keeps metadata-backed enum validation errors", () => {
 		assert.throws(
 			() =>
@@ -74,6 +83,17 @@ describe("parseEnvironment", () => {
 					LOG_LEVEL: "verbose",
 				}),
 			new RegExp(`${CONFIG_FIELD_METADATA.logLevel.env} must be one of:`),
+		);
+	});
+
+	it("rejects malformed GH_HOST values", () => {
+		assert.throws(
+			() =>
+				parseEnvironment({
+					BITBUCKET_TOKEN: "token",
+					GH_HOST: "tenant.ghe.com/settings",
+				}),
+			/without any path, query, or hash/,
 		);
 	});
 
@@ -296,6 +316,24 @@ describe("resolveRuntimeConfigGroups", () => {
 		assert.equal(resolved.logLevel, "warn");
 		assert.equal(resolved.ciSummaryPath, "/tmp/summary.txt");
 	});
+
+	it("resolves GH_HOST as a top-level runtime setting", () => {
+		const env = parseEnvironment({
+			BITBUCKET_TOKEN: "token",
+			GH_HOST: "tenant.ghe.com",
+		});
+
+		const resolved = resolveRuntimeConfigGroups(env, {
+			command: "review",
+			pullRequestUrl,
+			dryRun: false,
+			forceReview: false,
+			confirmRerun: false,
+			help: false,
+		});
+
+		assert.equal(resolved.githubHost, "tenant.ghe.com");
+	});
 });
 
 describe("resolveBitbucketAuth", () => {
@@ -371,6 +409,15 @@ describe("loadConfig feature flags", () => {
 		assert.equal(config.review.forceReview, false);
 		assert.equal(config.review.confirmRerun, false);
 		assert.equal(config.review.maxFiles, 300);
+	});
+
+	it("loads GH_HOST into the direct review config", () => {
+		const config = loadConfig(["review", pullRequestUrl], {
+			BITBUCKET_TOKEN: "token",
+			GH_HOST: "tenant.ghe.com",
+		});
+
+		assert.equal(config.githubHost, "tenant.ghe.com");
 	});
 
 	it("keeps strict TLS enabled by default in batch mode", () => {
@@ -504,6 +551,15 @@ describe("loadBatchConfig", () => {
 		assert.equal(config.gitRemoteName, "upstream");
 		assert.equal(config.logLevel, "debug");
 		assert.equal(config.review.forceReview, true);
+	});
+
+	it("loads GH_HOST into the batch config", () => {
+		const config = loadBatchConfig(["batch", repositoryUrl], {
+			BITBUCKET_TOKEN: "token",
+			GH_HOST: "tenant.ghe.com",
+		});
+
+		assert.equal(config.githubHost, "tenant.ghe.com");
 	});
 
 	it("reads batch skip branch prefixes from env", () => {

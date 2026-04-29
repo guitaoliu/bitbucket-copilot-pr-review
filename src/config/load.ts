@@ -66,6 +66,9 @@ export function loadConfig(
 		repoRoot: runtimeGroups.repoRoot,
 		gitRemoteName: runtimeGroups.gitRemoteName,
 		logLevel: runtimeGroups.logLevel,
+		...(runtimeGroups.githubHost !== undefined
+			? { githubHost: runtimeGroups.githubHost }
+			: {}),
 		bitbucket: resolveBitbucketConfig({
 			location: pullRequestLocation,
 			env: parsedEnv,
@@ -125,6 +128,9 @@ export function loadBatchConfig(
 		gitRemoteName:
 			parsedEnv.GIT_REMOTE_NAME ?? REVIEWER_CONFIG_DEFAULTS.gitRemoteName,
 		logLevel: parsedEnv.LOG_LEVEL ?? REVIEWER_CONFIG_DEFAULTS.logLevel,
+		...(parsedEnv.GH_HOST !== undefined
+			? { githubHost: parsedEnv.GH_HOST }
+			: {}),
 		bitbucket: {
 			baseUrl: repositoryLocation.baseUrl,
 			projectKey: repositoryLocation.projectKey,

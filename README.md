@@ -30,6 +30,8 @@ In practice, that usually means one of these is already set up before you run th
 - an existing Copilot CLI login
 - a supported GitHub token environment variable recognized by the Copilot SDK
 
+If your Copilot account is on GitHub Enterprise Cloud with data residency (`*.ghe.com`), also set `GH_HOST` to that hostname before running the reviewer, for example `GH_HOST=mycompany.ghe.com`.
+
 See `docs/operations.md` for the operator-focused details and the upstream SDK auth reference.
 
 ## Use With npx

@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { Logger } from "../shared/logger.ts";
-import { runBatchReview } from "./runner.ts";
+import { buildWorkerEnvironment, runBatchReview } from "./runner.ts";
 import type { BatchReviewConfig } from "./types.ts";
 
 const logger: Logger = {
@@ -72,6 +72,48 @@ function createPullRequest(id: number, title: string): PullRequestInfo {
 }
 
 describe("runBatchReview", () => {
+	it("passes GH_HOST through to review workers when configured", () => {
+		const originalGhHost = process.env.GH_HOST;
+
+		process.env.GH_HOST = "ambient.github.example";
+
+		try {
+			const env = buildWorkerEnvironment(
+				{
+					...baseConfig,
+					githubHost: "tenant.ghe.com",
+				},
+				"/tmp/workspaces/123",
+			);
+
+			assert.equal(env.GH_HOST, "tenant.ghe.com");
+		} finally {
+			if (originalGhHost === undefined) {
+				delete process.env.GH_HOST;
+			} else {
+				process.env.GH_HOST = originalGhHost;
+			}
+		}
+	});
+
+	it("drops ambient GH_HOST when the batch config does not set one", () => {
+		const originalGhHost = process.env.GH_HOST;
+
+		process.env.GH_HOST = "ambient.github.example";
+
+		try {
+			const env = buildWorkerEnvironment(baseConfig, "/tmp/workspaces/123");
+
+			assert.equal(env.GH_HOST, undefined);
+		} finally {
+			if (originalGhHost === undefined) {
+				delete process.env.GH_HOST;
+			} else {
+				process.env.GH_HOST = originalGhHost;
+			}
+		}
+	});
+
 	it("returns an empty summary when there are no open pull requests", async () => {
 		const output = await runBatchReview(baseConfig, logger, {
 			createRepositoryClient: () => ({

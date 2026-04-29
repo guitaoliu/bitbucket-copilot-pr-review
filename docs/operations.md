@@ -14,6 +14,8 @@ This guide collects the implementation and operator detail that is intentionally
 - `BITBUCKET_TOKEN` is the default Bitbucket Data Center credential
 - if your Bitbucket environment requires basic auth, set `BITBUCKET_USERNAME`, `BITBUCKET_PASSWORD`, and `BITBUCKET_AUTH_TYPE=basic`
 - Copilot authentication is resolved by the GitHub Copilot SDK; you can rely on an existing `copilot` CLI login, `gh auth` credentials, or any supported GitHub token environment variable already understood by the SDK
+- for GitHub Enterprise Cloud data residency hosts (`*.ghe.com`), set `GH_HOST` to the GitHub hostname you authenticate against, for example `tenant.ghe.com`
+- if you need to create or refresh a Copilot login for that host, run `copilot login --host https://tenant.ghe.com` before running the reviewer
 
 Official Copilot SDK auth docs: <https://github.com/github/copilot-sdk/blob/main/docs/auth/index.md>
 
@@ -94,6 +96,7 @@ Bitbucket repository URL, for example https://host/projects/PROJ/repos/my-repo.
 | `REPO_ROOT` | current working directory | Path to the repository under review. |
 | `GIT_REMOTE_NAME` | `origin` | Git remote name used to fetch PR commits. |
 | `LOG_LEVEL` | `info` | Logger verbosity. |
+| `GH_HOST` | `github.com` | GitHub host used for Copilot authentication and API requests, for example `mycompany.ghe.com`. |
 | `BITBUCKET_AUTH_TYPE` | auto-detected from provided credentials | Bitbucket authentication strategy. |
 | `BITBUCKET_CA_CERT_PATH` | - | PEM CA bundle path for Bitbucket TLS. |
 | `BITBUCKET_INSECURE_TLS` | `false` | Disable TLS certificate verification for Bitbucket (not recommended). |

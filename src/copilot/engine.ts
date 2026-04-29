@@ -555,11 +555,19 @@ export function buildCopilotClientOptions(
 ): CopilotClientOptions {
 	const clientLogLevel: CopilotClientOptions["logLevel"] =
 		config.logLevel === "debug" ? "debug" : "error";
+	const copilotEnvironment =
+		config.githubHost !== undefined
+			? {
+					...process.env,
+					GH_HOST: config.githubHost,
+				}
+			: undefined;
 
 	return omitUndefined({
 		cwd: config.repoRoot,
 		logLevel: clientLogLevel,
 		cliPath: resolveCliPath(),
+		env: copilotEnvironment,
 	}) satisfies CopilotClientOptions;
 }
 

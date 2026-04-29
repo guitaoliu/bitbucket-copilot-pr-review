@@ -50,6 +50,9 @@ export type ConfigFieldEnvParser =
 			kind: "string";
 	  }
 	| {
+			kind: "host";
+	  }
+	| {
 			kind: "enum";
 			values: readonly [string, ...string[]];
 	  }
@@ -66,18 +69,20 @@ export type ConfigFieldEnvParser =
 export type ConfigFieldEnvValue<TParser extends ConfigFieldEnvParser> =
 	TParser extends { kind: "string" }
 		? string | undefined
-		: TParser extends {
-					kind: "enum";
-					values: readonly [string, ...string[]];
-				}
-			? TParser["values"][number] | undefined
-			: TParser extends { kind: "positiveInteger" }
-				? number | undefined
-				: TParser extends { kind: "boolean" }
-					? boolean | undefined
-					: TParser extends { kind: "stringArray" }
-						? string[] | undefined
-						: never;
+		: TParser extends { kind: "host" }
+			? string | undefined
+			: TParser extends {
+						kind: "enum";
+						values: readonly [string, ...string[]];
+					}
+				? TParser["values"][number] | undefined
+				: TParser extends { kind: "positiveInteger" }
+					? number | undefined
+					: TParser extends { kind: "boolean" }
+						? boolean | undefined
+						: TParser extends { kind: "stringArray" }
+							? string[] | undefined
+							: never;
 
 export type EnvConfigFieldMetadata<
 	TParser extends ConfigFieldEnvParser = ConfigFieldEnvParser,
@@ -190,6 +195,14 @@ export const CONFIG_FIELD_METADATA = {
 		description: "Logger verbosity.",
 		...envParser({ kind: "enum", values: LOG_LEVEL_VALUES }),
 		...envDoc(11, { defaultValuePath: ["logLevel"] }),
+	},
+	githubHost: {
+		path: "githubHost",
+		env: "GH_HOST",
+		description:
+			"GitHub host used for Copilot authentication and API requests, for example `mycompany.ghe.com`.",
+		...envParser({ kind: "host" }),
+		...envDoc(11.5, { defaultText: "`github.com`" }),
 	},
 	bitbucketAuthType: {
 		path: "bitbucket.auth.type",

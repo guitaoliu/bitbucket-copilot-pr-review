@@ -24,6 +24,7 @@ export interface BatchReviewConfig {
 	keepWorkdirs: boolean;
 	gitRemoteName: string;
 	logLevel: LogLevel;
+	githubHost?: string | undefined;
 	bitbucket: BatchReviewBitbucketConfig;
 	review: {
 		dryRun: boolean;

@@ -35,6 +35,10 @@ describe("buildConfigReferenceMarkdown", () => {
 			markdown,
 			/`BITBUCKET_INSECURE_TLS` \| `false` \| Disable TLS certificate verification for Bitbucket \(not recommended\)\./,
 		);
+		assert.match(
+			markdown,
+			/`GH_HOST` \| `github\.com` \| GitHub host used for Copilot authentication and API requests, for example `mycompany\.ghe\.com`\./,
+		);
 		assert.doesNotMatch(markdown, /`COPILOT_GITHUB_TOKEN`/);
 		assert.match(markdown, /Argument: `<pull-request-url>`/);
 		assert.match(markdown, /Argument: `<repository-url>`/);

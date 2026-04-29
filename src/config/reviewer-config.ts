@@ -77,6 +77,7 @@ export const reviewerConfigSchema = z
 		repoRoot: z.string().min(1),
 		gitRemoteName: z.string().min(1),
 		logLevel: z.enum(LOG_LEVEL_VALUES),
+		githubHost: z.string().min(1).optional(),
 		bitbucket: z
 			.object({
 				baseUrl: z.string().min(1),

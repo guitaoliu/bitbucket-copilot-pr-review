@@ -1228,6 +1228,18 @@ describe("buildCopilotClientOptions", () => {
 		assert.equal("useLoggedInUser" in options, false);
 		assert.equal("githubToken" in options, false);
 	});
+
+	it("passes GH_HOST through the SDK environment when configured", () => {
+		const options = buildCopilotClientOptions(
+			{
+				...config,
+				githubHost: "tenant.ghe.com",
+			},
+			() => "/tmp/node_modules/@github/copilot/index.js",
+		);
+
+		assert.equal(options.env?.GH_HOST, "tenant.ghe.com");
+	});
 });
 
 describe("runCopilotReview", () => {

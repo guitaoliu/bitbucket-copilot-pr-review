@@ -73,6 +73,63 @@ function buildEnvString(_name: string) {
 	});
 }
 
+function normalizeHostValue(
+	name: string,
+	value: string,
+	ctx: z.RefinementCtx,
+): string {
+	const addIssue = (message: string) => {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			message,
+		});
+		return z.NEVER;
+	};
+
+	try {
+		const parsed = value.includes("://")
+			? new URL(value)
+			: new URL(`https://${value}`);
+
+		if (
+			parsed.protocol !== "http:" &&
+			parsed.protocol !== "https:" &&
+			value.includes("://")
+		) {
+			return addIssue(`${name} must use http or https when provided as a URL.`);
+		}
+
+		if (
+			parsed.host.length === 0 ||
+			parsed.username.length > 0 ||
+			parsed.password.length > 0 ||
+			(parsed.pathname !== "" && parsed.pathname !== "/") ||
+			parsed.search.length > 0 ||
+			parsed.hash.length > 0
+		) {
+			return addIssue(
+				`${name} must be a hostname like github.com or mycompany.ghe.com, without any path, query, or hash.`,
+			);
+		}
+
+		return parsed.host;
+	} catch {
+		return addIssue(
+			`${name} must be a hostname like github.com or mycompany.ghe.com.`,
+		);
+	}
+}
+
+function buildEnvHost(name: string) {
+	return optionalEnvString().transform((value, ctx): string | undefined => {
+		if (value === undefined) {
+			return undefined;
+		}
+
+		return normalizeHostValue(name, value, ctx);
+	});
+}
+
 function buildEnvEnum<TValues extends readonly [string, ...string[]]>(
 	name: string,
 	values: TValues,
@@ -164,6 +221,8 @@ function buildEnvValueSchema(field: EnvConfigFieldMetadata): z.ZodType {
 	switch (field.envParser.kind) {
 		case "string":
 			return buildEnvString(field.env);
+		case "host":
+			return buildEnvHost(field.env);
 		case "enum":
 			return buildEnvEnum(field.env, field.envParser.values);
 		case "positiveInteger":
