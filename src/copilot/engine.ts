@@ -1,3 +1,6 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 import type {
 	CopilotClientOptions,
 	CopilotSession,
@@ -33,6 +36,8 @@ import {
 } from "./review-guidance.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
 import { createSessionEventTracer } from "./trace.ts";
+
+const execFileAsync = promisify(execFile);
 
 type ReviewToolName = (typeof REVIEW_TOOL_NAMES)[number];
 
@@ -73,6 +78,10 @@ type ReviewProgressState = {
 export interface RunCopilotReviewDependencies {
 	resolveCliPath?: () => string;
 	createCopilotClient?: (options: CopilotClientOptions) => CopilotClientLike;
+	resolveGitHubToken?: (
+		config: ReviewerConfig,
+		logger: Logger,
+	) => Promise<string | undefined>;
 	createReviewSession?: (input: {
 		client: CopilotClientLike;
 		config: ReviewerConfig;
@@ -201,6 +210,139 @@ function getUncheckedReviewedFilePaths(
 }
 
 const MAX_UNCHECKED_REVIEWED_FILE_HINTS = 3;
+
+type ExecFileAsyncLike = (
+	file: string,
+	args: readonly string[],
+	options: {
+		cwd?: string;
+		env?: NodeJS.ProcessEnv;
+		encoding?: BufferEncoding;
+		maxBuffer?: number;
+		windowsHide?: boolean;
+	},
+) => Promise<{
+	stdout: string | Buffer;
+	stderr: string | Buffer;
+}>;
+
+type ResolvedGitHubToken = {
+	token: string;
+	source:
+		| "COPILOT_GITHUB_TOKEN"
+		| "GH_TOKEN"
+		| "GITHUB_TOKEN"
+		| "gh auth token";
+};
+
+const GITHUB_TOKEN_ENV_NAMES = [
+	"COPILOT_GITHUB_TOKEN",
+	"GH_TOKEN",
+	"GITHUB_TOKEN",
+] as const;
+
+function getGitHubTokenFromEnvironment(
+	env: NodeJS.ProcessEnv,
+	envNames: readonly (typeof GITHUB_TOKEN_ENV_NAMES)[number][],
+): ResolvedGitHubToken | undefined {
+	for (const envName of envNames) {
+		const rawValue = env[envName];
+		if (typeof rawValue !== "string") {
+			continue;
+		}
+
+		const token = rawValue.trim();
+		if (token.length === 0) {
+			continue;
+		}
+
+		return { token, source: envName };
+	}
+
+	return undefined;
+}
+
+function normalizeCommandOutput(value: string | Buffer): string | undefined {
+	const normalized =
+		typeof value === "string" ? value.trim() : value.toString("utf8").trim();
+	return normalized.length > 0 ? normalized : undefined;
+}
+
+export async function resolveCopilotGitHubToken(
+	config: ReviewerConfig,
+	logger: Logger,
+	dependencies: {
+		env?: NodeJS.ProcessEnv;
+		execFileAsync?: ExecFileAsyncLike;
+	} = {},
+): Promise<string | undefined> {
+	if (config.githubHost === undefined) {
+		return undefined;
+	}
+
+	const env = dependencies.env ?? process.env;
+	const explicitEnvToken = getGitHubTokenFromEnvironment(env, [
+		"COPILOT_GITHUB_TOKEN",
+	]);
+	if (explicitEnvToken) {
+		logger.debug("Resolved GitHub token for configured Copilot host", {
+			githubHost: config.githubHost,
+			source: explicitEnvToken.source,
+		});
+		return explicitEnvToken.token;
+	}
+
+	const runExecFile = dependencies.execFileAsync ?? execFileAsync;
+	try {
+		const { stdout } = await runExecFile(
+			"gh",
+			["auth", "token", "--hostname", config.githubHost],
+			{
+				cwd: config.repoRoot,
+				env,
+				encoding: "utf8",
+				maxBuffer: 1024 * 1024,
+				windowsHide: true,
+			},
+		);
+		const token = normalizeCommandOutput(stdout);
+		if (token) {
+			logger.debug("Resolved GitHub token for configured Copilot host", {
+				githubHost: config.githubHost,
+				source: "gh auth token",
+			});
+			return token;
+		}
+	} catch (error) {
+		logger.debug(
+			"Unable to resolve GitHub token from GitHub CLI for configured Copilot host",
+			{
+				githubHost: config.githubHost,
+				error: error instanceof Error ? error.message : String(error),
+			},
+		);
+	}
+
+	const fallbackEnvToken = getGitHubTokenFromEnvironment(env, [
+		"GH_TOKEN",
+		"GITHUB_TOKEN",
+	]);
+	if (fallbackEnvToken) {
+		logger.debug("Resolved GitHub token for configured Copilot host", {
+			githubHost: config.githubHost,
+			source: fallbackEnvToken.source,
+		});
+		return fallbackEnvToken.token;
+	}
+
+	logger.debug(
+		"No explicit GitHub token resolved for configured Copilot host; falling back to Copilot CLI login",
+		{
+			githubHost: config.githubHost,
+		},
+	);
+	return undefined;
+}
 
 function buildTruncatedDiffFollowUpSentence(
 	progressState: ReviewProgressState,
@@ -552,6 +694,7 @@ function buildPostToolHint(
 export function buildCopilotClientOptions(
 	config: ReviewerConfig,
 	resolveCliPath: () => string = resolveBundledCopilotCliPath,
+	gitHubToken?: string,
 ): CopilotClientOptions {
 	const clientLogLevel: CopilotClientOptions["logLevel"] =
 		config.logLevel === "debug" ? "debug" : "error";
@@ -559,6 +702,7 @@ export function buildCopilotClientOptions(
 		config.githubHost !== undefined
 			? {
 					...process.env,
+					COPILOT_GH_HOST: config.githubHost,
 					GH_HOST: config.githubHost,
 				}
 			: undefined;
@@ -568,6 +712,8 @@ export function buildCopilotClientOptions(
 		logLevel: clientLogLevel,
 		cliPath: resolveCliPath(),
 		env: copilotEnvironment,
+		gitHubToken,
+		useLoggedInUser: gitHubToken !== undefined ? false : undefined,
 	}) satisfies CopilotClientOptions;
 }
 
@@ -1195,9 +1341,14 @@ export async function runCopilotReview(
 	const summaryDrafts: ReviewSummaryDrafts = { fileSummaries: [] };
 	const toolTelemetry = createEmptyReviewToolTelemetry();
 	const reviewStartedAt = Date.now();
+	const gitHubToken = await (dependencies.resolveGitHubToken?.(
+		config,
+		logger,
+	) ?? resolveCopilotGitHubToken(config, logger));
 	const clientOptions = buildCopilotClientOptions(
 		config,
 		dependencies.resolveCliPath,
+		gitHubToken,
 	);
 	const sessionEventTracer = createSessionEventTracer(logger);
 

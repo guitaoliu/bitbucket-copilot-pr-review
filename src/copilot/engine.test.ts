@@ -14,6 +14,7 @@ import {
 	buildCopilotClientOptions,
 	createEmptyReviewToolTelemetry,
 	createReviewSessionHooks,
+	resolveCopilotGitHubToken,
 	runCopilotReview,
 } from "./engine.ts";
 import { buildSystemMessage } from "./prompt.ts";
@@ -1211,7 +1212,7 @@ describe("buildCopilotClientOptions", () => {
 		assert.equal(options.cwd, config.repoRoot);
 		assert.equal(options.logLevel, "error");
 		assert.equal("useLoggedInUser" in options, false);
-		assert.equal("githubToken" in options, false);
+		assert.equal("gitHubToken" in options, false);
 	});
 
 	it("passes the debug log level through without overriding SDK auth", () => {
@@ -1226,7 +1227,7 @@ describe("buildCopilotClientOptions", () => {
 		assert.equal(options.cliPath, "/tmp/node_modules/@github/copilot/index.js");
 		assert.equal(options.logLevel, "debug");
 		assert.equal("useLoggedInUser" in options, false);
-		assert.equal("githubToken" in options, false);
+		assert.equal("gitHubToken" in options, false);
 	});
 
 	it("passes GH_HOST through the SDK environment when configured", () => {
@@ -1238,7 +1239,110 @@ describe("buildCopilotClientOptions", () => {
 			() => "/tmp/node_modules/@github/copilot/index.js",
 		);
 
+		assert.equal(options.env?.COPILOT_GH_HOST, "tenant.ghe.com");
 		assert.equal(options.env?.GH_HOST, "tenant.ghe.com");
+	});
+
+	it("uses explicit token auth when a GitHub token is resolved", () => {
+		const options = buildCopilotClientOptions(
+			{
+				...config,
+				githubHost: "tenant.ghe.com",
+			},
+			() => "/tmp/node_modules/@github/copilot/index.js",
+			"gho_test-token",
+		);
+
+		assert.equal(options.gitHubToken, "gho_test-token");
+		assert.equal(options.useLoggedInUser, false);
+		assert.equal(options.env?.COPILOT_GH_HOST, "tenant.ghe.com");
+		assert.equal(options.env?.GH_HOST, "tenant.ghe.com");
+	});
+});
+
+describe("resolveCopilotGitHubToken", () => {
+	it("returns undefined when no GitHub host is configured", async () => {
+		const logSpy = createLoggerSpy();
+
+		const token = await resolveCopilotGitHubToken(config, logSpy.logger);
+
+		assert.equal(token, undefined);
+		assert.deepEqual(logSpy.infoEntries, []);
+		assert.deepEqual(logSpy.warnEntries, []);
+	});
+
+	it("prefers COPILOT_GITHUB_TOKEN from the environment", async () => {
+		const logSpy = createLoggerSpy();
+
+		const token = await resolveCopilotGitHubToken(
+			{
+				...config,
+				githubHost: "tenant.ghe.com",
+			},
+			logSpy.logger,
+			{
+				env: {
+					COPILOT_GITHUB_TOKEN: "gho_explicit",
+				},
+				execFileAsync: async () => {
+					throw new Error("execFileAsync should not be called");
+				},
+			},
+		);
+
+		assert.equal(token, "gho_explicit");
+	});
+
+	it("uses GitHub CLI auth for the configured host when no explicit env token exists", async () => {
+		const logSpy = createLoggerSpy();
+
+		const token = await resolveCopilotGitHubToken(
+			{
+				...config,
+				githubHost: "tenant.ghe.com",
+			},
+			logSpy.logger,
+			{
+				env: {},
+				execFileAsync: async (file, args) => {
+					assert.equal(file, "gh");
+					assert.deepEqual(args, [
+						"auth",
+						"token",
+						"--hostname",
+						"tenant.ghe.com",
+					]);
+					return {
+						stdout: "gho_host-token\n",
+						stderr: "",
+					};
+				},
+			},
+		);
+
+		assert.equal(token, "gho_host-token");
+	});
+
+	it("falls back to GH_TOKEN or GITHUB_TOKEN when GitHub CLI auth is unavailable", async () => {
+		const logSpy = createLoggerSpy();
+
+		const token = await resolveCopilotGitHubToken(
+			{
+				...config,
+				githubHost: "tenant.ghe.com",
+			},
+			logSpy.logger,
+			{
+				env: {
+					GH_TOKEN: "gho_generic",
+				},
+				execFileAsync: async () => {
+					throw new Error("gh missing");
+				},
+			},
+		);
+
+		assert.equal(token, "gho_generic");
 	});
 });
 
@@ -1291,6 +1395,55 @@ describe("runCopilotReview", () => {
 		assert.equal(createdOptions[0]?.cwd, config.repoRoot);
 		assert.equal(outcome.findings.length, 0);
 		assert.equal(outcome.assistantMessage, "Looks good.");
+	});
+
+	it("passes a resolved GitHub token into the created Copilot client", async () => {
+		const context = createReviewContext();
+		const createdOptions: Array<Record<string, unknown>> = [];
+
+		const session = {
+			on() {
+				return () => {};
+			},
+			async sendAndWait() {
+				return { data: { content: "Looks good." } };
+			},
+			async disconnect() {},
+		};
+
+		await runCopilotReview(
+			{
+				...config,
+				githubHost: "tenant.ghe.com",
+			},
+			context,
+			{} as never,
+			createLoggerSpy().logger,
+			{
+				resolveCliPath: () => "/tmp/node_modules/@github/copilot/index.js",
+				resolveGitHubToken: async () => "gho_test-token",
+				createCopilotClient(options) {
+					createdOptions.push(options as Record<string, unknown>);
+
+					return {
+						async start() {},
+						async createSession() {
+							throw new Error("createSession should not be called directly");
+						},
+						async stop() {
+							return [];
+						},
+					};
+				},
+				async createReviewSession() {
+					return session;
+				},
+			},
+		);
+
+		assert.equal(createdOptions.length, 1);
+		assert.equal(createdOptions[0]?.gitHubToken, "gho_test-token");
+		assert.equal(createdOptions[0]?.useLoggedInUser, false);
 	});
 
 	it("passes system prompt customization and early event handler into session creation", async () => {
