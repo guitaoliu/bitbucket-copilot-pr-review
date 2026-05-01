@@ -35,7 +35,9 @@ function normalizeOptionalEnvString(value: unknown): string | undefined {
 }
 
 function optionalEnvString() {
-	return z.preprocess(normalizeOptionalEnvString, z.string().optional());
+	return z
+		.preprocess(normalizeOptionalEnvString, z.string().optional())
+		.optional();
 }
 
 function toPositiveInteger(
