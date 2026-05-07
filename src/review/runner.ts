@@ -1,6 +1,7 @@
 import { BitbucketClient } from "../bitbucket/client.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import { runCopilotReview } from "../copilot/engine.ts";
+import { GitRepository } from "../git/repo.ts";
 import {
 	getPullRequestBranchSkipReason,
 	getPullRequestDraftSkipReason,
@@ -20,6 +21,7 @@ import {
 	buildReviewReusePlan,
 	getExistingPublicationStatus,
 } from "./skip-policy.ts";
+import { createDetachedReviewWorkspace } from "./workspace.ts";
 
 export async function runReview(
 	config: ReviewerConfig,
@@ -33,6 +35,8 @@ export async function runReview(
 		dependencies.prepareReviewContext ?? prepareReviewContext;
 	const buildContext = dependencies.buildReviewContext ?? buildReviewContext;
 	const reviewWithCopilot = dependencies.runCopilotReview ?? runCopilotReview;
+	const createReviewWorkspace =
+		dependencies.createDetachedReviewWorkspace ?? createDetachedReviewWorkspace;
 	const confirmRerunPrompt = dependencies.confirmRerun ?? confirmRerun;
 	const initialPullRequest = await bitbucket.getPullRequest();
 
@@ -136,10 +140,71 @@ export async function runReview(
 		logger.warn(reusePlan.repairWarning);
 	}
 
-	const review =
-		reusePlan.action === "republish" && reusePlan.reusedReview
-			? reusePlan.reusedReview
-			: await reviewWithCopilot(effectiveConfig, context, git, logger);
+	const shouldUseDetachedReviewWorkspace =
+		reusePlan.action !== "republish" &&
+		(dependencies.createDetachedReviewWorkspace !== undefined ||
+			dependencies.runCopilotReview === undefined);
+	let review = reusePlan.reusedReview;
+	if (!(reusePlan.action === "republish" && reusePlan.reusedReview)) {
+		let detachedWorkspace:
+			| Awaited<ReturnType<typeof createReviewWorkspace>>
+			| undefined;
+		try {
+			if (shouldUseDetachedReviewWorkspace) {
+				detachedWorkspace = await createReviewWorkspace({
+					repoRoot: effectiveConfig.repoRoot,
+					headCommit: context.headCommit,
+					logger,
+				});
+				logger.info(
+					`Using detached review workspace ${detachedWorkspace.workspaceRoot} for head ${context.headCommit}`,
+				);
+			}
+
+			const reviewRepoRoot =
+				detachedWorkspace?.workspaceRoot ?? effectiveConfig.repoRoot;
+			const reviewGit = detachedWorkspace
+				? new GitRepository(
+						reviewRepoRoot,
+						logger,
+						effectiveConfig.gitRemoteName,
+					)
+				: git;
+			review = await reviewWithCopilot(
+				shouldUseDetachedReviewWorkspace
+					? {
+							...effectiveConfig,
+							repoRoot: reviewRepoRoot,
+						}
+					: effectiveConfig,
+				shouldUseDetachedReviewWorkspace
+					? {
+							...context,
+							repoRoot: reviewRepoRoot,
+						}
+					: context,
+				reviewGit,
+				logger,
+			);
+		} finally {
+			if (detachedWorkspace) {
+				try {
+					await detachedWorkspace.cleanup();
+					logger.info(
+						`Removed detached review workspace ${detachedWorkspace.workspaceRoot}`,
+					);
+				} catch (error) {
+					logger.warn(
+						`Failed to clean up detached review workspace ${detachedWorkspace.workspaceRoot}`,
+						error,
+					);
+				}
+			}
+		}
+	}
+	if (!review) {
+		throw new Error("Review outcome was not produced.");
+	}
 	const artifacts =
 		reusePlan.action === "republish" && reusePlan.reusedArtifacts
 			? reusePlan.reusedArtifacts

@@ -348,6 +348,35 @@ describe("finalizeFindings", () => {
 		assert.equal(findings[0]?.confidence, "high");
 	});
 
+	it("prefers a concrete bug over a code smell at the same location", () => {
+		const drafts: FindingDraft[] = [
+			{
+				path: "src/service.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "CODE_SMELL",
+				confidence: "high",
+				title: "Missing tests for null handling",
+				details: "The new branch is not covered by tests.",
+			},
+			{
+				path: "src/service.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "medium",
+				title: "Null handling is broken",
+				details: "The new branch dereferences a possibly null response.",
+			},
+		];
+
+		const findings = finalizeFindings(drafts, [reviewedFile], 5, "medium");
+
+		assert.equal(findings.length, 1);
+		assert.equal(findings[0]?.type, "BUG");
+		assert.equal(findings[0]?.title, "Null handling is broken");
+	});
+
 	it("keeps file-level findings and normalizes oldPath entries to the head path", () => {
 		const drafts: FindingDraft[] = [
 			{

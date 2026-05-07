@@ -45,6 +45,19 @@ export function createSessionEventTracer(
 
 	return {
 		handleEvent(event) {
+			if (event.type === "assistant.intent") {
+				const data = getEventData(event);
+				const intent =
+					typeof data.intent === "string" ? data.intent : undefined;
+				if (intent) {
+					logger.info("Copilot intent", {
+						agentId: event.agentId,
+						intent,
+					});
+				}
+				return;
+			}
+
 			if (event.type === "assistant.reasoning_delta") {
 				const data = getEventData(event);
 				const reasoningId =
@@ -69,10 +82,119 @@ export function createSessionEventTracer(
 				return;
 			}
 
+			if (event.type === "assistant.message") {
+				const data = getEventData(event);
+				const phase = typeof data.phase === "string" ? data.phase : undefined;
+				const toolRequests = Array.isArray(data.toolRequests)
+					? data.toolRequests
+					: [];
+
+				const toolNames = toolRequests.flatMap((toolRequest) => {
+					if (!toolRequest || typeof toolRequest !== "object") {
+						return [];
+					}
+
+					const name = (toolRequest as Record<string, unknown>).name;
+					return typeof name === "string" ? [name] : [];
+				});
+				if (toolNames.length > 0) {
+					const intentionSummaries = toolRequests.flatMap((toolRequest) => {
+						if (!toolRequest || typeof toolRequest !== "object") {
+							return [];
+						}
+
+						const intentionSummary = (toolRequest as Record<string, unknown>)
+							.intentionSummary;
+						return typeof intentionSummary === "string" &&
+							intentionSummary.length > 0
+							? [intentionSummary]
+							: [];
+					});
+					const progressDetails: {
+						agentId?: string;
+						phase?: string;
+						toolCount: number;
+						toolNames: string[];
+						intentionSummaries?: string[];
+					} = {
+						toolCount: toolNames.length,
+						toolNames,
+					};
+
+					if (event.agentId !== undefined) {
+						progressDetails.agentId = event.agentId;
+					}
+					if (phase) {
+						progressDetails.phase = phase;
+					}
+					if (intentionSummaries.length > 0) {
+						progressDetails.intentionSummaries = intentionSummaries;
+					}
+
+					logger.info("Copilot planned tool calls", progressDetails);
+				}
+				return;
+			}
+
 			if (event.type === "session.idle") {
 				for (const reasoningId of reasoningContentById.keys()) {
 					flushReasoning(reasoningId);
 				}
+				return;
+			}
+
+			if (event.type === "subagent.started") {
+				const data = getEventData(event);
+				logger.info("Copilot subagent started", {
+					agentId: event.agentId,
+					agentName:
+						typeof data.agentName === "string" ? data.agentName : undefined,
+					agentDisplayName:
+						typeof data.agentDisplayName === "string"
+							? data.agentDisplayName
+							: undefined,
+					agentDescription:
+						typeof data.agentDescription === "string"
+							? data.agentDescription
+							: undefined,
+				});
+				return;
+			}
+
+			if (event.type === "subagent.completed") {
+				const data = getEventData(event);
+				logger.info("Copilot subagent completed", {
+					agentId: event.agentId,
+					agentName:
+						typeof data.agentName === "string" ? data.agentName : undefined,
+					agentDisplayName:
+						typeof data.agentDisplayName === "string"
+							? data.agentDisplayName
+							: undefined,
+					durationMs:
+						typeof data.durationMs === "number" ? data.durationMs : undefined,
+					totalToolCalls:
+						typeof data.totalToolCalls === "number"
+							? data.totalToolCalls
+							: undefined,
+				});
+				return;
+			}
+
+			if (event.type === "subagent.failed") {
+				const data = getEventData(event);
+				logger.warn("Copilot subagent failed", {
+					agentId: event.agentId,
+					agentName:
+						typeof data.agentName === "string" ? data.agentName : undefined,
+					agentDisplayName:
+						typeof data.agentDisplayName === "string"
+							? data.agentDisplayName
+							: undefined,
+					error: typeof data.error === "string" ? data.error : undefined,
+					durationMs:
+						typeof data.durationMs === "number" ? data.durationMs : undefined,
+				});
 				return;
 			}
 

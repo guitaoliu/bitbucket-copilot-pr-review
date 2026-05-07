@@ -159,17 +159,35 @@ export async function buildReviewContext(
 	const { config, git, mergeBaseCommit } = prepared;
 	const rawDiff = await git.diff(mergeBaseCommit, pr.source.latestCommit);
 	const parsedDiff = parseUnifiedDiff(rawDiff);
-	const reviewRevision = buildReviewRevision({
-		baseCommit: pr.target.latestCommit,
-		mergeBaseCommit,
-		rawDiff,
-	});
+	const ciSummary = await loadCiSummary(config.ciSummaryPath, logger);
+	const reviewRevision = buildReviewRevision(
+		omitUndefined({
+			baseCommit: pr.target.latestCommit,
+			mergeBaseCommit,
+			rawDiff,
+			ciSummary,
+			promptVersion: "2026-05-accuracy-stability-1",
+			copilot: {
+				model: config.copilot.model,
+				reasoningEffort: config.copilot.reasoningEffort,
+			},
+			reviewConfig: {
+				maxFiles: config.review.maxFiles,
+				maxFindings: config.review.maxFindings,
+				minConfidence: config.review.minConfidence,
+				maxPatchChars: config.review.maxPatchChars,
+				defaultFileSliceLines: config.review.defaultFileSliceLines,
+				maxFileSliceLines: config.review.maxFileSliceLines,
+				ignorePaths: [...config.review.ignorePaths],
+				skipBranchPrefixes: [...config.review.skipBranchPrefixes],
+			},
+		}),
+	);
 	const filtered = filterChangedFiles(
 		parsedDiff.files,
 		config.review.maxFiles,
 		config.review.ignorePaths,
 	);
-	const ciSummary = await loadCiSummary(config.ciSummaryPath, logger);
 	const repoAgentsInstructions = await loadRepoAgentsInstructions(
 		git,
 		pr.target.latestCommit,

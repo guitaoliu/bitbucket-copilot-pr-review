@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { SessionConfig, SessionEventHandler } from "@github/copilot-sdk";
+import type {
+	PermissionRequest,
+	SessionConfig,
+	SessionEventHandler,
+} from "@github/copilot-sdk";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { ChangedFile, HunkSummary } from "../git/types.ts";
 import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "../review/summary.ts";
@@ -168,48 +172,58 @@ function createReviewContext(): ReviewContext {
 	};
 }
 
+function createReviewedFilePaths(reviewedFileCount: number): string[] {
+	return Array.from({ length: reviewedFileCount }, (_, index) => {
+		switch (index) {
+			case 0:
+				return "src/first.ts";
+			case 1:
+				return "src/second.ts";
+			case 2:
+				return "src/third.ts";
+			case 3:
+				return "src/fourth.ts";
+			default:
+				return `src/reviewed-${index + 1}.ts`;
+		}
+	});
+}
+
 function createProgressState(
 	overrides: Partial<ReviewSummaryDrafts> = {},
 	reviewedFileCount = 4,
 	options: {
-		reviewedFilePaths?: string[];
-		reviewedFileMetadataSeenPaths?: string[];
+		reviewScopeSeenPaths?: string[];
 		directlyInspectedReviewedFilePaths?: string[];
-		truncatedDiffReviewedFilePaths?: string[];
+		reviewedFilePaths?: string[];
 		toolTelemetry?: ReturnType<typeof createEmptyReviewToolTelemetry>;
 	} = {},
 ): ReviewProgressState {
+	const reviewedFilePaths =
+		options.reviewedFilePaths ?? createReviewedFilePaths(reviewedFileCount);
 	const progressState: ReviewProgressState = {
 		reviewedFileCount,
+		reviewedFilePaths: new Set(reviewedFilePaths),
+		reviewedFilePathAliases: new Map(
+			reviewedFilePaths.map((path) => [path, path] as const),
+		),
 		summaryDrafts: {
 			fileSummaries: [],
 			...overrides,
 		},
 	};
 
-	if (options.reviewedFilePaths) {
-		progressState.reviewedFilePaths = new Set(options.reviewedFilePaths);
-	}
-
 	if (options.toolTelemetry) {
 		progressState.toolTelemetry = options.toolTelemetry;
 	}
 
-	if (options.reviewedFileMetadataSeenPaths) {
-		progressState.reviewedFileMetadataSeenPaths = new Set(
-			options.reviewedFileMetadataSeenPaths,
-		);
+	if (options.reviewScopeSeenPaths) {
+		progressState.reviewScopeSeenPaths = new Set(options.reviewScopeSeenPaths);
 	}
 
 	if (options.directlyInspectedReviewedFilePaths) {
 		progressState.directlyInspectedReviewedFilePaths = new Set(
 			options.directlyInspectedReviewedFilePaths,
-		);
-	}
-
-	if (options.truncatedDiffReviewedFilePaths) {
-		progressState.truncatedDiffReviewedFilePaths = new Set(
-			options.truncatedDiffReviewedFilePaths,
 		);
 	}
 
@@ -225,15 +239,6 @@ function createSdkToolResult(result: Record<string, unknown>): HookToolResult {
 		textResultForLlm: JSON.stringify(result),
 		resultType: "success",
 	};
-}
-
-function createReminderReviewedFilePaths(): string[] {
-	return [
-		"src/example.ts",
-		"src/example-1.ts",
-		"src/example-2.ts",
-		"src/file.ts",
-	];
 }
 
 describe("createReviewSessionHooks", () => {
@@ -255,7 +260,15 @@ describe("createReviewSessionHooks", () => {
 		);
 		assert.match(
 			result.additionalContext,
-			/Inspect diff plus relevant head\/base code/,
+			/Call get_pr_overview once to load canonical reviewed\/skipped file scope, then use readonly builtin shell tools/,
+		);
+		assert.match(
+			result.additionalContext,
+			/Prefer targeted shell inspection over repeated rereads of the same ranges, and avoid shell wrappers that only reformat output without adding evidence/,
+		);
+		assert.match(
+			result.additionalContext,
+			/The review session is readonly: use repo-scoped shell inspection only, and do not attempt network access or any write operation/,
 		);
 		assert.match(
 			result.additionalContext,
@@ -271,37 +284,13 @@ describe("createReviewSessionHooks", () => {
 		);
 		assert.match(
 			result.additionalContext,
-			/Use category only when it is obvious and helpful; otherwise omit it/,
-		);
-		assert.match(
-			result.additionalContext,
-			/Do not report issues that already exist in base unless the PR introduces them, exposes them on a changed path, or materially worsens them/,
-		);
-		assert.match(
-			result.additionalContext,
 			new RegExp(TEST_COVERAGE_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-		);
-		assert.match(
-			result.additionalContext,
-			/Ignore style, naming, formatting, and preference-only convention feedback/,
 		);
 		assert.ok(result.additionalContext.includes(FINDING_TAXONOMY_HINT));
 		assert.ok(result.additionalContext.includes(QUESTION_SHAPED_FINDING_HINT));
-		assert.match(
-			result.additionalContext,
-			/continue after the first finding when more distinct issues may exist/,
-		);
-		assert.match(
-			result.additionalContext,
-			/If more than 3 distinct issues exist, keep reviewing and preserve or replace the strongest published set instead of stopping early\. The publish cap is not a signal to stop searching/,
-		);
-		assert.match(
-			result.additionalContext,
-			/high confidence or better for publication, up to 3 total published findings/,
-		);
 	});
 
-	it("allows approved tools and returns tool-specific pre-use guidance", async () => {
+	it("allows builtin bash and returns readonly shell guidance", async () => {
 		const { logger, infoEntries } = createLoggerSpy();
 		const hooks = createReviewSessionHooks(
 			config,
@@ -310,25 +299,25 @@ describe("createReviewSessionHooks", () => {
 			createProgressState(),
 		);
 		const result = await hooks.onPreToolUse({
-			toolName: "get_file_content",
-			toolArgs: { path: "src/file.ts" },
+			toolName: "bash",
+			toolArgs: { command: "git diff --stat" },
 			cwd: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
 			permissionDecision: "allow",
 			additionalContext:
-				"Read head and base content as needed to verify a concrete regression, broken invariant, API change, or removed guard.",
+				"Use readonly repo-scoped shell commands to inspect git diff, history, tests, and relevant code paths. Prefer targeted reads over repeated rereads, avoid presentation-only wrappers, and do not use shell commands that write files, mutate git state, or access the network.",
 		});
 		assert.deepEqual(infoEntries, [
 			{
-				message: "Copilot requested tool get_file_content path=src/file.ts",
+				message: 'Copilot requested tool bash command="git diff --stat"',
 				details: [],
 			},
 		]);
 	});
 
-	it("returns overview paging guidance for large changed-file sets", async () => {
+	it("returns canonical overview guidance before inspection", async () => {
 		const hooks = createReviewSessionHooks(
 			config,
 			createLoggerSpy().logger,
@@ -336,44 +325,28 @@ describe("createReviewSessionHooks", () => {
 		);
 		const result = await hooks.onPreToolUse({
 			toolName: "get_pr_overview",
-			toolArgs: { reviewedFilesOffset: 10, reviewedFilesLimit: 10 },
+			toolArgs: {},
 			cwd: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
 			permissionDecision: "allow",
 			additionalContext:
-				"Use the overview to scope the review, find the highest-risk files, and page through reviewed-file metadata in manageable batches when the changed-file list is large.",
+				"Use the overview once to load canonical reviewed/skipped file scope, then inspect risky reviewed files with builtin readonly shell tools.",
 		});
 	});
 
-	it("returns changed-file paging guidance for list_changed_files", async () => {
-		const hooks = createReviewSessionHooks(
-			config,
-			createLoggerSpy().logger,
-			[],
-		);
-		const result = await hooks.onPreToolUse({
-			toolName: "list_changed_files",
-			toolArgs: { offset: 10, limit: 10 },
-			cwd: "/tmp/repo",
-		});
-
-		assert.deepEqual(result, {
-			permissionDecision: "allow",
-			additionalContext:
-				"Use this when you need a refreshed file list, skipped-file details, or another changed-file page beyond get_pr_overview; then keep moving through the reviewed files in batches until meaningful reviewed changes are covered.",
-		});
-	});
-
-	it("denies record_pr_summary until all reviewed-file metadata has been seen", async () => {
+	it("allows record_pr_summary once review scope is loaded", async () => {
+		const reviewedFilePaths = createReviewedFilePaths(4);
 		const telemetry = createEmptyReviewToolTelemetry();
 		const hooks = createReviewSessionHooks(
 			config,
 			createLoggerSpy().logger,
 			[],
 			createProgressState({}, 4, {
-				reviewedFileMetadataSeenPaths: ["src/first.ts"],
+				reviewedFilePaths,
+				reviewScopeSeenPaths: ["src/first.ts"],
+				directlyInspectedReviewedFilePaths: reviewedFilePaths,
 				toolTelemetry: telemetry,
 			}),
 		);
@@ -385,39 +358,28 @@ describe("createReviewSessionHooks", () => {
 		});
 
 		assert.deepEqual(result, {
-			permissionDecision: "deny",
-			permissionDecisionReason:
-				"Record the PR summary only after paging through all changed-file metadata. Seen reviewed-file metadata for 1/4 files so far; request the next changed-file batch first.",
+			permissionDecision: "allow",
+			additionalContext:
+				"Capture the PR's intended behavior change in one concise, evidence-backed summary after the main review coverage is complete. Use short bullet points when the PR has a few distinct changes.",
 		});
 		assert.equal(telemetry.totalRequested, 1);
-		assert.equal(telemetry.totalAllowed, 0);
-		assert.equal(telemetry.totalDenied, 1);
+		assert.equal(telemetry.totalAllowed, 1);
+		assert.equal(telemetry.totalDenied, 0);
 		assert.equal(telemetry.byTool.record_pr_summary?.requested, 1);
-		assert.equal(telemetry.byTool.record_pr_summary?.allowed, 0);
-		assert.equal(telemetry.byTool.record_pr_summary?.denied, 1);
+		assert.equal(telemetry.byTool.record_pr_summary?.allowed, 1);
+		assert.equal(telemetry.byTool.record_pr_summary?.denied, 0);
 	});
 
-	it("denies record_pr_summary until all reviewed files have been directly inspected", async () => {
-		const telemetry = createEmptyReviewToolTelemetry();
+	it("allows record_pr_summary and warns until all reviewed files have been inspected", async () => {
+		const reviewedFilePaths = createReviewedFilePaths(4);
 		const hooks = createReviewSessionHooks(
 			config,
 			createLoggerSpy().logger,
 			[],
 			createProgressState({}, 4, {
-				reviewedFilePaths: [
-					"src/first.ts",
-					"src/second.ts",
-					"src/third.ts",
-					"src/fourth.ts",
-				],
-				reviewedFileMetadataSeenPaths: [
-					"src/first.ts",
-					"src/second.ts",
-					"src/third.ts",
-					"src/fourth.ts",
-				],
-				directlyInspectedReviewedFilePaths: ["src/first.ts", "src/second.ts"],
-				toolTelemetry: telemetry,
+				reviewedFilePaths,
+				reviewScopeSeenPaths: reviewedFilePaths,
+				directlyInspectedReviewedFilePaths: ["src/first.ts"],
 			}),
 		);
 
@@ -428,92 +390,21 @@ describe("createReviewSessionHooks", () => {
 		});
 
 		assert.deepEqual(result, {
-			permissionDecision: "deny",
-			permissionDecisionReason:
-				"Record the PR summary only after directly inspecting every reviewed file. Directly inspected reviewed files: 2/4. 2 reviewed files still lack direct inspection. Unchecked reviewed files include src/third.ts, src/fourth.ts. Inspect their diffs or file content first.",
+			permissionDecision: "allow",
+			additionalContext:
+				"You can record the PR summary now if it helps, but review coverage is still incomplete. Inspected reviewed files: 1/4. Remaining reviewed files: src/second.ts, src/third.ts, src/fourth.ts. Inspect each remaining file with git diff/show or targeted repo searches before finishing.",
 		});
-		assert.equal(telemetry.totalRequested, 1);
-		assert.equal(telemetry.totalAllowed, 0);
-		assert.equal(telemetry.totalDenied, 1);
-		assert.equal(telemetry.byTool.record_pr_summary?.requested, 1);
-		assert.equal(telemetry.byTool.record_pr_summary?.allowed, 0);
-		assert.equal(telemetry.byTool.record_pr_summary?.denied, 1);
 	});
 
-	it("tracks reviewed-file metadata coverage across paged changed-file tools", async () => {
-		const reviewedFilePaths = [
-			"src/first.ts",
-			"src/second.ts",
-			"src/third.ts",
-			"src/fourth.ts",
-		];
-		const { logger, infoEntries } = createLoggerSpy();
-		const hooks = createReviewSessionHooks(
-			config,
-			logger,
-			[],
-			createProgressState({}, reviewedFilePaths.length, {
-				reviewedFilePaths,
-			}),
-		);
-
-		const firstResult = await hooks.onPostToolUse({
-			toolName: "get_pr_overview",
-			toolArgs: { reviewedFilesOffset: 0, reviewedFilesLimit: 2 },
-			toolResult: createToolResult({
-				textResultForLlm: "ok",
-				resultType: "success",
-				reviewedFiles: [{ path: "src/first.ts" }, { path: "src/second.ts" }],
-			}),
-			cwd: "/tmp/repo",
-		});
-		assert.deepEqual(firstResult, {
-			additionalContext:
-				"Changed-file metadata seen: 2/4. Choose the most suspicious files from the current overview batch, inspect their diffs, and page to the next changed-file batch before recording the PR summary.",
-		});
-
-		const secondResult = await hooks.onPostToolUse({
-			toolName: "list_changed_files",
-			toolArgs: { offset: 2, limit: 2 },
-			toolResult: createToolResult({
-				textResultForLlm: "ok",
-				resultType: "success",
-				reviewedFiles: [{ path: "src/third.ts" }, { path: "src/fourth.ts" }],
-			}),
-			cwd: "/tmp/repo",
-		});
-		assert.deepEqual(secondResult, {
-			additionalContext:
-				"Changed-file metadata seen: 4/4. Prioritize files touching validation, auth, persistence, async flow, serialization, and public interfaces; keep moving through unchecked reviewed files directly. Do not wrap up yet. Directly inspected reviewed files: 0/4. 4 reviewed files still lack direct inspection. Unchecked reviewed files include src/first.ts, src/second.ts, src/third.ts (+1 more). Inspect their diffs or file content before finishing.",
-		});
-		assert.deepEqual(infoEntries, [
-			{
-				message:
-					"Copilot completed tool get_pr_overview result=success reviewed_files=2 findings=0/3 reviewed_file_metadata=2/4 inspected_reviewed_files=0/4 file_summaries=0/4 pr_summary=missing",
-				details: [],
-			},
-			{
-				message:
-					"Copilot completed tool list_changed_files result=success reviewed_files=2 findings=0/3 reviewed_file_metadata=4/4 inspected_reviewed_files=0/4 file_summaries=0/4 pr_summary=missing",
-				details: [],
-			},
-		]);
-	});
-
-	it("allows record_pr_summary after metadata and direct inspection coverage are complete", async () => {
-		const reviewedFilePaths = [
-			"src/first.ts",
-			"src/second.ts",
-			"src/third.ts",
-			"src/fourth.ts",
-		];
+	it("allows record_pr_summary after scope coverage and inspection are complete", async () => {
+		const reviewedFilePaths = createReviewedFilePaths(4);
 		const hooks = createReviewSessionHooks(
 			config,
 			createLoggerSpy().logger,
 			[],
-			createProgressState({}, reviewedFilePaths.length, {
+			createProgressState({}, 4, {
 				reviewedFilePaths,
-				reviewedFileMetadataSeenPaths: reviewedFilePaths,
+				reviewScopeSeenPaths: reviewedFilePaths,
 				directlyInspectedReviewedFilePaths: reviewedFilePaths,
 			}),
 		);
@@ -531,193 +422,70 @@ describe("createReviewSessionHooks", () => {
 		});
 	});
 
-	it("requires truncated diff output to be followed by complete inspection", async () => {
-		const reviewedFilePaths = ["src/first.ts"];
+	it("tracks reviewed-file scope coverage across overview tool results", async () => {
 		const { logger, infoEntries } = createLoggerSpy();
 		const hooks = createReviewSessionHooks(
 			config,
 			logger,
 			[],
-			createProgressState({}, reviewedFilePaths.length, {
-				reviewedFilePaths,
-				reviewedFileMetadataSeenPaths: reviewedFilePaths,
-			}),
+			createProgressState({}, 4),
 		);
 
-		const truncatedDiffResult = await hooks.onPostToolUse({
-			toolName: "get_file_diff",
-			toolArgs: { path: "src/first.ts" },
-			toolResult: createSdkToolResult({
-				truncated: true,
-				returnedPatchChars: 12000,
-				totalHunks: 4,
+		const firstResult = await hooks.onPostToolUse({
+			toolName: "get_pr_overview",
+			toolArgs: {},
+			toolResult: createToolResult({
+				textResultForLlm: "ok",
+				resultType: "success",
+				reviewedFiles: [{ path: "src/first.ts" }, { path: "src/second.ts" }],
 			}),
 			cwd: "/tmp/repo",
 		});
-
-		assert.deepEqual(truncatedDiffResult, {
+		assert.deepEqual(firstResult, {
 			additionalContext:
-				"Directly inspected reviewed files: 0/1. This full diff is truncated, so this file does not count as fully inspected yet. Continue with get_file_diff_hunk or targeted file content until the changed behavior is clear before deciding whether an issue exists. Do not wrap up yet. 1 reviewed file still lack direct inspection. Unchecked reviewed files include src/first.ts. Inspect their diffs or file content before finishing.",
+				"Canonical review scope loaded: 2/4. Scope response appears partial, so keep reviewing with current scope and inspect the riskiest reviewed files with readonly git and repo inspection before recording the PR summary.",
 		});
 
-		const deniedSummary = await hooks.onPreToolUse({
-			toolName: "record_pr_summary",
-			toolArgs: { summary: "done" },
-			cwd: "/tmp/repo",
-		});
-
-		assert.deepEqual(deniedSummary, {
-			permissionDecision: "deny",
-			permissionDecisionReason:
-				"Record the PR summary only after directly inspecting every reviewed file. Directly inspected reviewed files: 0/1. 1 reviewed file still lack direct inspection. Unchecked reviewed files include src/first.ts. Some unchecked reviewed file still only has truncated diff output: src/first.ts. Use get_file_diff_hunk when a whole-file diff was truncated, or targeted file content when a hunk is still truncated, before considering it fully inspected. Inspect their diffs or file content first.",
-		});
-
-		const hunkResult = await hooks.onPostToolUse({
-			toolName: "get_file_diff_hunk",
-			toolArgs: { path: "src/first.ts", hunkIndex: 1 },
-			toolResult: createSdkToolResult({
-				truncated: true,
-				returnedPatchChars: 12000,
-				totalHunks: 4,
-			}),
-			cwd: "/tmp/repo",
-		});
-
-		assert.deepEqual(hunkResult, {
-			additionalContext:
-				"Directly inspected reviewed files: 0/1. This diff hunk is truncated, so this file does not count as fully inspected yet. Use targeted file content for the changed lines, and inspect additional relevant hunks if needed, until the changed behavior is clear before deciding whether an issue exists. Do not wrap up yet. 1 reviewed file still lack direct inspection. Unchecked reviewed files include src/first.ts. Inspect their diffs or file content before finishing.",
-		});
-
-		const deniedSummaryAfterTruncatedHunk = await hooks.onPreToolUse({
-			toolName: "record_pr_summary",
-			toolArgs: { summary: "done" },
-			cwd: "/tmp/repo",
-		});
-
-		assert.deepEqual(deniedSummaryAfterTruncatedHunk, {
-			permissionDecision: "deny",
-			permissionDecisionReason:
-				"Record the PR summary only after directly inspecting every reviewed file. Directly inspected reviewed files: 0/1. 1 reviewed file still lack direct inspection. Unchecked reviewed files include src/first.ts. Some unchecked reviewed file still only has truncated diff output: src/first.ts. Use get_file_diff_hunk when a whole-file diff was truncated, or targeted file content when a hunk is still truncated, before considering it fully inspected. Inspect their diffs or file content first.",
-		});
-
-		const contentResult = await hooks.onPostToolUse({
-			toolName: "get_file_content",
-			toolArgs: {
-				path: "src/first.ts",
-				version: "head",
-				startLine: 1,
-				endLine: 40,
-			},
-			toolResult: createSdkToolResult({
-				returnedEndLine: 40,
-				status: "ok",
-			}),
-			cwd: "/tmp/repo",
-		});
-
-		assert.deepEqual(contentResult, {
-			additionalContext:
-				"Directly inspected reviewed files: 1/1. Do not emit a finding unless the inspected code supports a concrete, material issue introduced or materially worsened by the PR. If the changed file touches shared behavior or critical boundaries, inspect the most relevant nearby path before closing the hypothesis.",
-		});
-
-		const allowedSummary = await hooks.onPreToolUse({
-			toolName: "record_pr_summary",
-			toolArgs: { summary: "done" },
-			cwd: "/tmp/repo",
-		});
-
-		assert.deepEqual(allowedSummary, {
-			permissionDecision: "allow",
-			additionalContext:
-				"Capture the PR's intended behavior change in one concise, evidence-backed summary after the main review coverage is complete. Use short bullet points when the PR has a few distinct changes.",
-		});
-		assert.deepEqual(infoEntries, [
-			{
-				message:
-					"Copilot completed tool get_file_diff result=success path=src/first.ts truncated=true patch_chars=12000 total_hunks=4 findings=0/3 reviewed_file_metadata=1/1 inspected_reviewed_files=0/1 file_summaries=0/1 pr_summary=missing",
-				details: [],
-			},
-			{
-				message: "Copilot requested tool record_pr_summary summary_chars=4",
-				details: [],
-			},
-			{
-				message:
-					"Copilot completed tool get_file_diff_hunk result=success path=src/first.ts hunk=1 truncated=true patch_chars=12000 total_hunks=4 findings=0/3 reviewed_file_metadata=1/1 inspected_reviewed_files=0/1 file_summaries=0/1 pr_summary=missing",
-				details: [],
-			},
-			{
-				message: "Copilot requested tool record_pr_summary summary_chars=4",
-				details: [],
-			},
-			{
-				message:
-					"Copilot completed tool get_file_content result=success path=src/first.ts version=head start=1 end=40 lines=40 status=ok findings=0/3 reviewed_file_metadata=1/1 inspected_reviewed_files=1/1 file_summaries=0/1 pr_summary=missing",
-				details: [],
-			},
-			{
-				message: "Copilot requested tool record_pr_summary summary_chars=4",
-				details: [],
-			},
-		]);
-	});
-
-	it("adds a direct-inspection reminder after paging is complete but files remain unchecked", async () => {
-		const reviewedFilePaths = [
-			"src/first.ts",
-			"src/second.ts",
-			"src/third.ts",
-			"src/fourth.ts",
-		];
-		const { logger, infoEntries } = createLoggerSpy();
-		const hooks = createReviewSessionHooks(
-			config,
-			logger,
-			[],
-			createProgressState({}, reviewedFilePaths.length, {
-				reviewedFilePaths,
-				reviewedFileMetadataSeenPaths: reviewedFilePaths,
-				directlyInspectedReviewedFilePaths: ["src/first.ts"],
-			}),
-		);
-
-		const result = await hooks.onPostToolUse({
-			toolName: "list_changed_files",
-			toolArgs: { offset: 2, limit: 2 },
-			toolResult: createSdkToolResult({
+		const secondResult = await hooks.onPostToolUse({
+			toolName: "get_pr_overview",
+			toolArgs: {},
+			toolResult: createToolResult({
+				textResultForLlm: "ok",
+				resultType: "success",
 				reviewedFiles: [{ path: "src/third.ts" }, { path: "src/fourth.ts" }],
 			}),
 			cwd: "/tmp/repo",
 		});
-
-		assert.deepEqual(result, {
+		assert.deepEqual(secondResult, {
 			additionalContext:
-				"Changed-file metadata seen: 4/4. Prioritize files touching validation, auth, persistence, async flow, serialization, and public interfaces; keep moving through unchecked reviewed files directly. Do not wrap up yet. Directly inspected reviewed files: 1/4. 3 reviewed files still lack direct inspection. Unchecked reviewed files include src/second.ts, src/third.ts, src/fourth.ts. Inspect their diffs or file content before finishing.",
+				"Canonical review scope loaded: 4/4. Use it to inspect the riskiest reviewed files with readonly git and repo inspection before recording the PR summary.",
 		});
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool list_changed_files result=success reviewed_files=2 findings=0/3 reviewed_file_metadata=4/4 inspected_reviewed_files=1/4 file_summaries=0/4 pr_summary=missing",
+					"Copilot completed tool get_pr_overview result=success reviewed_files=2 findings=0/3 review_scope_seen=2/4 partial_scope_responses=1 inspected_reviewed_files=0/4 dropped_findings_invalid_payload=0 dropped_findings_invalid_location=0 file_summaries=0/4 pr_summary=missing",
+				details: [],
+			},
+			{
+				message:
+					"Copilot completed tool get_pr_overview result=success reviewed_files=2 findings=0/3 review_scope_seen=4/4 partial_scope_responses=2 inspected_reviewed_files=0/4 dropped_findings_invalid_payload=0 dropped_findings_invalid_location=0 file_summaries=0/4 pr_summary=missing",
 				details: [],
 			},
 		]);
 	});
 
-	it("tracks reviewed-file metadata from real SDK JSON-wrapped tool results", async () => {
-		const reviewedFilePaths = ["src/first.ts", "src/second.ts", "src/third.ts"];
+	it("tracks review scope from real SDK JSON-wrapped tool results", async () => {
 		const { logger, infoEntries } = createLoggerSpy();
 		const hooks = createReviewSessionHooks(
 			config,
 			logger,
 			[],
-			createProgressState({}, reviewedFilePaths.length, {
-				reviewedFilePaths,
-			}),
+			createProgressState({}, 3),
 		);
 
 		const overviewResult = await hooks.onPostToolUse({
 			toolName: "get_pr_overview",
-			toolArgs: { reviewedFilesOffset: 0, reviewedFilesLimit: 2 },
+			toolArgs: {},
 			toolResult: createSdkToolResult({
 				reviewedFiles: [{ path: "src/first.ts" }, { path: "src/second.ts" }],
 				skippedFiles: [],
@@ -727,12 +495,54 @@ describe("createReviewSessionHooks", () => {
 
 		assert.deepEqual(overviewResult, {
 			additionalContext:
-				"Changed-file metadata seen: 2/3. Choose the most suspicious files from the current overview batch, inspect their diffs, and page to the next changed-file batch before recording the PR summary.",
+				"Canonical review scope loaded: 2/3. Scope response appears partial, so keep reviewing with current scope and inspect the riskiest reviewed files with readonly git and repo inspection before recording the PR summary.",
 		});
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool get_pr_overview result=success reviewed_files=2 skipped_files=0 findings=0/3 reviewed_file_metadata=2/3 inspected_reviewed_files=0/3 file_summaries=0/3 pr_summary=missing",
+					"Copilot completed tool get_pr_overview result=success reviewed_files=2 skipped_files=0 findings=0/3 review_scope_seen=2/3 partial_scope_responses=1 inspected_reviewed_files=0/3 dropped_findings_invalid_payload=0 dropped_findings_invalid_location=0 file_summaries=0/3 pr_summary=missing",
+				details: [],
+			},
+		]);
+	});
+
+	it("returns bash-specific post-use guidance", async () => {
+		const reviewedFilePaths = [
+			"src/file.ts",
+			"src/second.ts",
+			"src/third.ts",
+			"src/fourth.ts",
+		];
+		const { logger, infoEntries } = createLoggerSpy();
+		const hooks = createReviewSessionHooks(
+			config,
+			logger,
+			[],
+			createProgressState({}, 4, {
+				reviewedFilePaths,
+				reviewScopeSeenPaths: reviewedFilePaths,
+			}),
+		);
+
+		const result = await hooks.onPostToolUse({
+			toolName: "bash",
+			toolArgs: { command: "git diff -- src/file.ts" },
+			toolResult: {
+				textResultForLlm: "diff output",
+				resultType: "success",
+				toolTelemetry: { durationMs: 25 },
+			},
+			cwd: "/tmp/repo",
+		});
+
+		assert.deepEqual(result, {
+			additionalContext:
+				"Use this shell output to confirm or reject a specific hypothesis. Reuse evidence you already gathered, keep commands readonly, repo-scoped, and network-free, and avoid presentation-only reruns while you validate the changed behavior.",
+		});
+		assert.deepEqual(infoEntries, [
+			{
+				message:
+					'Copilot completed tool bash result=success duration_ms=25 command="git diff -- src/file.ts" findings=0/3 review_scope_seen=4/4 partial_scope_responses=0 inspected_reviewed_files=1/4 dropped_findings_invalid_payload=0 dropped_findings_invalid_location=0 file_summaries=0/4 pr_summary=missing',
 				details: [],
 			},
 		]);
@@ -776,21 +586,22 @@ describe("createReviewSessionHooks", () => {
 		});
 	});
 
-	it("denies unknown tools with a CI review mode reason", async () => {
+	it("denies unknown tools with a readonly review mode reason", async () => {
 		const hooks = createReviewSessionHooks(
 			config,
 			createLoggerSpy().logger,
 			[],
 		);
 		const result = await hooks.onPreToolUse({
-			toolName: "bash",
-			toolArgs: { command: "rm -rf /" },
+			toolName: "unknown_tool",
+			toolArgs: {},
 			cwd: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
 			permissionDecision: "deny",
-			permissionDecisionReason: "Tool bash is not allowed in CI review mode.",
+			permissionDecisionReason:
+				"Tool unknown_tool is not allowed in readonly review mode.",
 		});
 	});
 
@@ -814,7 +625,17 @@ describe("createReviewSessionHooks", () => {
 		});
 		await hooks.onPreToolUse({
 			toolName: "bash",
-			toolArgs: {},
+			toolArgs: { command: "git status --short" },
+			cwd: "/tmp/repo",
+		});
+		await hooks.onPostToolUse({
+			toolName: "bash",
+			toolArgs: { command: "git status --short" },
+			toolResult: {
+				textResultForLlm: " M src/file.ts",
+				resultType: "success",
+				toolTelemetry: { durationMs: 9 },
+			},
 			cwd: "/tmp/repo",
 		});
 		await hooks.onPostToolUse({
@@ -829,12 +650,11 @@ describe("createReviewSessionHooks", () => {
 		});
 
 		assert.equal(telemetry.totalRequested, 2);
-		assert.equal(telemetry.totalAllowed, 1);
-		assert.equal(telemetry.totalDenied, 1);
-		assert.equal(telemetry.totalCompleted, 1);
-		assert.equal(telemetry.totalDurationMs, 12);
+		assert.equal(telemetry.totalAllowed, 2);
+		assert.equal(telemetry.totalDenied, 0);
+		assert.equal(telemetry.totalCompleted, 2);
+		assert.equal(telemetry.totalDurationMs, 21);
 		assert.equal(telemetry.errorCount, 0);
-		assert.equal(telemetry.assistantMessageChars, 0);
 		assert.equal(telemetry.byTool.get_pr_overview?.requested, 1);
 		assert.equal(telemetry.byTool.get_pr_overview?.allowed, 1);
 		assert.equal(telemetry.byTool.get_pr_overview?.denied, 0);
@@ -843,24 +663,13 @@ describe("createReviewSessionHooks", () => {
 			success: 1,
 		});
 		assert.equal(telemetry.byTool.get_pr_overview?.totalDurationMs, 12);
-		assert.equal(telemetry.byTool.get_pr_overview?.maxDurationMs, 12);
-		assert.equal(telemetry.byTool.get_pr_overview?.totalInputChars, 2);
-		assert.equal(
-			(telemetry.byTool.get_pr_overview?.totalOutputChars ?? 0) > 0,
-			true,
-		);
-		assert.equal(telemetry.byTool.get_pr_overview?.truncatedResponses, 0);
 		assert.deepEqual(telemetry.byTool.bash, {
 			requested: 1,
-			allowed: 0,
-			denied: 1,
-			completed: 0,
-			resultCounts: {},
-			totalDurationMs: 0,
-			maxDurationMs: 0,
-			totalInputChars: 0,
-			totalOutputChars: 0,
-			truncatedResponses: 0,
+			allowed: 1,
+			denied: 0,
+			completed: 1,
+			resultCounts: { success: 1 },
+			totalDurationMs: 9,
 		});
 	});
 
@@ -871,9 +680,7 @@ describe("createReviewSessionHooks", () => {
 			config,
 			logger,
 			drafts,
-			createProgressState({ prSummary: "done", fileSummaries: [] }, 4, {
-				reviewedFilePaths: createReminderReviewedFilePaths(),
-			}),
+			createProgressState({ prSummary: "done", fileSummaries: [] }, 4),
 		);
 		const result = await hooks.onPostToolUse({
 			toolName: "emit_finding",
@@ -884,12 +691,12 @@ describe("createReviewSessionHooks", () => {
 
 		assert.deepEqual(result, {
 			additionalContext:
-				"Findings recorded: 1/3. Keep findings distinct and evidence-backed, then continue with unchecked reviewed files, interfaces, and tests. Do not wrap up yet. Directly inspected reviewed files: 0/4. 4 reviewed files still lack direct inspection. Unchecked reviewed files include src/example.ts, src/example-1.ts, src/example-2.ts (+1 more). Inspect their diffs or file content before finishing.",
+				"Findings recorded: 1/3. Keep findings distinct and evidence-backed, then continue with unchecked reviewed files, interfaces, and tests.",
 		});
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool emit_finding result=success path=src/file.ts findings=1/3 reviewed_file_metadata=0/4 inspected_reviewed_files=0/4 file_summaries=0/4 pr_summary=recorded",
+					"Copilot completed tool emit_finding result=success path=src/file.ts findings=1/3 review_scope_seen=0/4 partial_scope_responses=0 inspected_reviewed_files=0/4 dropped_findings_invalid_payload=0 dropped_findings_invalid_location=0 file_summaries=0/4 pr_summary=recorded",
 				details: [],
 			},
 		]);
@@ -937,53 +744,39 @@ describe("createReviewSessionHooks", () => {
 		});
 	});
 
-	it("returns iterative exploration guidance after repo search tools", async () => {
+	it("returns post-use guidance after recording shell inspection output", async () => {
 		const { logger, infoEntries } = createLoggerSpy();
 		const hooks = createReviewSessionHooks(
 			config,
 			logger,
 			[],
-			createProgressState({}, 4, {
-				reviewedFilePaths: createReminderReviewedFilePaths(),
-			}),
+			createProgressState({ prSummary: "done", fileSummaries: [] }, 4),
 		);
+
 		const result = await hooks.onPostToolUse({
-			toolName: "search_text_in_repo",
-			toolArgs: { query: "foo", version: "head", directories: ["src"] },
-			toolResult: { textResultForLlm: "[]", resultType: "success" },
+			toolName: "bash",
+			toolArgs: { command: "git show HEAD:src/file.ts" },
+			toolResult: {
+				textResultForLlm: "content",
+				resultType: "success",
+				sessionLog: "verbose session log",
+				toolTelemetry: { durationMs: 25 },
+			},
 			cwd: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
 			additionalContext:
-				"Use this context to confirm or reject a specific hypothesis. If the first pass is inconclusive and the changed code touches auth, validation, persistence, serialization, async flow, or public interfaces, keep iterating with targeted follow-up reads or searches until the main risky paths are resolved or ruled out. Do not wrap up yet. Directly inspected reviewed files: 0/4. 4 reviewed files still lack direct inspection. Unchecked reviewed files include src/example.ts, src/example-1.ts, src/example-2.ts (+1 more). Inspect their diffs or file content before finishing.",
+				"Use this shell output to confirm or reject a specific hypothesis. Reuse evidence you already gathered, keep commands readonly, repo-scoped, and network-free, and avoid presentation-only reruns while you validate the changed behavior.",
 		});
+
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool search_text_in_repo result=success query_chars=3 version=head directories=src findings=0/3 reviewed_file_metadata=0/4 inspected_reviewed_files=0/4 file_summaries=0/4 pr_summary=missing",
+					'Copilot completed tool bash result=success duration_ms=25 command="git show HEAD:src/file.ts" findings=0/3 review_scope_seen=0/4 partial_scope_responses=0 inspected_reviewed_files=0/4 dropped_findings_invalid_payload=0 dropped_findings_invalid_location=0 file_summaries=0/4 pr_summary=recorded',
 				details: [],
 			},
 		]);
-	});
-
-	it("guides the model toward nearby-test discovery before broad search", async () => {
-		const hooks = createReviewSessionHooks(
-			config,
-			createLoggerSpy().logger,
-			[],
-		);
-		const result = await hooks.onPreToolUse({
-			toolName: "get_related_tests",
-			toolArgs: { path: "src/file.ts" },
-			cwd: "/tmp/repo",
-		});
-
-		assert.deepEqual(result, {
-			permissionDecision: "allow",
-			additionalContext:
-				"Use this to find likely nearby automated tests for a reviewed file and verify whether positive, negative, and edge-case coverage exists before resorting to broader repository search.",
-		});
 	});
 
 	it("returns post-use guidance for recorded finding inspection", async () => {
@@ -1031,7 +824,7 @@ describe("createReviewSessionHooks", () => {
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool remove_recorded_finding result=success finding=1 findings=1/3 reviewed_file_metadata=0/4 inspected_reviewed_files=0/4 file_summaries=1/4 pr_summary=missing",
+					"Copilot completed tool remove_recorded_finding result=success finding=1 findings=1/3 review_scope_seen=0/4 partial_scope_responses=0 inspected_reviewed_files=0/4 dropped_findings_invalid_payload=0 dropped_findings_invalid_location=0 file_summaries=1/4 pr_summary=missing",
 				details: [],
 			},
 		]);
@@ -1066,53 +859,16 @@ describe("createReviewSessionHooks", () => {
 		const largePatch = "x".repeat(600);
 
 		await hooks.onPreToolUse({
-			toolName: "get_file_diff",
-			toolArgs: { path: "src/file.ts", patch: largePatch },
+			toolName: "bash",
+			toolArgs: { command: `git diff -- ${largePatch}` },
 			cwd: "/tmp/repo",
 		});
 
 		assert.equal(infoEntries.length, 1);
-		assert.deepEqual(infoEntries[0], {
-			message: "Copilot requested tool get_file_diff path=src/file.ts",
-			details: [],
-		});
-	});
-
-	it("logs compact progress instead of raw post-tool payloads", async () => {
-		const { logger, infoEntries } = createLoggerSpy();
-		const hooks = createReviewSessionHooks(
-			config,
-			logger,
-			[],
-			createProgressState({ prSummary: "done", fileSummaries: [] }, 4, {
-				reviewedFilePaths: createReminderReviewedFilePaths(),
-			}),
+		assert.match(
+			infoEntries[0]?.message ?? "",
+			/^Copilot requested tool bash command=/,
 		);
-
-		const result = await hooks.onPostToolUse({
-			toolName: "get_file_content",
-			toolArgs: { path: "src/file.ts", version: "head" },
-			toolResult: {
-				textResultForLlm: "content",
-				resultType: "success",
-				sessionLog: "verbose session log",
-				toolTelemetry: { durationMs: 25 },
-			},
-			cwd: "/tmp/repo",
-		});
-
-		assert.deepEqual(result, {
-			additionalContext:
-				"Directly inspected reviewed files: 1/4. Do not emit a finding unless the inspected code supports a concrete, material issue introduced or materially worsened by the PR. If the changed file touches shared behavior or critical boundaries, inspect the most relevant nearby path before closing the hypothesis. Do not wrap up yet. 3 reviewed files still lack direct inspection. Unchecked reviewed files include src/example.ts, src/example-1.ts, src/example-2.ts. Inspect their diffs or file content before finishing.",
-		});
-
-		assert.deepEqual(infoEntries, [
-			{
-				message:
-					"Copilot completed tool get_file_content result=success duration_ms=25 path=src/file.ts version=head findings=0/3 reviewed_file_metadata=0/4 inspected_reviewed_files=1/4 file_summaries=0/4 pr_summary=recorded",
-				details: [],
-			},
-		]);
 	});
 
 	it("shows file summary progress after recording a file summary", async () => {
@@ -1140,7 +896,7 @@ describe("createReviewSessionHooks", () => {
 		assert.deepEqual(infoEntries, [
 			{
 				message:
-					"Copilot completed tool record_file_summary result=success path=src/third.ts findings=0/3 reviewed_file_metadata=0/4 inspected_reviewed_files=0/4 file_summaries=2/4 pr_summary=recorded",
+					"Copilot completed tool record_file_summary result=success path=src/third.ts findings=0/3 review_scope_seen=0/4 partial_scope_responses=0 inspected_reviewed_files=0/4 dropped_findings_invalid_payload=0 dropped_findings_invalid_location=0 file_summaries=2/4 pr_summary=recorded",
 				details: [],
 			},
 		]);
@@ -1194,7 +950,7 @@ describe("createReviewSessionHooks", () => {
 			},
 			{
 				message:
-					"Copilot completed tool record_pr_summary result=success summary_chars=2 findings=0/3 reviewed_file_metadata=0/26 inspected_reviewed_files=0/26 file_summaries=disabled pr_summary=recorded",
+					"Copilot completed tool record_pr_summary result=success summary_chars=2 findings=0/3 review_scope_seen=0/26 partial_scope_responses=0 inspected_reviewed_files=0/26 dropped_findings_invalid_payload=0 dropped_findings_invalid_location=0 file_summaries=disabled pr_summary=recorded",
 				details: [],
 			},
 		]);
@@ -1446,9 +1202,57 @@ describe("runCopilotReview", () => {
 		assert.equal(createdOptions[0]?.useLoggedInUser, false);
 	});
 
-	it("passes system prompt customization and early event handler into session creation", async () => {
+	it("wraps Copilot startup HTML parse failures with actionable auth guidance", async () => {
+		const context = createReviewContext();
+		let stopCalls = 0;
+
+		await assert.rejects(
+			runCopilotReview(
+				{
+					...config,
+					githubHost: "tenant.ghe.com",
+				},
+				context,
+				{} as never,
+				createLoggerSpy().logger,
+				{
+					createCopilotClient() {
+						return {
+							async start() {
+								throw new SyntaxError(
+									"Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON",
+								);
+							},
+							async createSession() {
+								throw new Error("createSession should not be called directly");
+							},
+							async stop() {
+								stopCalls += 1;
+								return [];
+							},
+						};
+					},
+				},
+			),
+			(error) => {
+				assert(error instanceof Error);
+				assert.match(
+					error.message,
+					/Copilot client startup failed because the runtime returned HTML instead of JSON/,
+				);
+				assert.match(error.message, /tenant\.ghe\.com/);
+				assert(error.cause instanceof SyntaxError);
+				return true;
+			},
+		);
+
+		assert.equal(stopCalls, 0);
+	});
+
+	it("passes system prompt customization and readonly shell session config into session creation", async () => {
 		const context = createReviewContext();
 		const createdSessionConfigs: SessionConfig[] = [];
+		const sessionEventHandlers: SessionEventHandler[] = [];
 		const logSpy = createLoggerSpy();
 
 		await runCopilotReview(config, context, {} as never, logSpy.logger, {
@@ -1459,21 +1263,9 @@ describe("runCopilotReview", () => {
 					async createSession(configArg: SessionConfig) {
 						createdSessionConfigs.push(configArg);
 
-						const onEvent: SessionEventHandler | undefined = configArg.onEvent;
-						onEvent?.({
-							id: "1",
-							timestamp: "2026-03-25T00:00:00.000Z",
-							parentId: null,
-							ephemeral: true,
-							type: "assistant.reasoning",
-							data: {
-								reasoningId: "r1",
-								content: "Review reasoning",
-							},
-						});
-
 						return {
-							on() {
+							on(handler: SessionEventHandler) {
+								sessionEventHandlers.push(handler);
 								return () => {};
 							},
 							async sendAndWait() {
@@ -1494,8 +1286,180 @@ describe("runCopilotReview", () => {
 			createdSessionConfigs[0]?.systemMessage,
 			buildSystemMessage(config, context.reviewedFiles.length),
 		);
-		assert.equal(typeof createdSessionConfigs[0]?.onEvent, "function");
-		assert.deepEqual(logSpy.infoEntries, []);
-		assert.deepEqual(logSpy.warnEntries, []);
+		assert.deepEqual(createdSessionConfigs[0]?.availableTools, [
+			"get_pr_overview",
+			"record_pr_summary",
+			"record_file_summary",
+			"list_recorded_findings",
+			"remove_recorded_finding",
+			"replace_recorded_finding",
+			"emit_finding",
+			"bash",
+		]);
+		assert.equal(
+			typeof createdSessionConfigs[0]?.onPermissionRequest,
+			"function",
+		);
+		assert.equal(sessionEventHandlers.length, 1);
+
+		const allowed = await createdSessionConfigs[0]?.onPermissionRequest(
+			{
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git diff --stat",
+				intention: "Inspect diff",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/tmp/repo/src/file.ts"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(allowed, { kind: "approve-once" });
+
+		const denied = await createdSessionConfigs[0]?.onPermissionRequest(
+			{
+				kind: "shell",
+				commands: [{ identifier: "node", readOnly: true }],
+				fullCommandText: 'node -e "process.exit(0)"',
+				intention: "Run an interpreter",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/tmp/repo/src/file.ts"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(denied, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode allows only approved readonly inspection commands.",
+		});
+
+		const deniedGitFetch = await createdSessionConfigs[0]?.onPermissionRequest(
+			{
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git fetch origin main",
+				intention: "Fetch refs",
+				hasWriteFileRedirection: false,
+				possiblePaths: [],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedGitFetch, {
+			kind: "reject",
+			feedback: "Readonly review mode blocks remote-capable git commands.",
+		});
+
+		const deniedUrl = await createdSessionConfigs[0]?.onPermissionRequest(
+			{
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git diff https://example.com",
+				intention: "Inspect a URL-like input",
+				hasWriteFileRedirection: false,
+				possiblePaths: [],
+				possibleUrls: [{ url: "https://example.com" }],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedUrl, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode blocks shell commands that may access network URLs.",
+		});
+
+		const deniedEchoWrapper =
+			await createdSessionConfigs[0]?.onPermissionRequest(
+				{
+					kind: "shell",
+					commands: [{ identifier: "git", readOnly: true }],
+					fullCommandText: "echo 'diff' && git diff --stat",
+					intention: "Inspect diff with label",
+					hasWriteFileRedirection: false,
+					possiblePaths: ["/tmp/repo/src/file.ts"],
+					possibleUrls: [],
+				} as PermissionRequest,
+				{ sessionId: "session-1" },
+			);
+		assert.deepEqual(deniedEchoWrapper, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode blocks presentation-only shell wrappers. Run the underlying inspection command directly.",
+		});
+
+		const deniedPrintfWrapper =
+			await createdSessionConfigs[0]?.onPermissionRequest(
+				{
+					kind: "shell",
+					commands: [{ identifier: "git", readOnly: true }],
+					fullCommandText: "git diff --stat && printf '\\n'",
+					intention: "Inspect diff with footer",
+					hasWriteFileRedirection: false,
+					possiblePaths: ["/tmp/repo/src/file.ts"],
+					possibleUrls: [],
+				} as PermissionRequest,
+				{ sessionId: "session-1" },
+			);
+		assert.deepEqual(deniedPrintfWrapper, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode blocks presentation-only shell wrappers. Run the underlying inspection command directly.",
+		});
+
+		sessionEventHandlers[0]?.({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			ephemeral: true,
+			type: "assistant.intent",
+			data: {
+				intent: "Checking the changed behavior",
+			},
+		});
+
+		assert.deepEqual(logSpy.infoEntries, [
+			{
+				message:
+					"Continuing Copilot review because coverage is incomplete (1/1)",
+				details: [],
+			},
+			{
+				message: "Copilot intent",
+				details: [
+					{
+						agentId: undefined,
+						intent: "Checking the changed behavior",
+					},
+				],
+			},
+		]);
+		assert.deepEqual(logSpy.warnEntries, [
+			{
+				message:
+					"Stopping Copilot review continuation because coverage did not progress",
+				details: [
+					{
+						reviewScopeSeen: 0,
+						reviewedFileCount: 1,
+						directlyInspectedReviewedFiles: 0,
+						partialScopeResponses: 0,
+					},
+				],
+			},
+			{
+				message:
+					"Copilot review finished before full reviewed-file coverage was observed",
+				details: [
+					{
+						reviewScopeSeen: 0,
+						partialScopeResponses: 0,
+						reviewedFileCount: 1,
+						directlyInspectedReviewedFiles: 0,
+						remainingReviewedFiles: ["src/example.ts"],
+					},
+				],
+			},
+		]);
 	});
 });

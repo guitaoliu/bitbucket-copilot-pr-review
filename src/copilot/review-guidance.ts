@@ -24,7 +24,7 @@ const FINDING_TAXONOMY_RULES = [
 	{
 		type: "CODE_SMELL",
 		hintClause:
-			" only for substantial merge-relevant fragility introduced or materially worsened by the PR, such as missing test coverage",
+			" only for substantial merge-relevant fragility introduced or materially worsened by the PR",
 		promptDetails:
 			"only for substantial merge-relevant fragility with concrete impact, such as missing test coverage for a meaningful behavior change or brittle logic likely to break soon, when the PR introduces or materially worsens that risk. Never use it for style, naming, formatting, or preference.",
 	},
@@ -57,7 +57,7 @@ export const FINDING_TAXONOMY_PROMPT_LINES = FINDING_TAXONOMY_RULES.map(
 );
 
 export const FINDING_TAXONOMY_PREFERENCE_PROMPT_LINE =
-	"- Prefer BUG or VULNERABILITY when the PR makes behavior wrong or widens access.";
+	"- Prefer BUG or VULNERABILITY when the PR already makes behavior wrong or widens access. Use CODE_SMELL for missing tests only when the gap adds a separate merge-relevant risk beyond any concrete defect.";
 
 export const FINDING_TAXONOMY_HINT = `Use ${joinNaturalLanguageList(
 	FINDING_TAXONOMY_RULES.map((rule) => `${rule.type}${rule.hintClause}`),
@@ -70,9 +70,9 @@ export const QUESTION_SHAPED_FINDING_PROMPT_LINE =
 	"- No question-shaped or speculative findings: investigate the code path until you can verify the concern or rule it out.";
 
 export const TEST_COVERAGE_HINT =
-	"Treat missing tests as a standalone finding when a meaningful or risky behavior change leaves important positive, negative, or edge-case behavior unvalidated, especially in auth, validation, persistence, concurrency, serialization, or public API paths. Prefer concrete BUG or VULNERABILITY findings when behavior is already wrong, but still report the coverage gap when it leaves a distinct merge risk.";
+	"Treat missing tests as a standalone finding only when a meaningful or risky behavior change leaves important positive, negative, or edge-case behavior unvalidated and that gap adds a distinct merge risk. If behavior is already wrong or access is widened, prefer BUG or VULNERABILITY instead of a standalone test-gap finding unless the missing coverage adds a separate merge-relevant risk.";
 
 export const TEST_COVERAGE_PROMPT_LINES = [
-	"- Missing or inadequate tests are reportable when a meaningful or risky behavior change leaves important positive, negative, or edge-case behavior unvalidated, especially in auth, validation, persistence, concurrency, serialization, or public API paths.",
-	"- Do not emit a standalone test-coverage finding when a stronger concrete BUG or VULNERABILITY already captures the same PR-introduced or PR-worsened root cause, but do report the coverage gap when it leaves a distinct merge-relevant risk that would otherwise be easy to miss.",
+	"- Missing or inadequate tests are reportable only when a meaningful or risky behavior change leaves important positive, negative, or edge-case behavior unvalidated and that gap adds a distinct merge risk, especially in auth, validation, persistence, concurrency, serialization, or public API paths.",
+	"- If the PR already makes behavior wrong or widens access, emit BUG or VULNERABILITY instead of a standalone test-coverage finding unless the missing coverage adds a separate merge-relevant risk that would otherwise be easy to miss.",
 ] as const;

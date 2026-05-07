@@ -24,6 +24,7 @@ Copilot authentication:
 Optional environment:
   PUBLISH=1                    Publish to Bitbucket instead of dry-run
   FORCE_REVIEW=1               Force reruns for already-reviewed PR revisions
+  REVIEW_FORCE=1               Alias for FORCE_REVIEW used by the CLI env config
   MAX_PARALLEL=2               Concurrent batch review workers
   TEMP_ROOT=/tmp/review-batch  Parent directory for temp clone/cache data
   KEEP_WORKDIRS=1              Preserve per-PR workdirs after the run
@@ -90,6 +91,8 @@ export COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 export LOG_LEVEL="${LOG_LEVEL:-debug}"
 export NODE_USE_SYSTEM_CA="${NODE_USE_SYSTEM_CA:-1}"
 
+FORCE_REVIEW_EFFECTIVE="${FORCE_REVIEW:-${REVIEW_FORCE:-0}}"
+
 declare -a REVIEW_ARGS=(batch "$REPO_URL")
 
 if [[ "${PUBLISH:-0}" == "1" ]]; then
@@ -98,7 +101,7 @@ else
   REVIEW_ARGS+=(--dry-run)
 fi
 
-if [[ "${FORCE_REVIEW:-0}" == "1" ]]; then
+if [[ "$FORCE_REVIEW_EFFECTIVE" == "1" ]]; then
   REVIEW_ARGS+=(--force-review)
 fi
 
@@ -120,7 +123,7 @@ printf 'Model: %s\n' "$COPILOT_MODEL"
 printf 'Reasoning effort: %s\n' "$COPILOT_REASONING_EFFORT"
 printf 'Node system CA: %s\n' "$( [[ "$NODE_USE_SYSTEM_CA" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 printf 'Mode: %s\n' "$( [[ "${PUBLISH:-0}" == "1" ]] && printf 'publish' || printf 'dry-run' )"
-printf 'Force review: %s\n' "$( [[ "${FORCE_REVIEW:-0}" == "1" ]] && printf 'enabled' || printf 'disabled' )"
+printf 'Force review: %s\n' "$( [[ "$FORCE_REVIEW_EFFECTIVE" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 printf 'Keep workdirs: %s\n' "$( [[ "${KEEP_WORKDIRS:-0}" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 printf 'Max parallel: %s\n' "${MAX_PARALLEL:-2}"
 if [[ -n "${TEMP_ROOT:-}" ]]; then

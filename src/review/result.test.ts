@@ -386,7 +386,6 @@ describe("buildReviewRunOutput", () => {
 				totalDurationMs: 44,
 				sessionDurationMs: 80,
 				errorCount: 0,
-				assistantMessageChars: 19,
 				byTool: {
 					get_pr_overview: {
 						requested: 1,
@@ -395,10 +394,6 @@ describe("buildReviewRunOutput", () => {
 						completed: 1,
 						resultCounts: { success: 1 },
 						totalDurationMs: 44,
-						maxDurationMs: 44,
-						totalInputChars: 2,
-						totalOutputChars: 18,
-						truncatedResponses: 0,
 					},
 				},
 			},

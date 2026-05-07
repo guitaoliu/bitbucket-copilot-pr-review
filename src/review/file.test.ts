@@ -164,4 +164,52 @@ describe("normalizeFindingDraftLocation", () => {
 			},
 		});
 	});
+
+	it("remaps nearby lines inside the same changed hunk to the nearest changed line", () => {
+		const reviewedFile: ChangedFile = {
+			path: "src/new-name.ts",
+			status: "modified",
+			patch: "diff --git a/src/new-name.ts b/src/new-name.ts",
+			changedLines: [10, 12],
+			hunks: [
+				{
+					oldStart: 10,
+					oldLines: 3,
+					newStart: 10,
+					newLines: 4,
+					header: "",
+					changedLines: [10, 12],
+				},
+			],
+			additions: 2,
+			deletions: 1,
+			isBinary: false,
+		};
+
+		const result = normalizeFindingDraftLocation(
+			{
+				path: "src/new-name.ts",
+				line: 11,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Nearby line",
+				details: "Anchored one line away inside the same hunk.",
+			},
+			createReviewedFileLookup([reviewedFile]),
+		);
+
+		assert.deepEqual(result, {
+			normalizedDraft: {
+				path: "src/new-name.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Nearby line",
+				details: "Anchored one line away inside the same hunk.",
+			},
+			note: "normalized line from 11 to 10.",
+		});
+	});
 });

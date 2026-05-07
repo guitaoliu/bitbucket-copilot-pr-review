@@ -186,7 +186,7 @@ Batch mode keeps a shared bare mirror cache under the temp root and creates one 
 
 The batch JSON output includes `metrics.mirror` and `metrics.workspaces`. Single-review JSON output includes `metrics.toolTelemetry` so you can inspect which Copilot tools were requested, allowed, denied, and completed.
 
-The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and forwards common controls such as `MAX_PARALLEL`, `TEMP_ROOT`, `KEEP_WORKDIRS=1`, and `FORCE_REVIEW=1`.
+The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and forwards common controls such as `MAX_PARALLEL`, `TEMP_ROOT`, `KEEP_WORKDIRS=1`, and either `FORCE_REVIEW=1` or `REVIEW_FORCE=1`.
 
 Pull requests whose source branch starts with `renovate/` are skipped automatically by default. You can override the skipped branch prefixes with `REVIEW_SKIP_BRANCH_PREFIXES` or repo-level `review.skipBranchPrefixes`, including clearing the list entirely.
 
@@ -201,7 +201,7 @@ scripts/run-local-review.sh /path/to/local/my-repo \
   https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
-The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, and runs in dry-run mode unless you set `PUBLISH=1`.
+The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and accepts either `FORCE_REVIEW=1` or `REVIEW_FORCE=1` to bypass a cached revision skip.
 
 If your Bitbucket Data Center uses an internal or self-signed certificate, prefer setting `BITBUCKET_CA_CERT_PATH` to a PEM file containing your CA bundle. When the CA is already installed on the machine, `NODE_USE_SYSTEM_CA=1` lets Node use the system trust store. Strict TLS verification is enabled by default.
 

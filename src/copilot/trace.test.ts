@@ -8,9 +8,11 @@ function createLoggerSpy(): {
 	logger: Logger;
 	traceCalls: Array<{ message: string; details: unknown[] }>;
 	infoCalls: Array<{ message: string; details: unknown[] }>;
+	warnCalls: Array<{ message: string; details: unknown[] }>;
 } {
 	const traceCalls: Array<{ message: string; details: unknown[] }> = [];
 	const infoCalls: Array<{ message: string; details: unknown[] }> = [];
+	const warnCalls: Array<{ message: string; details: unknown[] }> = [];
 
 	return {
 		logger: {
@@ -18,7 +20,9 @@ function createLoggerSpy(): {
 			info(message, ...details) {
 				infoCalls.push({ message, details });
 			},
-			warn() {},
+			warn(message, ...details) {
+				warnCalls.push({ message, details });
+			},
 			error() {},
 			trace(message, ...details) {
 				traceCalls.push({ message, details });
@@ -27,6 +31,7 @@ function createLoggerSpy(): {
 		},
 		traceCalls,
 		infoCalls,
+		warnCalls,
 	};
 }
 
@@ -163,6 +168,165 @@ describe("createSessionEventTracer", () => {
 						status: "completed",
 						content:
 							"<system_notification>Agent completed</system_notification>",
+					},
+				],
+			},
+		]);
+	});
+
+	it("logs assistant intent as visible progress", () => {
+		const { logger, infoCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			ephemeral: true,
+			type: "assistant.intent",
+			data: {
+				intent: "Inspecting the changed file and nearby tests",
+			},
+		});
+
+		assert.deepEqual(infoCalls, [
+			{
+				message: "Copilot intent",
+				details: [
+					{
+						agentId: undefined,
+						intent: "Inspecting the changed file and nearby tests",
+					},
+				],
+			},
+		]);
+	});
+
+	it("logs tool planning from assistant messages", () => {
+		const { logger, infoCalls, traceCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			type: "assistant.message",
+			data: {
+				content: "",
+				phase: "tool_planning",
+				toolRequests: [
+					{
+						toolCallId: "tool-1",
+						name: "get_pr_overview",
+						arguments: {},
+						intentionSummary: "Load review scope first",
+					},
+					{
+						toolCallId: "tool-2",
+						name: "bash",
+						arguments: {},
+					},
+				],
+			},
+		} as SessionEvent);
+
+		assert.deepEqual(traceCalls, []);
+		assert.deepEqual(infoCalls, [
+			{
+				message: "Copilot planned tool calls",
+				details: [
+					{
+						phase: "tool_planning",
+						toolCount: 2,
+						toolNames: ["get_pr_overview", "bash"],
+						intentionSummaries: ["Load review scope first"],
+					},
+				],
+			},
+		]);
+	});
+
+	it("logs subagent lifecycle progress", () => {
+		const { logger, infoCalls, warnCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			type: "subagent.started",
+			agentId: "agent-1",
+			data: {
+				agentName: "explore",
+				agentDisplayName: "Explore Agent",
+				agentDescription: "Searches the codebase",
+				toolCallId: "tool-1",
+			},
+		});
+		tracer.handleEvent({
+			id: "2",
+			timestamp: "2026-03-25T00:00:01.000Z",
+			parentId: "1",
+			type: "subagent.completed",
+			agentId: "agent-1",
+			data: {
+				agentName: "explore",
+				agentDisplayName: "Explore Agent",
+				durationMs: 500,
+				totalToolCalls: 3,
+				toolCallId: "tool-1",
+			},
+		});
+		tracer.handleEvent({
+			id: "3",
+			timestamp: "2026-03-25T00:00:02.000Z",
+			parentId: "2",
+			type: "subagent.failed",
+			agentId: "agent-2",
+			data: {
+				agentName: "builder",
+				agentDisplayName: "Builder Agent",
+				error: "Tool call failed",
+				durationMs: 200,
+				toolCallId: "tool-2",
+			},
+		});
+
+		assert.deepEqual(infoCalls, [
+			{
+				message: "Copilot subagent started",
+				details: [
+					{
+						agentId: "agent-1",
+						agentName: "explore",
+						agentDisplayName: "Explore Agent",
+						agentDescription: "Searches the codebase",
+					},
+				],
+			},
+			{
+				message: "Copilot subagent completed",
+				details: [
+					{
+						agentId: "agent-1",
+						agentName: "explore",
+						agentDisplayName: "Explore Agent",
+						durationMs: 500,
+						totalToolCalls: 3,
+					},
+				],
+			},
+		]);
+		assert.deepEqual(warnCalls, [
+			{
+				message: "Copilot subagent failed",
+				details: [
+					{
+						agentId: "agent-2",
+						agentName: "builder",
+						agentDisplayName: "Builder Agent",
+						error: "Tool call failed",
+						durationMs: 200,
 					},
 				],
 			},

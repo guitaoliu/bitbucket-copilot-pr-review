@@ -24,6 +24,7 @@ Copilot authentication:
 Optional environment:
   PUBLISH=1                    Publish to Bitbucket instead of dry-run
   FORCE_REVIEW=1               Force a rerun even if this commit already has the report key
+  REVIEW_FORCE=1               Alias for FORCE_REVIEW used by the CLI env config
   CONFIRM_RERUN=1              Prompt only when rerunning unusable cached artifacts for the current unchanged PR head and revision
   CI_SUMMARY_PATH=/tmp/ci.txt  Include CI context in the review
   NODE_USE_SYSTEM_CA=1         Use the Node.js system CA store (default)
@@ -82,6 +83,8 @@ export COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 export LOG_LEVEL="${LOG_LEVEL:-debug}"
 export NODE_USE_SYSTEM_CA="${NODE_USE_SYSTEM_CA:-1}"
 
+FORCE_REVIEW_EFFECTIVE="${FORCE_REVIEW:-${REVIEW_FORCE:-0}}"
+
 declare -a REVIEW_ARGS=(review "$PR_URL")
 
 if [[ "${PUBLISH:-0}" == "1" ]]; then
@@ -90,7 +93,7 @@ else
   REVIEW_ARGS+=(--dry-run)
 fi
 
-if [[ "${FORCE_REVIEW:-0}" == "1" ]]; then
+if [[ "$FORCE_REVIEW_EFFECTIVE" == "1" ]]; then
   REVIEW_ARGS+=(--force-review)
 fi
 
@@ -105,7 +108,7 @@ printf 'Model: %s\n' "$COPILOT_MODEL"
 printf 'Reasoning effort: %s\n' "$COPILOT_REASONING_EFFORT"
 printf 'Node system CA: %s\n' "$( [[ "$NODE_USE_SYSTEM_CA" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 printf 'Mode: %s\n' "$( [[ "${PUBLISH:-0}" == "1" ]] && printf 'publish' || printf 'dry-run' )"
-printf 'Force review: %s\n' "$( [[ "${FORCE_REVIEW:-0}" == "1" ]] && printf 'enabled' || printf 'disabled' )"
+printf 'Force review: %s\n' "$( [[ "$FORCE_REVIEW_EFFECTIVE" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 printf 'Confirm rerun: %s\n' "$( [[ "${CONFIRM_RERUN:-0}" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 if [[ -n "${BITBUCKET_CA_CERT_PATH:-}" ]]; then
   printf 'Bitbucket CA cert: %s\n' "$BITBUCKET_CA_CERT_PATH"

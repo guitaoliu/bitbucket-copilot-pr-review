@@ -12,22 +12,13 @@ import type {
 } from "../review/types.ts";
 import { createReviewToolContext } from "./tools/context.ts";
 import { createEmitFindingTool } from "./tools/emit-finding.ts";
-import { createGetCiSummaryTool } from "./tools/get-ci-summary.ts";
-import { createGetFileContentTool } from "./tools/get-file-content.ts";
-import { createGetFileDiffTool } from "./tools/get-file-diff.ts";
-import { createGetFileDiffHunkTool } from "./tools/get-file-diff-hunk.ts";
-import { createGetFileListByDirectoryTool } from "./tools/get-file-list-by-directory.ts";
 import { createGetPrOverviewTool } from "./tools/get-pr-overview.ts";
-import { createGetRelatedFileContentTool } from "./tools/get-related-file-content.ts";
-import { createGetRelatedTestsTool } from "./tools/get-related-tests.ts";
-import { createListChangedFilesTool } from "./tools/list-changed-files.ts";
+import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
 import { createListRecordedFindingsTool } from "./tools/list-recorded-findings.ts";
 import { createRecordFileSummaryTool } from "./tools/record-file-summary.ts";
 import { createRecordPrSummaryTool } from "./tools/record-pr-summary.ts";
 import { createRemoveRecordedFindingTool } from "./tools/remove-recorded-finding.ts";
 import { createReplaceRecordedFindingTool } from "./tools/replace-recorded-finding.ts";
-import { createSearchSymbolNameTool } from "./tools/search-symbol-name.ts";
-import { createSearchTextInRepoTool } from "./tools/search-text-in-repo.ts";
 
 const config: ReviewerConfig = {
 	repoRoot: "/tmp/repo",
@@ -195,129 +186,19 @@ function getHandler<TArgs, TResult>(tool: Tool<TArgs>) {
 }
 
 describe("Copilot tools", () => {
-	it("reads base content from oldPath for renamed files", async () => {
-		const git = createGitStub({
-			readTextFileAtCommit: async (commit, filePath) => {
-				assert.equal(commit, "base-123");
-				assert.equal(filePath, "src/old-name.ts");
-				return {
-					status: "ok" as const,
-					content: ["one", "two", "three", "four", "five"].join("\n"),
-				};
-			},
-		});
-		const tool = createGetFileContentTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{
-				path: string;
-				version: "head" | "base";
-				startLine?: number;
-				endLine?: number;
-			},
-			unknown
-		>(tool);
-
-		const result = await handler(
-			{ path: "src/new-name.ts", version: "base", startLine: 2, endLine: 5 },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_file_content",
-				arguments: {},
-			},
+	it("creates only the active review tools in the published order", () => {
+		const tools = createReviewTools(
+			config,
+			reviewContext,
+			createGitStub(),
+			[],
+			createSummaryDrafts(),
 		);
 
-		assert.deepEqual(result, {
-			path: "src/old-name.ts",
-			version: "base",
-			totalLines: 5,
-			returnedStartLine: 2,
-			returnedEndLine: 5,
-			content: "2: two\n3: three\n4: four\n5: five",
-		});
-	});
-
-	it("reads base content from the current path for copied files", async () => {
-		const copiedReviewContext: ReviewContext = {
-			...reviewContext,
-			reviewedFiles: [
-				{
-					path: "src/copied.ts",
-					oldPath: "src/original.ts",
-					status: "copied",
-					patch: "diff --git a/src/original.ts b/src/copied.ts",
-					changedLines: [10],
-					hunks: [
-						{
-							oldStart: 10,
-							oldLines: 0,
-							newStart: 10,
-							newLines: 1,
-							header: "",
-							changedLines: [10],
-						},
-					],
-					additions: 1,
-					deletions: 0,
-					isBinary: false,
-				},
-			],
-		};
-		const git = createGitStub({
-			readTextFileAtCommit: async (commit, filePath) => {
-				assert.equal(commit, "base-123");
-				assert.equal(filePath, "src/copied.ts");
-				return {
-					status: "ok" as const,
-					content: ["one", "two"].join("\n"),
-				};
-			},
-		});
-		const tool = createGetFileContentTool(
-			createReviewToolContext(
-				config,
-				copiedReviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
+		assert.deepEqual(
+			tools.map((tool) => tool.name),
+			[...REVIEW_TOOL_NAMES],
 		);
-		const handler = getHandler<
-			{
-				path: string;
-				version: "head" | "base";
-				startLine?: number;
-				endLine?: number;
-			},
-			unknown
-		>(tool);
-
-		const result = await handler(
-			{ path: "src/copied.ts", version: "base" },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_file_content",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			path: "src/copied.ts",
-			version: "base",
-			totalLines: 2,
-			returnedStartLine: 1,
-			returnedEndLine: 2,
-			content: "1: one\n2: two",
-		});
 	});
 
 	it("rejects emit_finding when the line is not changed", async () => {
@@ -372,10 +253,7 @@ describe("Copilot tools", () => {
 				createSummaryDrafts(),
 			),
 		);
-		const handler = getHandler<
-			FindingDraft,
-			{ resultType: string; textResultForLlm: string }
-		>(tool);
+		const handler = getHandler<FindingDraft, string>(tool);
 
 		const result = await handler(
 			{
@@ -479,613 +357,7 @@ describe("Copilot tools", () => {
 		assert.deepEqual(drafts, []);
 	});
 
-	it("normalizes search options and directory restriction", async () => {
-		const git = createGitStub({
-			getPathTypeAtCommit: async (commit, filePath) => {
-				assert.equal(commit, "head-123");
-				assert.equal(filePath, "src");
-				return "directory";
-			},
-			searchTextAtCommit: async (commit, query, options) => {
-				assert.equal(commit, "head-123");
-				assert.equal(query, "needle");
-				assert.deepEqual(options, {
-					directoryPaths: ["src"],
-					limit: 200,
-					mode: "literal",
-					wholeWord: true,
-				});
-				return {
-					matches: [{ path: "src/new-name.ts", line: 10, text: "needle" }],
-					truncated: false,
-					totalMatches: 1,
-				};
-			},
-		});
-		const tool = createSearchTextInRepoTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{
-				query: string;
-				version: "head" | "base";
-				directories?: string[];
-				mode?: "literal" | "regex";
-				wholeWord?: boolean;
-				limit?: number;
-			},
-			unknown
-		>(tool);
-
-		const result = await handler(
-			{
-				query: "needle",
-				version: "head",
-				directories: ["src"],
-				wholeWord: true,
-				limit: 999,
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "search_text_in_repo",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			query: "needle",
-			version: "head",
-			mode: "literal",
-			wholeWord: true,
-			directories: ["src"],
-			matches: [{ path: "src/new-name.ts", line: 10, text: "needle" }],
-			truncated: false,
-			totalMatches: 1,
-		});
-	});
-
-	it("rejects invalid regex searches without aborting the tool", async () => {
-		const tool = createSearchTextInRepoTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				createGitStub(),
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{
-				query: string;
-				version: "head" | "base";
-				mode?: "literal" | "regex";
-			},
-			{ resultType: string; textResultForLlm: string }
-		>(tool);
-
-		const result = await handler(
-			{ query: "(", version: "head", mode: "regex" },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "search_text_in_repo",
-				arguments: {},
-			},
-		);
-
-		assert.equal(result.resultType, "rejected");
-		assert.match(result.textResultForLlm, /^Invalid regex search pattern:/);
-	});
-
-	it("rejects file paths passed as directories for repo search", async () => {
-		const git = createGitStub({
-			getPathTypeAtCommit: async () => "file",
-		});
-		const tool = createSearchTextInRepoTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{
-				query: string;
-				version: "head" | "base";
-				directories?: string[];
-			},
-			{ resultType: string; textResultForLlm: string }
-		>(tool);
-
-		const result = await handler(
-			{
-				query: "needle",
-				version: "head",
-				directories: ["src/new-name.ts"],
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "search_text_in_repo",
-				arguments: {},
-			},
-		);
-
-		assert.equal(result.resultType, "rejected");
-		assert.equal(
-			result.textResultForLlm,
-			"Directory access rejected: src/new-name.ts is a file, not a directory.",
-		);
-	});
-
-	it("filters blocked files out of symbol search results", async () => {
-		const git = createGitStub({
-			getPathTypeAtCommit: async () => "directory",
-			searchTextAtCommit: async () => ({
-				matches: [
-					{ path: "src/new-name.ts", line: 10, text: "PasswordChallenge" },
-					{ path: "src/.env.local", line: 1, text: "PasswordChallenge" },
-				],
-				truncated: false,
-				totalMatches: 2,
-			}),
-		});
-		const tool = createSearchSymbolNameTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{
-				symbol: string;
-				version: "head" | "base";
-				directories?: string[];
-			},
-			unknown
-		>(tool);
-
-		const result = await handler(
-			{
-				symbol: "PasswordChallenge",
-				version: "head",
-				directories: ["src"],
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "search_symbol_name",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			symbol: "PasswordChallenge",
-			version: "head",
-			directories: ["src"],
-			matches: [
-				{ path: "src/new-name.ts", line: 10, text: "PasswordChallenge" },
-			],
-			truncated: false,
-			totalMatches: 1,
-		});
-	});
-
-	it("preserves git-layer truncation metadata for text search", async () => {
-		const git = createGitStub({
-			getPathTypeAtCommit: async () => "directory",
-			searchTextAtCommit: async () => ({
-				matches: [{ path: "src/new-name.ts", line: 10, text: "needle" }],
-				truncated: true,
-				totalMatches: 2,
-			}),
-		});
-		const tool = createSearchTextInRepoTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{
-				query: string;
-				version: "head" | "base";
-				limit?: number;
-				directories?: string[];
-			},
-			unknown
-		>(tool);
-
-		const result = await handler(
-			{ query: "needle", version: "head", directories: ["src"], limit: 1 },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "search_text_in_repo",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			query: "needle",
-			version: "head",
-			mode: "literal",
-			wholeWord: false,
-			directories: ["src"],
-			matches: [{ path: "src/new-name.ts", line: 10, text: "needle" }],
-			truncated: true,
-			totalMatches: 1,
-		});
-	});
-
-	it("suggests nearby tests from concrete directories", async () => {
-		const git = createGitStub({
-			getPathTypeAtCommit: async (_commit, filePath) => {
-				if (filePath === "src" || filePath === "test") {
-					return "directory";
-				}
-
-				return undefined;
-			},
-			listFilesAtCommit: async (commit, directoryPaths) => {
-				assert.equal(commit, "head-123");
-				if (directoryPaths?.[0] === "src") {
-					return [
-						"src/new-name.ts",
-						"src/new-name.test.ts",
-						"src/helper.spec.ts",
-					];
-				}
-
-				if (directoryPaths?.[0] === "test") {
-					return ["test/new-name.test.ts", "test/unrelated.test.ts"];
-				}
-
-				return [];
-			},
-		});
-		const tool = createGetRelatedTestsTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{ path: string; version?: "head" | "base"; limit?: number },
-			unknown
-		>(tool);
-
-		const result = await handler(
-			{ path: "src/new-name.ts", limit: 3 },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_related_tests",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			path: "src/new-name.ts",
-			version: "head",
-			directoriesSearched: ["src", "test", "tests"],
-			candidateCount: 2,
-			candidates: [
-				{ path: "test/new-name.test.ts", score: 20 },
-				{ path: "src/new-name.test.ts", score: 15 },
-			],
-		});
-	});
-
-	it("filters blocked test candidates from related test suggestions", async () => {
-		const git = createGitStub({
-			getPathTypeAtCommit: async (_commit, filePath) => {
-				if (filePath === "src" || filePath === "tests") {
-					return "directory";
-				}
-
-				return undefined;
-			},
-			listFilesAtCommit: async (commit, directoryPaths) => {
-				assert.equal(commit, "head-123");
-				if (directoryPaths?.[0] === "src") {
-					return ["src/new-name.ts"];
-				}
-
-				if (directoryPaths?.[0] === "tests") {
-					return ["tests/new-name.test.ts", "tests/.env.spec.ts"];
-				}
-
-				return [];
-			},
-		});
-		const tool = createGetRelatedTestsTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{ path: string; version?: "head" | "base"; limit?: number },
-			unknown
-		>(tool);
-
-		const result = await handler(
-			{ path: "src/new-name.ts", limit: 5 },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_related_tests",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			path: "src/new-name.ts",
-			version: "head",
-			directoriesSearched: ["src", "test", "tests"],
-			candidateCount: 1,
-			candidates: [{ path: "tests/new-name.test.ts", score: 20 }],
-		});
-	});
-
-	it("explains that missing nearby-test suggestions are only heuristic", async () => {
-		const git = createGitStub({
-			getPathTypeAtCommit: async (_commit, filePath) => {
-				if (filePath === "src" || filePath === "test") {
-					return "directory";
-				}
-
-				return undefined;
-			},
-			listFilesAtCommit: async () => [
-				"src/new-name.ts",
-				"test/unrelated.test.ts",
-			],
-		});
-		const tool = createGetRelatedTestsTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{ path: string; version?: "head" | "base"; limit?: number },
-			unknown
-		>(tool);
-
-		const result = await handler(
-			{ path: "src/new-name.ts", limit: 3 },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_related_tests",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			path: "src/new-name.ts",
-			version: "head",
-			directoriesSearched: ["src", "test", "tests"],
-			candidateCount: 0,
-			candidates: [],
-			note: "No likely related tests were found in nearby concrete directories. This heuristic result is not proof that no relevant tests exist. If coverage still matters, search more narrowly with search_text_in_repo or inspect known test roots.",
-		});
-	});
-
-	it("lists files across multiple directories and filters blocked descendants", async () => {
-		const git = createGitStub({
-			getPathTypeAtCommit: async (_commit, filePath) => {
-				assert.match(filePath, /^(src|test)$/);
-				return "directory";
-			},
-			listFilesAtCommit: async (commit, directoryPaths) => {
-				assert.equal(commit, "head-123");
-				assert.deepEqual(directoryPaths, ["src", "test"]);
-				return ["src/new-name.ts", "src/.env.local", "test/review.test.ts"];
-			},
-		});
-		const tool = createGetFileListByDirectoryTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{ directories?: string[]; version: "head" | "base"; limit?: number },
-			unknown
-		>(tool);
-
-		const result = await handler(
-			{ directories: ["src", "test"], version: "head" },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_file_list_by_directory",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			directories: ["src", "test"],
-			version: "head",
-			files: ["src/new-name.ts", "test/review.test.ts"],
-			truncated: false,
-			totalFiles: 2,
-		});
-		assert.equal("filteredCount" in (result as Record<string, unknown>), false);
-	});
-
-	it("rejects reversed file-content line ranges", async () => {
-		const tool = createGetFileContentTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				createGitStub(),
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{
-				path: string;
-				version: "head" | "base";
-				startLine?: number;
-				endLine?: number;
-			},
-			{ resultType: string; textResultForLlm: string }
-		>(tool);
-
-		const result = await handler(
-			{ path: "src/new-name.ts", version: "head", startLine: 5, endLine: 4 },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_file_content",
-				arguments: {},
-			},
-		);
-
-		assert.equal(result.resultType, "rejected");
-		assert.equal(
-			result.textResultForLlm,
-			"endLine (4) must be greater than or equal to startLine (5).",
-		);
-	});
-
-	it("returns structured out-of-range details for file content", async () => {
-		const git = createGitStub({
-			readTextFileAtCommit: async () => ({
-				status: "ok",
-				content: ["one", "two", "three"].join("\n"),
-			}),
-		});
-		const tool = createGetFileContentTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{ path: string; version: "head" | "base"; startLine?: number },
-			unknown
-		>(tool);
-
-		const result = await handler(
-			{ path: "src/new-name.ts", version: "head", startLine: 10 },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_file_content",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			status: "out_of_range",
-			path: "src/new-name.ts",
-			version: "head",
-			totalLines: 3,
-			message:
-				"Requested startLine 10 is beyond the end of src/new-name.ts (3 lines).",
-		});
-	});
-
-	it("rejects directory reads for related file content", async () => {
-		const git = createGitStub({
-			readTextFileAtCommit: async () => ({ status: "not_file" }),
-		});
-		const tool = createGetRelatedFileContentTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{ path: string; version: "head" | "base" },
-			{ resultType: string; textResultForLlm: string }
-		>(tool);
-
-		const result = await handler(
-			{ path: "src", version: "head" },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_related_file_content",
-				arguments: {},
-			},
-		);
-
-		assert.equal(result.resultType, "rejected");
-		assert.equal(
-			result.textResultForLlm,
-			"Related file access rejected: src is a directory, not a file.",
-		);
-	});
-
-	it("returns structured CI summary responses", async () => {
-		const tool = createGetCiSummaryTool(
-			createReviewToolContext(
-				config,
-				{ ...reviewContext },
-				createGitStub(),
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<unknown, unknown>(tool);
-
-		const result = await handler(
-			{},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_ci_summary",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			status: "missing",
-			message: "No CI summary was provided.",
-		});
-	});
-
-	it("marks safe read-only tools to skip permission prompts", () => {
+	it("marks only active read-only tools to skip permission prompts", () => {
 		const toolContext = createReviewToolContext(
 			config,
 			reviewContext,
@@ -1095,15 +367,24 @@ describe("Copilot tools", () => {
 		);
 
 		assert.equal(createGetPrOverviewTool(toolContext).skipPermission, true);
-		assert.equal(createListChangedFilesTool(toolContext).skipPermission, true);
-		assert.equal(createGetFileContentTool(toolContext).skipPermission, true);
 		assert.equal(
-			createGetRelatedFileContentTool(toolContext).skipPermission,
+			createListRecordedFindingsTool(toolContext).skipPermission,
 			true,
 		);
-		assert.equal(createGetCiSummaryTool(toolContext).skipPermission, true);
 		assert.equal(
 			createRecordPrSummaryTool(toolContext).skipPermission,
+			undefined,
+		);
+		assert.equal(
+			createRecordFileSummaryTool(toolContext).skipPermission,
+			undefined,
+		);
+		assert.equal(
+			createRemoveRecordedFindingTool(toolContext).skipPermission,
+			undefined,
+		);
+		assert.equal(
+			createReplaceRecordedFindingTool(toolContext).skipPermission,
 			undefined,
 		);
 		assert.equal(createEmitFindingTool(toolContext).skipPermission, undefined);
@@ -1125,7 +406,7 @@ describe("Copilot tools", () => {
 
 		assert.equal(
 			overviewTool.description,
-			"Get pull request metadata, changed-file metadata, and CI summary. Use reviewedFilesOffset and reviewedFilesLimit to page through large reviews.",
+			"Get canonical review scope: reviewed files you may target and skipped files you must ignore. Use builtin bash for diff and code inspection.",
 		);
 		assert.equal(
 			emitFindingParameters.properties?.category?.description,
@@ -1133,27 +414,26 @@ describe("Copilot tools", () => {
 		);
 	});
 
-	it("returns overview metadata including PR description and CI summary", async () => {
+	it("returns minimal canonical scope for reviewed and skipped files", async () => {
 		const tool = createGetPrOverviewTool(
 			createReviewToolContext(
 				config,
 				{
 					...reviewContext,
-					pr: {
-						...reviewContext.pr,
-						description: "Untrusted summary from the PR body.",
-					},
-					ciSummary: "1 failing test in validation suite",
+					skippedFiles: [
+						{
+							path: "dist/generated.js",
+							status: "modified",
+							reason: "ignored by policy",
+						},
+					],
 				},
 				createGitStub(),
 				[],
 				createSummaryDrafts(),
 			),
 		);
-		const handler = getHandler<
-			{ reviewedFilesOffset?: number; reviewedFilesLimit?: number },
-			unknown
-		>(tool);
+		const handler = getHandler<unknown, unknown>(tool);
 
 		const result = await handler(
 			{},
@@ -1166,86 +446,41 @@ describe("Copilot tools", () => {
 		);
 
 		assert.deepEqual(result, {
-			title: "Test PR",
-			description: "Untrusted summary from the PR body.",
-			sourceBranch: "feature",
-			targetBranch: "main",
-			headCommit: "head-123",
-			mergeBaseCommit: "base-123",
-			diffStats: { fileCount: 1, additions: 2, deletions: 1 },
 			reviewedFiles: [
 				{
 					path: "src/new-name.ts",
 					oldPath: "src/old-name.ts",
 					status: "renamed",
-					additions: 2,
-					deletions: 1,
-					changedLineCount: 2,
-					changedLineRanges: "10-11",
-					hunks: [{ newStart: 10, newEnd: 11, header: "" }],
 				},
 				{
 					path: "src/multi-hunk.ts",
-					oldPath: undefined,
 					status: "modified",
-					additions: 2,
-					deletions: 1,
-					changedLineCount: 2,
-					changedLineRanges: "1, 10",
-					hunks: [
-						{ newStart: 1, newEnd: 3, header: "" },
-						{ newStart: 10, newEnd: 13, header: "" },
-					],
 				},
 			],
-			skippedFiles: [],
-			ciSummary: {
-				status: "ok",
-				content: "1 failing test in validation suite",
-			},
+			skippedFiles: [
+				{
+					path: "dist/generated.js",
+					status: "modified",
+					reason: "ignored by policy",
+				},
+			],
 		});
 	});
 
-	it("pages reviewed files in the overview response for large reviews", async () => {
-		const largeReviewContext: ReviewContext = {
-			...reviewContext,
-			reviewedFiles: Array.from({ length: 12 }, (_, index) => ({
-				path: `src/example-${index}.ts`,
-				status: "modified",
-				patch: `diff --git a/src/example-${index}.ts b/src/example-${index}.ts`,
-				changedLines: [index + 1],
-				hunks: [
-					{
-						oldStart: index + 1,
-						oldLines: 1,
-						newStart: index + 1,
-						newLines: 1,
-						header: "",
-						changedLines: [index + 1],
-					},
-				],
-				additions: 1,
-				deletions: 0,
-				isBinary: false,
-			})),
-			diffStats: { fileCount: 12, additions: 12, deletions: 0 },
-		};
+	it("rejects unexpected overview arguments", async () => {
 		const tool = createGetPrOverviewTool(
 			createReviewToolContext(
 				config,
-				largeReviewContext,
+				reviewContext,
 				createGitStub(),
 				[],
 				createSummaryDrafts(),
 			),
 		);
-		const handler = getHandler<
-			{ reviewedFilesOffset?: number; reviewedFilesLimit?: number },
-			unknown
-		>(tool);
+		const handler = getHandler<unknown, unknown>(tool);
 
 		const result = await handler(
-			{ reviewedFilesOffset: 5, reviewedFilesLimit: 3 },
+			{ reviewedFilesOffset: 1 },
 			{
 				sessionId: "session",
 				toolCallId: "tool",
@@ -1255,308 +490,10 @@ describe("Copilot tools", () => {
 		);
 
 		assert.deepEqual(result, {
-			title: "Test PR",
-			sourceBranch: "feature",
-			targetBranch: "main",
-			headCommit: "head-123",
-			mergeBaseCommit: "base-123",
-			diffStats: { fileCount: 12, additions: 12, deletions: 0 },
-			reviewedFiles: [
-				{
-					path: "src/example-5.ts",
-					oldPath: undefined,
-					status: "modified",
-					additions: 1,
-					deletions: 0,
-					changedLineCount: 1,
-					changedLineRanges: "6",
-					hunks: [{ newStart: 6, newEnd: 6, header: "" }],
-				},
-				{
-					path: "src/example-6.ts",
-					oldPath: undefined,
-					status: "modified",
-					additions: 1,
-					deletions: 0,
-					changedLineCount: 1,
-					changedLineRanges: "7",
-					hunks: [{ newStart: 7, newEnd: 7, header: "" }],
-				},
-				{
-					path: "src/example-7.ts",
-					oldPath: undefined,
-					status: "modified",
-					additions: 1,
-					deletions: 0,
-					changedLineCount: 1,
-					changedLineRanges: "8",
-					hunks: [{ newStart: 8, newEnd: 8, header: "" }],
-				},
-			],
-			reviewedFilesOffset: 5,
-			reviewedFilesLimit: 3,
-			returnedReviewedFileCount: 3,
-			totalReviewedFiles: 12,
-			reviewedFilesTruncated: true,
-			nextReviewedFilesOffset: 8,
-			skippedFiles: [],
-			ciSummary: {
-				status: "missing",
-				message: "No CI summary was provided.",
-			},
+			resultType: "rejected",
+			textResultForLlm:
+				'Invalid PR overview payload: Unrecognized key: "reviewedFilesOffset"',
 		});
-	});
-
-	it("pages changed files in list_changed_files", async () => {
-		const largeReviewContext: ReviewContext = {
-			...reviewContext,
-			reviewedFiles: Array.from({ length: 12 }, (_, index) => ({
-				path: `src/example-${index}.ts`,
-				status: "modified",
-				patch: `diff --git a/src/example-${index}.ts b/src/example-${index}.ts`,
-				changedLines: [index + 1],
-				hunks: [
-					{
-						oldStart: index + 1,
-						oldLines: 1,
-						newStart: index + 1,
-						newLines: 1,
-						header: "",
-						changedLines: [index + 1],
-					},
-				],
-				additions: 1,
-				deletions: 0,
-				isBinary: false,
-			})),
-		};
-		const tool = createListChangedFilesTool(
-			createReviewToolContext(
-				config,
-				largeReviewContext,
-				createGitStub(),
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{ includeSkipped?: boolean; offset?: number; limit?: number },
-			unknown
-		>(tool);
-
-		const result = await handler(
-			{ offset: 4, limit: 2 },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "list_changed_files",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			reviewedFiles: [
-				{
-					path: "src/example-4.ts",
-					oldPath: undefined,
-					status: "modified",
-					additions: 1,
-					deletions: 0,
-					changedLineCount: 1,
-					changedLineRanges: "5",
-					hunks: [{ newStart: 5, newEnd: 5, header: "" }],
-				},
-				{
-					path: "src/example-5.ts",
-					oldPath: undefined,
-					status: "modified",
-					additions: 1,
-					deletions: 0,
-					changedLineCount: 1,
-					changedLineRanges: "6",
-					hunks: [{ newStart: 6, newEnd: 6, header: "" }],
-				},
-			],
-			reviewedFilesOffset: 4,
-			reviewedFilesLimit: 2,
-			returnedReviewedFileCount: 2,
-			totalReviewedFiles: 12,
-			reviewedFilesTruncated: true,
-			nextReviewedFilesOffset: 6,
-		});
-	});
-
-	it("truncates oversized PR descriptions in the overview response", async () => {
-		const description = `intro ${"x".repeat(2500)}`;
-		const tool = createGetPrOverviewTool(
-			createReviewToolContext(
-				config,
-				{
-					...reviewContext,
-					pr: {
-						...reviewContext.pr,
-						description,
-					},
-				},
-				createGitStub(),
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			{ reviewedFilesOffset?: number; reviewedFilesLimit?: number },
-			unknown
-		>(tool);
-
-		const result = (await handler(
-			{},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_pr_overview",
-				arguments: {},
-			},
-		)) as {
-			description?: string;
-			descriptionTruncated?: boolean;
-			descriptionOriginalChars?: number;
-		};
-
-		assert.equal(result.descriptionTruncated, true);
-		assert.equal(result.descriptionOriginalChars, description.length);
-		assert.equal(result.description?.startsWith("intro "), true);
-		assert.equal(result.description?.endsWith("... truncated ..."), true);
-		assert.equal(result.description?.includes("x".repeat(2200)), false);
-	});
-
-	it("reports diff truncation metadata", async () => {
-		const diffConfig = {
-			...config,
-			review: {
-				...config.review,
-				maxPatchChars: 20,
-			},
-		};
-		const tool = createGetFileDiffTool(
-			createReviewToolContext(
-				diffConfig,
-				reviewContext,
-				createGitStub(),
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<{ path: string }, unknown>(tool);
-
-		const result = await handler(
-			{ path: "src/multi-hunk.ts" },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_file_diff",
-				arguments: {},
-			},
-		);
-
-		assert.equal((result as { truncated: boolean }).truncated, true);
-		assert.equal(
-			typeof (result as { returnedPatchChars: number }).returnedPatchChars,
-			"number",
-		);
-	});
-
-	it("returns a specific diff hunk with file header context", async () => {
-		const tool = createGetFileDiffHunkTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				createGitStub(),
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<{ path: string; hunkIndex: number }, unknown>(
-			tool,
-		);
-
-		const result = await handler(
-			{ path: "src/multi-hunk.ts", hunkIndex: 2 },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_file_diff_hunk",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			path: "src/multi-hunk.ts",
-			oldPath: undefined,
-			status: "modified",
-			additions: 2,
-			deletions: 1,
-			changedLineCount: 2,
-			changedLineRanges: "1, 10",
-			hunks: [
-				{ newStart: 1, newEnd: 3, header: "" },
-				{ newStart: 10, newEnd: 13, header: "" },
-			],
-			hunkIndex: 2,
-			totalHunks: 2,
-			fileHeader: [
-				"diff --git a/src/multi-hunk.ts b/src/multi-hunk.ts",
-				"index 1111111..2222222 100644",
-				"--- a/src/multi-hunk.ts",
-				"+++ b/src/multi-hunk.ts",
-			].join("\n"),
-			patch: [
-				"@@ -10,3 +10,4 @@",
-				" const stable = true;",
-				"+const second = addedValue;",
-				" export { stable };",
-			].join("\n"),
-			truncated: false,
-			returnedPatchChars: [
-				"@@ -10,3 +10,4 @@",
-				" const stable = true;",
-				"+const second = addedValue;",
-				" export { stable };",
-			].join("\n").length,
-		});
-	});
-
-	it("rejects malformed file diff hunk payloads", async () => {
-		const tool = createGetFileDiffHunkTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				createGitStub(),
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = tool.handler as (
-			args: { path: string; hunkIndex: unknown },
-			invocation: {
-				sessionId: string;
-				toolCallId: string;
-				toolName: string;
-				arguments: unknown;
-			},
-		) => Promise<{ resultType: string; textResultForLlm: string }>;
-
-		const result = await handler(
-			{ path: "src/multi-hunk.ts", hunkIndex: "1" },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_file_diff_hunk",
-				arguments: {},
-			},
-		);
-
-		assert.equal(result.resultType, "rejected");
-		assert.match(result.textResultForLlm, /Invalid file-diff-hunk payload/);
 	});
 
 	it("lists recorded findings with stable numbering", async () => {
@@ -1632,7 +569,7 @@ describe("Copilot tools", () => {
 		);
 		const handler = getHandler<
 			FindingDraft & { findingNumber: number },
-			unknown
+			string
 		>(tool);
 
 		const result = await handler(
@@ -1760,7 +697,7 @@ describe("Copilot tools", () => {
 				createSummaryDrafts(),
 			),
 		);
-		const handler = getHandler<{ findingNumber: number }, unknown>(tool);
+		const handler = getHandler<{ findingNumber: number }, string>(tool);
 
 		const result = await handler(
 			{ findingNumber: 1 },
@@ -1981,7 +918,7 @@ describe("Copilot tools", () => {
 		);
 		const handler = getHandler<{ summary: string }, string>(tool);
 
-		const result = await handler(
+		const firstResult = await handler(
 			{ summary: "Adds stricter validation to the renamed service flow." },
 			{
 				sessionId: "session",
@@ -1990,11 +927,21 @@ describe("Copilot tools", () => {
 				arguments: {},
 			},
 		);
+		const secondResult = await handler(
+			{ summary: "Tightens validation and updates the renamed service path." },
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "record_pr_summary",
+				arguments: {},
+			},
+		);
 
-		assert.equal(result, "Recorded the pull request summary.");
+		assert.equal(firstResult, "Recorded the pull request summary.");
+		assert.equal(secondResult, "Recorded the pull request summary.");
 		assert.equal(
 			summaryDrafts.prSummary,
-			"Adds stricter validation to the renamed service flow.",
+			"Tightens validation and updates the renamed service path.",
 		);
 		assert.match(
 			JSON.stringify(tool.parameters),

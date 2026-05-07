@@ -1,6 +1,40 @@
 import type { ChangedFile } from "../git/types.ts";
 import type { FindingDraft } from "./types.ts";
 
+function getHunkNewEnd(
+	hunk: Pick<ChangedFile["hunks"][number], "newStart" | "newLines">,
+): number {
+	return Math.max(
+		hunk.newStart,
+		hunk.newStart + Math.max(hunk.newLines, 1) - 1,
+	);
+}
+
+function findNearestChangedLineInContainingHunk(
+	line: number,
+	file: Pick<ChangedFile, "hunks">,
+): number | undefined {
+	let nearestLine: number | undefined;
+	let nearestDistance = Number.POSITIVE_INFINITY;
+
+	for (const hunk of file.hunks) {
+		const hunkEnd = getHunkNewEnd(hunk);
+		if (line < hunk.newStart || line > hunkEnd) {
+			continue;
+		}
+
+		for (const changedLine of hunk.changedLines) {
+			const distance = Math.abs(changedLine - line);
+			if (distance < nearestDistance) {
+				nearestDistance = distance;
+				nearestLine = changedLine;
+			}
+		}
+	}
+
+	return nearestLine;
+}
+
 function canUseOldPathForReviewedFileLookup(
 	file: Pick<ChangedFile, "status" | "oldPath">,
 ): file is Pick<ChangedFile, "status" | "oldPath"> & { oldPath: string } {
@@ -72,9 +106,21 @@ export function normalizeFindingDraftLocation(
 		normalizedDraft.line > 0 &&
 		!file.changedLines.includes(normalizedDraft.line)
 	) {
-		return {
-			error: `Line ${normalizedDraft.line} is not a changed line in ${file.path}.`,
-		};
+		const remappedLine = findNearestChangedLineInContainingHunk(
+			normalizedDraft.line,
+			file,
+		);
+		if (remappedLine !== undefined) {
+			normalizedDraft = {
+				...normalizedDraft,
+				line: remappedLine,
+			};
+			notes.push(`normalized line from ${draft.line} to ${remappedLine}`);
+		} else {
+			return {
+				error: `Line ${normalizedDraft.line} is not a changed line in ${file.path}.`,
+			};
+		}
 	}
 
 	if (notes.length > 0) {

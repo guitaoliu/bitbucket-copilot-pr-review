@@ -20,10 +20,6 @@ export interface ReviewToolTelemetryCounter {
 	completed: number;
 	resultCounts: Record<string, number>;
 	totalDurationMs: number;
-	maxDurationMs: number;
-	totalInputChars: number;
-	totalOutputChars: number;
-	truncatedResponses: number;
 }
 
 export interface ReviewToolTelemetry {
@@ -34,7 +30,6 @@ export interface ReviewToolTelemetry {
 	totalDurationMs: number;
 	sessionDurationMs: number;
 	errorCount: number;
-	assistantMessageChars: number;
 	byTool: Record<string, ReviewToolTelemetryCounter>;
 }
 

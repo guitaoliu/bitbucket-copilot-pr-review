@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { ChangedFile } from "../git/types.ts";
 import {
 	createReviewedFileLookup,
-	getReviewedFilePathForVersion,
+	normalizeFindingDraftLocation,
 } from "../review/file.ts";
 import type {
 	Confidence,
@@ -25,14 +25,25 @@ const SEVERITY_RANK: Record<ReviewFinding["severity"], number> = {
 	HIGH: 3,
 };
 
+const TYPE_RANK: Record<ReviewFinding["type"], number> = {
+	CODE_SMELL: 1,
+	BUG: 2,
+	VULNERABILITY: 3,
+};
+
 function compareFindingPriority(
-	left: Pick<ReviewFinding, "severity" | "confidence">,
-	right: Pick<ReviewFinding, "severity" | "confidence">,
+	left: Pick<ReviewFinding, "severity" | "type" | "confidence">,
+	right: Pick<ReviewFinding, "severity" | "type" | "confidence">,
 ): number {
 	const severityDelta =
 		SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity];
 	if (severityDelta !== 0) {
 		return severityDelta;
+	}
+
+	const typeDelta = TYPE_RANK[left.type] - TYPE_RANK[right.type];
+	if (typeDelta !== 0) {
+		return typeDelta;
 	}
 
 	return CONFIDENCE_RANK[left.confidence] - CONFIDENCE_RANK[right.confidence];
@@ -100,6 +111,10 @@ export function finalizeFindings(
 ): ReviewFinding[] {
 	const fileMap = createReviewedFileLookup(reviewedFiles);
 	const acceptedByKey = new Map<string, ReviewFinding>();
+	const preferredFindingKeyByLocation = new Map<
+		string,
+		{ dedupeKey: string; finding: ReviewFinding }
+	>();
 
 	for (const rawDraft of drafts) {
 		const parsed = findingDraftSchema.safeParse(rawDraft);
@@ -108,26 +123,12 @@ export function finalizeFindings(
 		}
 
 		const draft = parsed.data;
-		const file = fileMap.get(draft.path);
-		if (!file) {
+		const location = normalizeFindingDraftLocation(draft, fileMap);
+		if (location.error) {
 			continue;
 		}
 
-		const normalizedPath = getReviewedFilePathForVersion(file, "head");
-		const normalizedDraft =
-			normalizedPath === draft.path
-				? draft
-				: {
-						...draft,
-						path: normalizedPath,
-					};
-
-		if (
-			normalizedDraft.line > 0 &&
-			!file.changedLines.includes(normalizedDraft.line)
-		) {
-			continue;
-		}
+		const normalizedDraft = location.normalizedDraft ?? draft;
 
 		if (!meetsConfidenceThreshold(normalizedDraft.confidence, minConfidence)) {
 			continue;
@@ -144,11 +145,50 @@ export function finalizeFindings(
 			externalId: makeExternalId(normalizedDraft),
 		};
 		const existing = acceptedByKey.get(dedupeKey);
-		if (existing && compareFindingPriority(candidate, existing) <= 0) {
-			continue;
+		if (existing) {
+			if (compareFindingPriority(candidate, existing) <= 0) {
+				continue;
+			}
+
+			acceptedByKey.set(dedupeKey, candidate);
+		} else {
+			const locationKey = `${candidate.path}|${candidate.line}`;
+			const preferredAtLocation =
+				preferredFindingKeyByLocation.get(locationKey);
+			if (
+				preferredAtLocation &&
+				preferredAtLocation.dedupeKey !== dedupeKey &&
+				preferredAtLocation.finding.type !== "CODE_SMELL" &&
+				candidate.type === "CODE_SMELL"
+			) {
+				continue;
+			}
+
+			if (
+				preferredAtLocation &&
+				preferredAtLocation.dedupeKey !== dedupeKey &&
+				preferredAtLocation.finding.type === "CODE_SMELL" &&
+				candidate.type !== "CODE_SMELL"
+			) {
+				acceptedByKey.delete(preferredAtLocation.dedupeKey);
+			}
+
+			acceptedByKey.set(dedupeKey, candidate);
 		}
 
-		acceptedByKey.set(dedupeKey, candidate);
+		const locationKey = `${candidate.path}|${candidate.line}`;
+		const preferredAtLocation = preferredFindingKeyByLocation.get(locationKey);
+		if (
+			!preferredAtLocation ||
+			preferredAtLocation.dedupeKey === dedupeKey ||
+			(preferredAtLocation.finding.type === "CODE_SMELL" &&
+				candidate.type !== "CODE_SMELL")
+		) {
+			preferredFindingKeyByLocation.set(locationKey, {
+				dedupeKey,
+				finding: candidate,
+			});
+		}
 	}
 
 	const accepted = [...acceptedByKey.values()];
@@ -158,6 +198,11 @@ export function finalizeFindings(
 			SEVERITY_RANK[right.severity] - SEVERITY_RANK[left.severity];
 		if (severityDelta !== 0) {
 			return severityDelta;
+		}
+
+		const typeDelta = TYPE_RANK[right.type] - TYPE_RANK[left.type];
+		if (typeDelta !== 0) {
+			return typeDelta;
 		}
 
 		const confidenceDelta =
