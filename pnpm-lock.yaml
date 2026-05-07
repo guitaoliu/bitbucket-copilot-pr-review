@@ -25,16 +25,16 @@ importers:
         specifier: 2.4.12
         version: 2.4.12
       '@github/copilot-sdk':
-        specifier: ^0.3.0
+        specifier: 0.3.0
         version: 0.3.0
       '@types/node':
-        specifier: ^24.12.2
+        specifier: 24.12.2
         version: 24.12.2
       tsdown:
-        specifier: ^0.21.10
+        specifier: 0.21.10
         version: 0.21.10(typescript@6.0.3)
       typescript:
-        specifier: ^6.0.3
+        specifier: 6.0.3
         version: 6.0.3
 
 packages:
