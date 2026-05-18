@@ -44,9 +44,9 @@
 		"zod": "4.4.3"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.4.14",
+		"@biomejs/biome": "2.4.15",
 		"@github/copilot-sdk": "0.3.0",
-		"@types/node": "24.12.3",
+		"@types/node": "24.12.4",
 		"tsdown": "0.22.0",
 		"typescript": "6.0.3"
 	}
