@@ -72,7 +72,7 @@ export interface ReviewRunnerDependencies {
 	) => Promise<ReviewOutcome>;
 	createDetachedReviewWorkspace?: (options: {
 		repoRoot: string;
-		headCommit: string;
+		commit: string;
 		logger: Logger;
 	}) => Promise<DetachedReviewWorkspace>;
 	confirmRerun?: (options: { message: string }) => Promise<boolean>;

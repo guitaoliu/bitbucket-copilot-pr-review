@@ -37,7 +37,7 @@ export interface DetachedReviewWorkspace {
 
 export async function createDetachedReviewWorkspace(options: {
 	repoRoot: string;
-	headCommit: string;
+	commit: string;
 	logger: Logger;
 }): Promise<DetachedReviewWorkspace> {
 	const tempRoot = await mkdtemp(
@@ -46,13 +46,13 @@ export async function createDetachedReviewWorkspace(options: {
 	const workspaceRoot = path.join(tempRoot, "review-worktree");
 
 	options.logger.info(
-		`Creating detached review workspace for ${options.headCommit} at ${workspaceRoot}`,
+		`Creating detached review workspace for ${options.commit} at ${workspaceRoot}`,
 	);
 
 	try {
 		await runGitCommand({
 			repoRoot: options.repoRoot,
-			args: ["worktree", "add", "--detach", workspaceRoot, options.headCommit],
+			args: ["worktree", "add", "--detach", workspaceRoot, options.commit],
 			logger: options.logger,
 			context: `creating detached review workspace ${workspaceRoot}`,
 		});

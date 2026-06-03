@@ -168,6 +168,66 @@ describe("runReview", () => {
 		);
 	});
 
+	it("runs Copilot in a detached trusted base workspace while preserving head review context", async () => {
+		const pr = createPullRequest();
+		const context = createReviewContext(pr);
+		let workspaceCommit: string | undefined;
+		let cleanupCalled = false;
+		let reviewConfig: ReviewerConfig | undefined;
+		let reviewContext: ReviewContext | undefined;
+		const client: FakeBitbucketClient = {
+			async getPullRequest() {
+				return pr;
+			},
+			async getCodeInsightsReport() {
+				return undefined;
+			},
+			async listCodeInsightsAnnotations() {
+				return [];
+			},
+			async getCodeInsightsAnnotationCount() {
+				return 0;
+			},
+			async findPullRequestCommentByTag() {
+				return undefined;
+			},
+			async publishCodeInsights() {},
+			async upsertPullRequestComment() {},
+		};
+
+		const result = await runReview(baseConfig, logger, {
+			createBitbucketClient: () => client as never,
+			prepareReviewContext: async () => ({
+				config: baseConfig,
+				git: createGitStub(),
+				mergeBaseCommit: context.mergeBaseCommit,
+			}),
+			buildReviewContext: async () => context,
+			createDetachedReviewWorkspace: async ({ commit }) => {
+				workspaceCommit = commit;
+				return {
+					workspaceRoot: "/tmp/base-worktree",
+					async cleanup() {
+						cleanupCalled = true;
+					},
+				};
+			},
+			runCopilotReview: async (config, passedContext) => {
+				reviewConfig = config;
+				reviewContext = passedContext;
+				return createReviewOutcome();
+			},
+		});
+
+		assert.equal(result.skipped, false);
+		assert.equal(workspaceCommit, context.baseCommit);
+		assert.equal(cleanupCalled, true);
+		assert.equal(reviewConfig?.repoRoot, "/tmp/base-worktree");
+		assert.equal(reviewContext?.repoRoot, "/tmp/base-worktree");
+		assert.equal(reviewContext?.headCommit, context.headCommit);
+		assert.equal(reviewContext?.baseCommit, context.baseCommit);
+	});
+
 	it("skips when the publication is already complete", async () => {
 		const pr = createPullRequest();
 		const context = createReviewContext(pr);

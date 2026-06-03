@@ -153,11 +153,11 @@ export async function runReview(
 			if (shouldUseDetachedReviewWorkspace) {
 				detachedWorkspace = await createReviewWorkspace({
 					repoRoot: effectiveConfig.repoRoot,
-					headCommit: context.headCommit,
+					commit: context.baseCommit,
 					logger,
 				});
 				logger.info(
-					`Using detached review workspace ${detachedWorkspace.workspaceRoot} for head ${context.headCommit}`,
+					`Using detached review workspace ${detachedWorkspace.workspaceRoot} for trusted base ${context.baseCommit}`,
 				);
 			}
 

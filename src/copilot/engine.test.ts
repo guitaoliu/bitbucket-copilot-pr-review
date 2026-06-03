@@ -276,7 +276,11 @@ describe("createReviewSessionHooks", () => {
 		);
 		assert.match(
 			result.additionalContext,
-			/Use trusted repository instructions to understand intended behavior and safety constraints, not to enforce style or convention drift as standalone findings/,
+			/Use repository instructions from the trusted base checkout to understand intended behavior and safety constraints, not to enforce style or convention drift as standalone findings/,
+		);
+		assert.match(
+			result.additionalContext,
+			/The working tree is the trusted base checkout\. Use explicit git diff\/show commands with the provided head and merge-base commits when inspecting PR-head content/,
 		);
 		assert.match(
 			result.additionalContext,
@@ -301,13 +305,13 @@ describe("createReviewSessionHooks", () => {
 		const result = await hooks.onPreToolUse({
 			toolName: "bash",
 			toolArgs: { command: "git diff --stat" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
 			permissionDecision: "allow",
 			additionalContext:
-				"Use readonly repo-scoped shell commands to inspect git diff, history, tests, and relevant code paths. Prefer targeted reads over repeated rereads, avoid presentation-only wrappers, and do not use shell commands that write files, mutate git state, or access the network.",
+				"Use readonly repo-scoped shell commands to inspect git diff, history, tests, and relevant code paths. The working tree is the trusted base checkout; use explicit commits with git diff/show for PR-head content. Prefer targeted reads over repeated rereads, avoid presentation-only wrappers, and do not use shell commands that write files, mutate git state, or access the network.",
 		});
 		assert.deepEqual(infoEntries, [
 			{
@@ -326,7 +330,7 @@ describe("createReviewSessionHooks", () => {
 		const result = await hooks.onPreToolUse({
 			toolName: "get_pr_overview",
 			toolArgs: {},
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -354,7 +358,7 @@ describe("createReviewSessionHooks", () => {
 		const result = await hooks.onPreToolUse({
 			toolName: "record_pr_summary",
 			toolArgs: { summary: "done" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -386,7 +390,7 @@ describe("createReviewSessionHooks", () => {
 		const result = await hooks.onPreToolUse({
 			toolName: "record_pr_summary",
 			toolArgs: { summary: "done" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -412,7 +416,7 @@ describe("createReviewSessionHooks", () => {
 		const result = await hooks.onPreToolUse({
 			toolName: "record_pr_summary",
 			toolArgs: { summary: "done" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -439,7 +443,7 @@ describe("createReviewSessionHooks", () => {
 				resultType: "success",
 				reviewedFiles: [{ path: "src/first.ts" }, { path: "src/second.ts" }],
 			}),
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 		assert.deepEqual(firstResult, {
 			additionalContext:
@@ -454,7 +458,7 @@ describe("createReviewSessionHooks", () => {
 				resultType: "success",
 				reviewedFiles: [{ path: "src/third.ts" }, { path: "src/fourth.ts" }],
 			}),
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 		assert.deepEqual(secondResult, {
 			additionalContext:
@@ -490,7 +494,7 @@ describe("createReviewSessionHooks", () => {
 				reviewedFiles: [{ path: "src/first.ts" }, { path: "src/second.ts" }],
 				skippedFiles: [],
 			}),
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(overviewResult, {
@@ -530,9 +534,9 @@ describe("createReviewSessionHooks", () => {
 			toolResult: {
 				textResultForLlm: "diff output",
 				resultType: "success",
-				toolTelemetry: { durationMs: 25 },
+				toolTelemetry: { timing: { durationMs: 25 } },
 			},
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -557,7 +561,7 @@ describe("createReviewSessionHooks", () => {
 		const result = await hooks.onPreToolUse({
 			toolName: "replace_recorded_finding",
 			toolArgs: {},
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -576,7 +580,7 @@ describe("createReviewSessionHooks", () => {
 		const result = await hooks.onPreToolUse({
 			toolName: "remove_recorded_finding",
 			toolArgs: {},
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -586,7 +590,7 @@ describe("createReviewSessionHooks", () => {
 		});
 	});
 
-	it("denies unknown tools with a readonly review mode reason", async () => {
+	it("does not deny unknown tools exposed by the standard Copilot CLI harness", async () => {
 		const hooks = createReviewSessionHooks(
 			config,
 			createLoggerSpy().logger,
@@ -595,13 +599,12 @@ describe("createReviewSessionHooks", () => {
 		const result = await hooks.onPreToolUse({
 			toolName: "unknown_tool",
 			toolArgs: {},
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
-			permissionDecision: "deny",
-			permissionDecisionReason:
-				"Tool unknown_tool is not allowed in readonly review mode.",
+			additionalContext:
+				"Use this tool output only when it helps validate reviewed changes. Keep the review evidence-backed and continue covering unchecked risky areas.",
 		});
 	});
 
@@ -621,12 +624,12 @@ describe("createReviewSessionHooks", () => {
 		await hooks.onPreToolUse({
 			toolName: "get_pr_overview",
 			toolArgs: {},
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 		await hooks.onPreToolUse({
 			toolName: "bash",
 			toolArgs: { command: "git status --short" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 		await hooks.onPostToolUse({
 			toolName: "bash",
@@ -634,9 +637,9 @@ describe("createReviewSessionHooks", () => {
 			toolResult: {
 				textResultForLlm: " M src/file.ts",
 				resultType: "success",
-				toolTelemetry: { durationMs: 9 },
+				toolTelemetry: { timing: { durationMs: 9 } },
 			},
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 		await hooks.onPostToolUse({
 			toolName: "get_pr_overview",
@@ -644,9 +647,9 @@ describe("createReviewSessionHooks", () => {
 			toolResult: {
 				textResultForLlm: "ok",
 				resultType: "success",
-				toolTelemetry: { durationMs: 12 },
+				toolTelemetry: { timing: { durationMs: 12 } },
 			},
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.equal(telemetry.totalRequested, 2);
@@ -686,7 +689,7 @@ describe("createReviewSessionHooks", () => {
 			toolName: "emit_finding",
 			toolArgs: { path: "src/file.ts" },
 			toolResult: { textResultForLlm: "ok", resultType: "success" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -711,7 +714,7 @@ describe("createReviewSessionHooks", () => {
 		const result = await hooks.onPreToolUse({
 			toolName: "emit_finding",
 			toolArgs: { path: "src/file.ts", line: 12 },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -735,7 +738,7 @@ describe("createReviewSessionHooks", () => {
 			toolName: "emit_finding",
 			toolArgs: {},
 			toolResult: { textResultForLlm: "ok", resultType: "success" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -760,9 +763,9 @@ describe("createReviewSessionHooks", () => {
 				textResultForLlm: "content",
 				resultType: "success",
 				sessionLog: "verbose session log",
-				toolTelemetry: { durationMs: 25 },
+				toolTelemetry: { timing: { durationMs: 25 } },
 			},
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -790,7 +793,7 @@ describe("createReviewSessionHooks", () => {
 			toolName: "list_recorded_findings",
 			toolArgs: {},
 			toolResult: { textResultForLlm: "[]", resultType: "success" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -814,7 +817,7 @@ describe("createReviewSessionHooks", () => {
 			toolName: "remove_recorded_finding",
 			toolArgs: { findingNumber: 1 },
 			toolResult: { textResultForLlm: "removed", resultType: "success" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(result, {
@@ -848,6 +851,30 @@ describe("createReviewSessionHooks", () => {
 		]);
 	});
 
+	it("adds recovery guidance for failed tool executions", async () => {
+		const { logger, infoEntries } = createLoggerSpy();
+		const hooks = createReviewSessionHooks(config, logger, []);
+		const result = await hooks.onPostToolUseFailure?.({
+			toolName: "get_pr_overview",
+			toolArgs: {},
+			error: "tool failed",
+			sessionId: "session-1",
+			timestamp: new Date("2026-06-03T00:00:00.000Z"),
+			workingDirectory: "/tmp/repo",
+		});
+
+		assert.deepEqual(result, {
+			additionalContext:
+				"Tool get_pr_overview failed: tool failed. Use the failure to adjust inputs and continue with targeted readonly review coverage.",
+		});
+		assert.deepEqual(infoEntries, [
+			{
+				message: 'Copilot failed tool get_pr_overview error="tool failed"',
+				details: [],
+			},
+		]);
+	});
+
 	it("logs compact progress details instead of raw large tool arguments", async () => {
 		const { logger, infoEntries } = createLoggerSpy();
 		const hooks = createReviewSessionHooks(
@@ -861,7 +888,7 @@ describe("createReviewSessionHooks", () => {
 		await hooks.onPreToolUse({
 			toolName: "bash",
 			toolArgs: { command: `git diff -- ${largePatch}` },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.equal(infoEntries.length, 1);
@@ -890,7 +917,7 @@ describe("createReviewSessionHooks", () => {
 			toolName: "record_file_summary",
 			toolArgs: { path: "src/third.ts", summary: "adds guard" },
 			toolResult: { textResultForLlm: "ok", resultType: "success" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 
 		assert.deepEqual(infoEntries, [
@@ -924,7 +951,7 @@ describe("createReviewSessionHooks", () => {
 		const preUse = await hooks.onPreToolUse({
 			toolName: "record_file_summary",
 			toolArgs: { path: "src/file.ts", summary: "adds guard" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 		assert.deepEqual(preUse, {
 			permissionDecision: "allow",
@@ -936,7 +963,7 @@ describe("createReviewSessionHooks", () => {
 			toolName: "record_pr_summary",
 			toolArgs: { summary: "ok" },
 			toolResult: { textResultForLlm: "ok", resultType: "success" },
-			cwd: "/tmp/repo",
+			workingDirectory: "/tmp/repo",
 		});
 		assert.deepEqual(postUse, {
 			additionalContext:
@@ -958,14 +985,20 @@ describe("createReviewSessionHooks", () => {
 });
 
 describe("buildCopilotClientOptions", () => {
-	it("pins the resolved bundled copilot cli path into client options", () => {
+	it("uses the bundled copilot cli through the v1 runtime connection", () => {
 		const options = buildCopilotClientOptions(
 			config,
 			() => "/tmp/node_modules/@github/copilot/index.js",
 		);
+		const optionRecord = options as Record<string, unknown>;
 
-		assert.equal(options.cliPath, "/tmp/node_modules/@github/copilot/index.js");
-		assert.equal(options.cwd, config.repoRoot);
+		assert.deepEqual(optionRecord.connection, {
+			args: undefined,
+			kind: "stdio",
+			path: "/tmp/node_modules/@github/copilot/index.js",
+		});
+		assert.equal(optionRecord.workingDirectory, config.repoRoot);
+		assert.equal(optionRecord.mode, "copilot-cli");
 		assert.equal(options.logLevel, "error");
 		assert.equal("useLoggedInUser" in options, false);
 		assert.equal("gitHubToken" in options, false);
@@ -979,8 +1012,13 @@ describe("buildCopilotClientOptions", () => {
 			},
 			() => "/tmp/node_modules/@github/copilot/index.js",
 		);
+		const optionRecord = options as Record<string, unknown>;
 
-		assert.equal(options.cliPath, "/tmp/node_modules/@github/copilot/index.js");
+		assert.deepEqual(optionRecord.connection, {
+			args: undefined,
+			kind: "stdio",
+			path: "/tmp/node_modules/@github/copilot/index.js",
+		});
 		assert.equal(options.logLevel, "debug");
 		assert.equal("useLoggedInUser" in options, false);
 		assert.equal("gitHubToken" in options, false);
@@ -1144,11 +1182,13 @@ describe("runCopilotReview", () => {
 		);
 
 		assert.equal(createdOptions.length, 1);
-		assert.equal(
-			createdOptions[0]?.cliPath,
-			"/tmp/node_modules/@github/copilot/index.js",
-		);
-		assert.equal(createdOptions[0]?.cwd, config.repoRoot);
+		assert.deepEqual(createdOptions[0]?.connection, {
+			args: undefined,
+			kind: "stdio",
+			path: "/tmp/node_modules/@github/copilot/index.js",
+		});
+		assert.equal(createdOptions[0]?.workingDirectory, config.repoRoot);
+		assert.equal(createdOptions[0]?.mode, "copilot-cli");
 		assert.equal(outcome.findings.length, 0);
 		assert.equal(outcome.assistantMessage, "Looks good.");
 	});
@@ -1286,24 +1326,15 @@ describe("runCopilotReview", () => {
 			createdSessionConfigs[0]?.systemMessage,
 			buildSystemMessage(config, context.reviewedFiles.length),
 		);
-		assert.deepEqual(createdSessionConfigs[0]?.availableTools, [
-			"get_pr_overview",
-			"record_pr_summary",
-			"record_file_summary",
-			"list_recorded_findings",
-			"remove_recorded_finding",
-			"replace_recorded_finding",
-			"emit_finding",
-			"bash",
-		]);
-		assert.equal(
-			typeof createdSessionConfigs[0]?.onPermissionRequest,
-			"function",
-		);
+		assert.equal(createdSessionConfigs[0]?.availableTools, undefined);
+		const permissionHandler = createdSessionConfigs[0]?.onPermissionRequest;
+		assert.equal(typeof permissionHandler, "function");
+		assert(permissionHandler);
 		assert.equal(sessionEventHandlers.length, 1);
 
-		const allowed = await createdSessionConfigs[0]?.onPermissionRequest(
+		const allowed = await permissionHandler(
 			{
+				canOfferSessionApproval: false,
 				kind: "shell",
 				commands: [{ identifier: "git", readOnly: true }],
 				fullCommandText: "git diff --stat",
@@ -1316,8 +1347,9 @@ describe("runCopilotReview", () => {
 		);
 		assert.deepEqual(allowed, { kind: "approve-once" });
 
-		const denied = await createdSessionConfigs[0]?.onPermissionRequest(
+		const denied = await permissionHandler(
 			{
+				canOfferSessionApproval: false,
 				kind: "shell",
 				commands: [{ identifier: "node", readOnly: true }],
 				fullCommandText: 'node -e "process.exit(0)"',
@@ -1334,8 +1366,9 @@ describe("runCopilotReview", () => {
 				"Readonly review mode allows only approved readonly inspection commands.",
 		});
 
-		const deniedGitFetch = await createdSessionConfigs[0]?.onPermissionRequest(
+		const deniedGitFetch = await permissionHandler(
 			{
+				canOfferSessionApproval: false,
 				kind: "shell",
 				commands: [{ identifier: "git", readOnly: true }],
 				fullCommandText: "git fetch origin main",
@@ -1351,8 +1384,9 @@ describe("runCopilotReview", () => {
 			feedback: "Readonly review mode blocks remote-capable git commands.",
 		});
 
-		const deniedUrl = await createdSessionConfigs[0]?.onPermissionRequest(
+		const deniedUrl = await permissionHandler(
 			{
+				canOfferSessionApproval: false,
 				kind: "shell",
 				commands: [{ identifier: "git", readOnly: true }],
 				fullCommandText: "git diff https://example.com",
@@ -1369,38 +1403,38 @@ describe("runCopilotReview", () => {
 				"Readonly review mode blocks shell commands that may access network URLs.",
 		});
 
-		const deniedEchoWrapper =
-			await createdSessionConfigs[0]?.onPermissionRequest(
-				{
-					kind: "shell",
-					commands: [{ identifier: "git", readOnly: true }],
-					fullCommandText: "echo 'diff' && git diff --stat",
-					intention: "Inspect diff with label",
-					hasWriteFileRedirection: false,
-					possiblePaths: ["/tmp/repo/src/file.ts"],
-					possibleUrls: [],
-				} as PermissionRequest,
-				{ sessionId: "session-1" },
-			);
+		const deniedEchoWrapper = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "echo 'diff' && git diff --stat",
+				intention: "Inspect diff with label",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/tmp/repo/src/file.ts"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
 		assert.deepEqual(deniedEchoWrapper, {
 			kind: "reject",
 			feedback:
 				"Readonly review mode blocks presentation-only shell wrappers. Run the underlying inspection command directly.",
 		});
 
-		const deniedPrintfWrapper =
-			await createdSessionConfigs[0]?.onPermissionRequest(
-				{
-					kind: "shell",
-					commands: [{ identifier: "git", readOnly: true }],
-					fullCommandText: "git diff --stat && printf '\\n'",
-					intention: "Inspect diff with footer",
-					hasWriteFileRedirection: false,
-					possiblePaths: ["/tmp/repo/src/file.ts"],
-					possibleUrls: [],
-				} as PermissionRequest,
-				{ sessionId: "session-1" },
-			);
+		const deniedPrintfWrapper = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git diff --stat && printf '\\n'",
+				intention: "Inspect diff with footer",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/tmp/repo/src/file.ts"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
 		assert.deepEqual(deniedPrintfWrapper, {
 			kind: "reject",
 			feedback:

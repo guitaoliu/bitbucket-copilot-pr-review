@@ -14,6 +14,7 @@ This guide collects the implementation and operator detail that is intentionally
 - `BITBUCKET_TOKEN` is the default Bitbucket Data Center credential
 - if your Bitbucket environment requires basic auth, set `BITBUCKET_USERNAME`, `BITBUCKET_PASSWORD`, and `BITBUCKET_AUTH_TYPE=basic`
 - Copilot authentication is resolved by the GitHub Copilot SDK; you can rely on an existing `copilot` CLI login, `gh auth` credentials, or any supported GitHub token environment variable already understood by the SDK
+- Copilot repo context and instruction discovery are handled by the standard Copilot CLI harness running in a detached trusted-base checkout; this tool adds the Bitbucket PR review prompt, scoped output tools, and publishing flow
 - for GitHub Enterprise Cloud data residency hosts (`*.ghe.com`), set `GH_HOST` to the GitHub hostname you authenticate against, for example `tenant.ghe.com`
 - if you need to create or refresh a Copilot login for that host, run `copilot login --host https://tenant.ghe.com` before running the reviewer
 
@@ -207,7 +208,7 @@ If your Bitbucket Data Center uses an internal or self-signed certificate, prefe
 
 For local helper-script runs, Node system CA loading is enabled by default with `NODE_USE_SYSTEM_CA=1`. Set `NODE_USE_SYSTEM_CA=0` if you need to disable that behavior for troubleshooting.
 
-When the target repository contains `AGENTS.md` files in the root or in directories that contain reviewed files, the reviewer reads the matching files from the trusted base commit and appends them to the Copilot review prompt. Root instructions apply repo-wide, and deeper `AGENTS.md` files apply only to reviewed files under that subtree.
+Target repository instructions and broader project context are discovered by the standard Copilot CLI harness from a detached checkout at the pull request base commit. The reviewer no longer reads or injects `AGENTS.md` files itself, and instruction files added or changed by the pull request are reviewed as untrusted PR content rather than followed as review instructions.
 
 When the target repository contains a root-level `copilot-code-review.json`, the reviewer loads it from the trusted base commit and uses it for repo-scoped review configuration such as ignored paths, review limits, and selected Copilot or report overrides. Environment variables and CLI flags still take precedence. The JSON schema is published at `schemas/copilot-code-review.schema.json`.
 

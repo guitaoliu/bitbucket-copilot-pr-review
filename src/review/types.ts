@@ -7,12 +7,6 @@ export type AnnotationType = "BUG" | "CODE_SMELL" | "VULNERABILITY";
 
 export type Confidence = "low" | "medium" | "high";
 
-export interface RepoAgentsInstructions {
-	path: string;
-	appliesTo: string[];
-	content: string;
-}
-
 export interface ReviewToolTelemetryCounter {
 	requested: number;
 	allowed: number;
@@ -77,7 +71,6 @@ export interface ReviewContext {
 	diffStats: DiffStats;
 	reviewedFiles: ChangedFile[];
 	skippedFiles: SkippedFile[];
-	repoAgentsInstructions?: RepoAgentsInstructions[];
 	ciSummary?: string;
 }
 
