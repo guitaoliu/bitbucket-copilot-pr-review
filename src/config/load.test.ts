@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 
 import {
 	parseBitbucketPullRequestUrl,
-	parseBitbucketRepositoryUrl,
 	resolveBitbucketAuth,
 	resolveBitbucketConfig,
 } from "./bitbucket-resolver.ts";
@@ -13,15 +12,13 @@ import {
 	normalizeReportKey,
 	parseEnvironment,
 } from "./env.ts";
-import { loadBatchConfig, loadConfig } from "./load.ts";
+import { loadConfig } from "./load.ts";
 import { CONFIG_FIELD_METADATA } from "./metadata.ts";
 import { mergeRepoReviewConfig, parseRepoReviewConfig } from "./repo-config.ts";
 import { resolveRuntimeConfigGroups } from "./runtime-resolver.ts";
 
 const pullRequestUrl =
 	"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123";
-const repositoryUrl =
-	"https://bitbucket.example.com/projects/PROJ/repos/my-repo";
 
 describe("normalizeReportKey", () => {
 	it("keeps short report keys unchanged", () => {
@@ -219,31 +216,6 @@ describe("parseBitbucketPullRequestUrl", () => {
 	});
 });
 
-describe("parseBitbucketRepositoryUrl", () => {
-	it("parses repository urls", () => {
-		const parsed = parseBitbucketRepositoryUrl(
-			`${repositoryUrl}/?foo=1#browse`,
-		);
-
-		assert.deepEqual(parsed, {
-			baseUrl: "https://bitbucket.example.com",
-			projectKey: "PROJ",
-			repoSlug: "my-repo",
-			repositoryUrl,
-		});
-	});
-
-	it("rejects malformed repository urls", () => {
-		assert.throws(
-			() =>
-				parseBitbucketRepositoryUrl(
-					"https://bitbucket.example.com/projects/PROJ",
-				),
-			/Repository URL must point to a repository page/,
-		);
-	});
-});
-
 describe("resolveRuntimeConfigGroups", () => {
 	it("resolves copilot report and review groups from metadata-driven sources", () => {
 		const env = parseEnvironment({
@@ -420,14 +392,6 @@ describe("loadConfig feature flags", () => {
 		assert.equal(config.githubHost, "tenant.ghe.com");
 	});
 
-	it("keeps strict TLS enabled by default in batch mode", () => {
-		const config = loadBatchConfig(["batch", repositoryUrl], {
-			BITBUCKET_TOKEN: "token",
-		});
-
-		assert.equal(config.bitbucket.tls.insecureSkipVerify, false);
-	});
-
 	it("parses ignored review path globs from env", () => {
 		const config = loadConfig(["review", pullRequestUrl], {
 			BITBUCKET_TOKEN: "token",
@@ -526,80 +490,6 @@ describe("loadConfig feature flags", () => {
 		assert.throws(
 			() => loadConfig(["review", pullRequestUrl], {}),
 			/Provide BITBUCKET_TOKEN or BITBUCKET_USERNAME and BITBUCKET_PASSWORD/,
-		);
-	});
-});
-
-describe("loadBatchConfig", () => {
-	it("builds batch review config from repository url and env", () => {
-		const config = loadBatchConfig(
-			["batch", repositoryUrl, "--max-parallel", "4"],
-			{
-				BITBUCKET_TOKEN: "token",
-				GIT_REMOTE_NAME: "upstream",
-				LOG_LEVEL: "debug",
-				REVIEW_FORCE: "1",
-			},
-		);
-
-		assert.equal(config.repoId, "PROJ/my-repo");
-		assert.equal(config.repositoryUrl, repositoryUrl);
-		assert.equal(config.bitbucket.baseUrl, "https://bitbucket.example.com");
-		assert.equal(config.bitbucket.projectKey, "PROJ");
-		assert.equal(config.bitbucket.repoSlug, "my-repo");
-		assert.equal(config.maxParallel, 4);
-		assert.equal(config.gitRemoteName, "upstream");
-		assert.equal(config.logLevel, "debug");
-		assert.equal(config.review.forceReview, true);
-	});
-
-	it("loads GH_HOST into the batch config", () => {
-		const config = loadBatchConfig(["batch", repositoryUrl], {
-			BITBUCKET_TOKEN: "token",
-			GH_HOST: "tenant.ghe.com",
-		});
-
-		assert.equal(config.githubHost, "tenant.ghe.com");
-	});
-
-	it("reads batch skip branch prefixes from env", () => {
-		const config = loadBatchConfig(["batch", repositoryUrl], {
-			BITBUCKET_TOKEN: "token",
-			REVIEW_SKIP_BRANCH_PREFIXES: "renovate/, deps/",
-		});
-
-		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/", "deps/"]);
-	});
-
-	it("lets batch env clear default skip branch prefixes", () => {
-		const config = loadBatchConfig(["batch", repositoryUrl], {
-			BITBUCKET_TOKEN: "token",
-			REVIEW_SKIP_BRANCH_PREFIXES: " , ",
-		});
-
-		assert.deepEqual(config.review.skipBranchPrefixes, []);
-	});
-
-	it("rejects batch-only command invocations without a repository url", () => {
-		assert.throws(
-			() =>
-				loadBatchConfig(["batch", "--max-parallel", "2"], {
-					BITBUCKET_TOKEN: "token",
-				}),
-			/batch requires <repository-url>/,
-		);
-	});
-
-	it("rejects malformed repository urls", () => {
-		assert.throws(
-			() =>
-				loadBatchConfig(
-					["batch", "https://bitbucket.example.com/projects/PROJ"],
-					{
-						BITBUCKET_TOKEN: "token",
-					},
-				),
-			/Repository URL must point to a repository page/,
 		);
 	});
 });

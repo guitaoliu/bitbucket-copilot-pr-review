@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { PullRequestApi, RepositoryPullRequestApi } from "./pull-request.ts";
+import { PullRequestApi } from "./pull-request.ts";
 
 describe("PullRequestApi", () => {
 	it("normalizes pull request payloads and prefers HTTP clone URLs", async () => {
@@ -171,98 +171,5 @@ describe("PullRequestApi", () => {
 		const result = await api.getPullRequest();
 
 		assert.equal(result.draft, true);
-	});
-});
-
-describe("RepositoryPullRequestApi", () => {
-	it("lists open pull requests across paginated responses", async () => {
-		const requestedPaths: string[] = [];
-		const api = new RepositoryPullRequestApi(
-			"PROJ",
-			"repo",
-			async (pathname) => {
-				requestedPaths.push(pathname);
-				if (pathname.includes("start=0")) {
-					return {
-						values: [
-							{
-								id: 101,
-								version: 1,
-								state: "OPEN",
-								title: "PR One",
-								description: " first ",
-								fromRef: {
-									id: "refs/heads/a",
-									displayId: "a",
-									latestCommit: "head-a",
-									repository: {
-										id: 1,
-										slug: "repo",
-										project: { key: "PROJ" },
-									},
-								},
-								toRef: {
-									id: "refs/heads/main",
-									displayId: "main",
-									latestCommit: "base-a",
-									repository: {
-										id: 1,
-										slug: "repo",
-										project: { key: "PROJ" },
-									},
-								},
-							},
-						],
-						isLastPage: false,
-						nextPageStart: 25,
-					} as never;
-				}
-
-				return {
-					values: [
-						{
-							id: 102,
-							version: 2,
-							state: "OPEN",
-							title: "PR Two",
-							description: null,
-							fromRef: {
-								id: "refs/heads/b",
-								displayId: "b",
-								latestCommit: "head-b",
-								repository: {
-									id: 1,
-									slug: "repo",
-									project: { key: "PROJ" },
-								},
-							},
-							toRef: {
-								id: "refs/heads/main",
-								displayId: "main",
-								latestCommit: "base-b",
-								repository: {
-									id: 1,
-									slug: "repo",
-									project: { key: "PROJ" },
-								},
-							},
-						},
-					],
-					isLastPage: true,
-				} as never;
-			},
-		);
-
-		const result = await api.listOpenPullRequests();
-
-		assert.deepEqual(requestedPaths, [
-			"/rest/api/latest/projects/PROJ/repos/repo/pull-requests?limit=1000&start=0&state=OPEN",
-			"/rest/api/latest/projects/PROJ/repos/repo/pull-requests?limit=1000&start=25&state=OPEN",
-		]);
-		assert.equal(result.length, 2);
-		assert.equal(result[0]?.id, 101);
-		assert.equal(result[0]?.description, "first");
-		assert.equal(result[0]?.draft, undefined);
-		assert.equal(result[1]?.id, 102);
 	});
 });

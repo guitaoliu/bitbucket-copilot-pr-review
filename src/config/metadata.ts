@@ -120,15 +120,6 @@ export interface ReviewCliOptionMetadataMap {
 	help: CliOptionMetadata;
 }
 
-export interface BatchCliOptionMetadataMap {
-	dryRun: CliOptionMetadata;
-	forceReview: CliOptionMetadata;
-	tempRoot: CliOptionMetadata;
-	maxParallel: CliOptionMetadata;
-	keepWorkdirs: CliOptionMetadata;
-	help: CliOptionMetadata;
-}
-
 export function isEnvConfigField(
 	field: ConfigFieldMetadata,
 ): field is EnvConfigFieldMetadata {
@@ -430,14 +421,6 @@ export const CLI_COMMAND_METADATA = {
 		argumentDescription:
 			"Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pull-requests/123 or a PR tab URL like /overview, /diff, /commits, or /builds.",
 	},
-	batch: {
-		usage: "batch <repository-url> [options]",
-		description:
-			"Review all open pull requests for one Bitbucket repository URL",
-		argumentLabel: "<repository-url>",
-		argumentDescription:
-			"Bitbucket repository URL, for example https://host/projects/PROJ/repos/my-repo.",
-	},
 } as const satisfies Record<string, CliCommandMetadata>;
 
 export const REVIEW_CLI_OPTION_METADATA: ReviewCliOptionMetadataMap = {
@@ -459,33 +442,6 @@ export const REVIEW_CLI_OPTION_METADATA: ReviewCliOptionMetadataMap = {
 		flags: ["--repo-root"],
 		description: "Use a different local checkout as the repository root",
 		valueLabel: "<path>",
-	},
-	help: HELP_CLI_OPTION_METADATA,
-};
-
-export const BATCH_CLI_OPTION_METADATA: BatchCliOptionMetadataMap = {
-	dryRun: {
-		flags: ["--dry-run"],
-		description: "Run without publishing results to Bitbucket",
-	},
-	forceReview: {
-		flags: ["--force-review"],
-		description:
-			"Re-run even if the current PR revision already has published results",
-	},
-	tempRoot: {
-		flags: ["--temp-root"],
-		description: "Parent directory for mirror and workspace clones",
-		valueLabel: "<path>",
-	},
-	maxParallel: {
-		flags: ["--max-parallel"],
-		description: "Maximum concurrent review workers",
-		valueLabel: "<count>",
-	},
-	keepWorkdirs: {
-		flags: ["--keep-workdirs"],
-		description: "Keep per-PR workdirs after the run completes",
 	},
 	help: HELP_CLI_OPTION_METADATA,
 };

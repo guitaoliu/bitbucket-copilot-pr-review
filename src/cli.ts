@@ -1,15 +1,13 @@
 import process from "node:process";
 
-import { runBatchReview } from "./batch/runner.ts";
 import { BitbucketApiError } from "./bitbucket/transport.ts";
 import {
 	getHelpText,
-	isBatchCliOptions,
 	isReviewCliOptions,
 	parseCliArgs,
 } from "./config/args.ts";
 import { isCliUserError } from "./config/errors.ts";
-import { loadBatchConfig, loadConfig } from "./config/load.ts";
+import { loadConfig } from "./config/load.ts";
 import type { ReviewRunOutput } from "./review/output-types.ts";
 import { runReview } from "./review/runner.ts";
 import { createLogger } from "./shared/logger.ts";
@@ -53,17 +51,6 @@ async function main(): Promise<void> {
 	const cliOptions = parseCliArgs(argv);
 	if (!("command" in cliOptions) && cliOptions.help) {
 		console.log(getHelpText(cliOptions.commandName));
-		return;
-	}
-
-	if (isBatchCliOptions(cliOptions)) {
-		const config = loadBatchConfig(argv, process.env, cliOptions);
-		const logger = createLogger(config.logLevel);
-		const output = await runBatchReview(config, logger);
-		if (output.failed > 0) {
-			process.exitCode = 1;
-		}
-		logger.json(`${JSON.stringify(output, null, 2)}\n`);
 		return;
 	}
 

@@ -1,18 +1,13 @@
 import { accessSync, constants as fsConstants } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { BatchReviewConfig } from "../batch/types.ts";
 import { omitUndefined } from "../shared/object.ts";
-import type { BatchCliOptions, ReviewCliOptions } from "./args.ts";
-import { isBatchCliOptions, isReviewCliOptions, parseCliArgs } from "./args.ts";
+import type { ReviewCliOptions } from "./args.ts";
+import { isReviewCliOptions, parseCliArgs } from "./args.ts";
 import {
 	parseBitbucketPullRequestUrl,
-	parseBitbucketRepositoryUrl,
-	resolveBitbucketAuth,
 	resolveBitbucketConfig,
 } from "./bitbucket-resolver.ts";
-import { REVIEWER_CONFIG_DEFAULTS } from "./defaults.ts";
 import { getEnvRepoOverrides, parseEnvironment } from "./env.ts";
 import { CliUserError } from "./errors.ts";
 import {
@@ -87,75 +82,4 @@ export function loadConfig(
 			envRepoOverrides: cloneRepoOverrides(envRepoOverrides),
 		},
 	});
-}
-
-export function loadBatchConfig(
-	argv = process.argv.slice(2),
-	env: NodeJS.ProcessEnv = process.env,
-	cliOptions: BatchCliOptions = (() => {
-		const parsed = parseCliArgs(
-			argv[0] === "batch" ? argv : ["batch", ...argv],
-		);
-		if (!isBatchCliOptions(parsed)) {
-			throw new CliUserError("batch command options are required.");
-		}
-
-		return parsed;
-	})(),
-): BatchReviewConfig {
-	const parsedEnv = parseEnvironment(env);
-	const repositoryLocation = parseBitbucketRepositoryUrl(
-		cliOptions.repositoryUrl,
-	);
-	const bitbucketCaCertPath =
-		parsedEnv.BITBUCKET_CA_CERT_PATH !== undefined
-			? resolveReadableFilePath(
-					parsedEnv.BITBUCKET_CA_CERT_PATH,
-					"BITBUCKET_CA_CERT_PATH",
-				)
-			: undefined;
-	const tempRoot =
-		cliOptions.tempRoot !== undefined
-			? path.resolve(cliOptions.tempRoot)
-			: path.join(tmpdir(), "bitbucket-copilot-pr-review");
-
-	return {
-		repoId: `${repositoryLocation.projectKey}/${repositoryLocation.repoSlug}`,
-		repositoryUrl: repositoryLocation.repositoryUrl,
-		tempRoot,
-		maxParallel: cliOptions.maxParallel ?? 2,
-		keepWorkdirs: cliOptions.keepWorkdirs ?? false,
-		gitRemoteName:
-			parsedEnv.GIT_REMOTE_NAME ?? REVIEWER_CONFIG_DEFAULTS.gitRemoteName,
-		logLevel: parsedEnv.LOG_LEVEL ?? REVIEWER_CONFIG_DEFAULTS.logLevel,
-		...(parsedEnv.GH_HOST !== undefined
-			? { githubHost: parsedEnv.GH_HOST }
-			: {}),
-		bitbucket: {
-			baseUrl: repositoryLocation.baseUrl,
-			projectKey: repositoryLocation.projectKey,
-			repoSlug: repositoryLocation.repoSlug,
-			auth: resolveBitbucketAuth(parsedEnv),
-			tls: omitUndefined({
-				caCertPath: bitbucketCaCertPath,
-				insecureSkipVerify:
-					parsedEnv.BITBUCKET_INSECURE_TLS ??
-					REVIEWER_CONFIG_DEFAULTS.bitbucket.tls.insecureSkipVerify,
-			}),
-		},
-		review: {
-			dryRun: cliOptions.dryRun,
-			forceReview:
-				cliOptions.forceReview ||
-				parsedEnv.REVIEW_FORCE ||
-				REVIEWER_CONFIG_DEFAULTS.review.forceReview,
-			confirmRerun: REVIEWER_CONFIG_DEFAULTS.review.confirmRerun,
-			skipBranchPrefixes:
-				parsedEnv.REVIEW_SKIP_BRANCH_PREFIXES ??
-				REVIEWER_CONFIG_DEFAULTS.review.skipBranchPrefixes,
-		},
-		internal: {
-			envRepoOverrides: cloneRepoOverrides(getEnvRepoOverrides(parsedEnv)),
-		},
-	};
 }

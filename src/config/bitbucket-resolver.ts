@@ -17,15 +17,11 @@ export interface ResolvedBitbucketRuntimeConfig {
 	};
 }
 
-export interface ParsedBitbucketRepositoryLocation {
+export interface ParsedBitbucketPullRequestLocation {
 	baseUrl: string;
 	projectKey: string;
 	repoSlug: string;
 	repositoryUrl: string;
-}
-
-export interface ParsedBitbucketPullRequestLocation
-	extends ParsedBitbucketRepositoryLocation {
 	prId: number;
 	pullRequestUrl: string;
 }
@@ -111,20 +107,6 @@ function parseRepositoryPathSegments(options: {
 	}
 
 	const prefixSegments = segments.slice(0, projectsIndex);
-	if (!options.requirePullRequestId) {
-		if (segments.length !== projectsIndex + 4) {
-			throw new CliUserError(
-				`${options.label} must point to a repository page like https://host/projects/PROJ/repos/repo.`,
-			);
-		}
-
-		return {
-			prefixSegments,
-			projectKey,
-			repoSlug,
-		};
-	}
-
 	const pullRequestsSegment = segments[projectsIndex + 4];
 	const prIdSegment = segments[projectsIndex + 5];
 	if (pullRequestsSegment !== "pull-requests" || prIdSegment === undefined) {
@@ -138,30 +120,6 @@ function parseRepositoryPathSegments(options: {
 		projectKey,
 		repoSlug,
 		prId: parsePositiveInteger(prIdSegment, options.label),
-	};
-}
-
-export function parseBitbucketRepositoryUrl(
-	repositoryUrl: string,
-): ParsedBitbucketRepositoryLocation {
-	const url = parseUrlOrThrow(repositoryUrl, "Repository URL");
-	if (url.protocol !== "http:" && url.protocol !== "https:") {
-		throw new CliUserError("Repository URL must use http or https.");
-	}
-
-	const parsedPath = parseRepositoryPathSegments({
-		url,
-		label: "Repository URL",
-		requirePullRequestId: false,
-	});
-	const baseUrl = normalizeBaseUrl(url, parsedPath.prefixSegments);
-	const normalizedRepositoryUrl = `${baseUrl}/projects/${parsedPath.projectKey}/repos/${parsedPath.repoSlug}`;
-
-	return {
-		baseUrl,
-		projectKey: parsedPath.projectKey,
-		repoSlug: parsedPath.repoSlug,
-		repositoryUrl: normalizedRepositoryUrl,
 	};
 }
 
@@ -196,18 +154,6 @@ export function parseBitbucketPullRequestUrl(
 		repositoryUrl,
 		pullRequestUrl: normalizedPullRequestUrl,
 	};
-}
-
-export function buildBitbucketPullRequestUrl(options: {
-	baseUrl: string;
-	projectKey: string;
-	repoSlug: string;
-	prId: number;
-}): string {
-	const parsedRepository = parseBitbucketRepositoryUrl(
-		`${options.baseUrl}/projects/${options.projectKey}/repos/${options.repoSlug}`,
-	);
-	return `${parsedRepository.repositoryUrl}/pull-requests/${options.prId}`;
 }
 
 export function resolveBitbucketAuth(

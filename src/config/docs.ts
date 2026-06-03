@@ -5,7 +5,6 @@ import type {
 	ConfigFieldMetadata,
 } from "./metadata.ts";
 import {
-	BATCH_CLI_OPTION_METADATA,
 	CLI_COMMAND_METADATA,
 	CONFIG_FIELD_METADATA,
 	isEnvConfigField,
@@ -114,12 +113,6 @@ export function buildConfigReferenceMarkdown(): string {
 			heading: "### Review command",
 			command: CLI_COMMAND_METADATA.review,
 			cliOptions: Object.values(REVIEW_CLI_OPTION_METADATA),
-		}),
-		"",
-		...buildCommandSection({
-			heading: "### Batch command",
-			command: CLI_COMMAND_METADATA.batch,
-			cliOptions: Object.values(BATCH_CLI_OPTION_METADATA),
 		}),
 		"",
 		"### Environment variables",

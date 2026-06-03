@@ -9,7 +9,6 @@ This project computes a PR diff locally, gives Copilot a tightly scoped read-onl
 - reviews only the changed pull request scope
 - runs from your local checkout or CI workspace instead of shipping repository contents to a separate service
 - publishes native Bitbucket review artifacts
-- supports single-PR and batch repository review flows
 - loads trusted repo-level configuration from the PR base commit
 
 ## Requirements
@@ -46,20 +45,9 @@ NODE_USE_SYSTEM_CA=1 npx bitbucket-copilot-pr-review review \
   --dry-run
 ```
 
-The `review` command reads local git data from your current working directory by default, so run it from the target repository root. Set `REPO_ROOT` or `--repo-root` only when the repository being reviewed lives somewhere else. Batch mode does not need `REPO_ROOT` because it clones the repository into its own temp workspace.
+The `review` command reads local git data from your current working directory by default, so run it from the target repository root. Set `REPO_ROOT` or `--repo-root` only when the repository being reviewed lives somewhere else.
 
 When the dry run looks correct, rerun without `--dry-run` to publish the Bitbucket review artifacts.
-
-Batch mode works the same way with the published CLI:
-
-```bash
-export BITBUCKET_TOKEN="<bitbucket token>"
-
-NODE_USE_SYSTEM_CA=1 npx bitbucket-copilot-pr-review batch \
-  https://bitbucket.example.com/projects/PROJ/repos/my-repo \
-  --dry-run \
-  --max-parallel 2
-```
 
 ## Quick Start From Source
 
@@ -90,7 +78,7 @@ NODE_USE_SYSTEM_CA=1 npx bitbucket-copilot-pr-review batch \
    pnpm review -- https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
    ```
 
-Use `pnpm review --help` or `pnpm batch --help` for command-specific help while developing locally.
+Use `pnpm review --help` for command-specific help while developing locally.
 
 ## How It Works
 
@@ -151,10 +139,6 @@ Published package:
 NODE_USE_SYSTEM_CA=1 npx bitbucket-copilot-pr-review review --help
 ```
 
-```bash
-NODE_USE_SYSTEM_CA=1 npx bitbucket-copilot-pr-review batch --help
-```
-
 Local source checkout:
 
 ```bash
@@ -164,7 +148,7 @@ node dist/cli.js review --help
 
 ## Documentation
 
-- `docs/operations.md` - configuration, local testing, CI usage, batch mode, release verification, and npm publishing
+- `docs/operations.md` - configuration, local testing, CI usage, release verification, and npm publishing
 - `schemas/copilot-code-review.schema.json` - JSON schema for trusted repo config
 
 ## Why This Exists

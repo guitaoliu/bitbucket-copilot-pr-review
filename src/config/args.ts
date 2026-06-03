@@ -1,6 +1,5 @@
 import { CliUserError } from "./errors.ts";
 import {
-	BATCH_CLI_OPTION_METADATA,
 	CLI_COMMAND_METADATA,
 	type CliCommandMetadata,
 	type CliOptionMetadata,
@@ -20,15 +19,7 @@ export interface ReviewCliOptions extends CommonCliOptions {
 	repoRoot?: string;
 }
 
-export interface BatchCliOptions extends CommonCliOptions {
-	command: "batch";
-	repositoryUrl: string;
-	tempRoot?: string;
-	maxParallel?: number;
-	keepWorkdirs: boolean;
-}
-
-export type CliOptions = ReviewCliOptions | BatchCliOptions;
+export type CliOptions = ReviewCliOptions;
 
 export interface HelpCliResult {
 	help: true;
@@ -36,19 +27,6 @@ export interface HelpCliResult {
 }
 
 export type ParsedCliArgs = CliOptions | HelpCliResult;
-
-function parsePositiveIntegerOption(flag: string, value: string): number {
-	if (!/^\d+$/.test(value)) {
-		throw new CliUserError(`${flag} must be a positive integer.`);
-	}
-
-	const parsed = Number.parseInt(value, 10);
-	if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-		throw new CliUserError(`${flag} must be a positive integer.`);
-	}
-
-	return parsed;
-}
 
 function parseFlagOnlyOption(arg: string, option: CliOptionMetadata): boolean {
 	return option.flags.includes(arg);
@@ -131,74 +109,6 @@ function parseReviewCommandArgs(argv: string[]): ReviewCliOptions {
 	return options;
 }
 
-function parseBatchCommandArgs(argv: string[]): BatchCliOptions {
-	const options: BatchCliOptions = {
-		command: "batch",
-		repositoryUrl: "",
-		dryRun: false,
-		forceReview: false,
-		keepWorkdirs: false,
-		help: false,
-	};
-
-	for (let index = 0; index < argv.length; index += 1) {
-		const arg = argv[index];
-		if (arg === undefined || arg === "--") {
-			continue;
-		}
-
-		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.dryRun)) {
-			options.dryRun = true;
-			continue;
-		}
-
-		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.forceReview)) {
-			options.forceReview = true;
-			continue;
-		}
-
-		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.tempRoot)) {
-			const parsed = parseValueOption({
-				argv,
-				index,
-				flag: "--temp-root",
-			});
-			options.tempRoot = parsed.value;
-			index = parsed.nextIndex;
-			continue;
-		}
-
-		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.maxParallel)) {
-			const parsed = parseValueOption({
-				argv,
-				index,
-				flag: "--max-parallel",
-			});
-			options.maxParallel = parsePositiveIntegerOption(arg, parsed.value);
-			index = parsed.nextIndex;
-			continue;
-		}
-
-		if (parseFlagOnlyOption(arg, BATCH_CLI_OPTION_METADATA.keepWorkdirs)) {
-			options.keepWorkdirs = true;
-			continue;
-		}
-
-		if (!arg.startsWith("-") && options.repositoryUrl.length === 0) {
-			options.repositoryUrl = arg;
-			continue;
-		}
-
-		throw new CliUserError(`Unknown argument for batch: ${arg}`);
-	}
-
-	if (options.repositoryUrl.length === 0) {
-		throw new CliUserError("batch requires <repository-url>.");
-	}
-
-	return options;
-}
-
 function isTopLevelHelp(argv: string[]): boolean {
 	return argv.length === 1 && isHelpFlag(argv[0]);
 }
@@ -264,21 +174,11 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
 		return { help: true, commandName: "review" };
 	}
 
-	if (command === "batch" && isCommandHelp(rest)) {
-		return { help: true, commandName: "batch" };
-	}
-
 	if (command === "review") {
 		return parseReviewCommandArgs(rest);
 	}
 
-	if (command === "batch") {
-		return parseBatchCommandArgs(rest);
-	}
-
-	throw new CliUserError(
-		`Unknown command: ${command}. Expected 'review' or 'batch'.`,
-	);
+	throw new CliUserError(`Unknown command: ${command}. Expected 'review'.`);
 }
 
 export function isReviewCliOptions(
@@ -287,23 +187,13 @@ export function isReviewCliOptions(
 	return "command" in options && options.command === "review";
 }
 
-export function isBatchCliOptions(
-	options: ParsedCliArgs,
-): options is BatchCliOptions {
-	return "command" in options && options.command === "batch";
-}
-
 export function getHelpText(
 	commandName?: keyof typeof CLI_COMMAND_METADATA,
 ): string {
 	if (commandName) {
 		return buildCommandHelp({
 			commandName,
-			optionMetadata: Object.values(
-				commandName === "review"
-					? REVIEW_CLI_OPTION_METADATA
-					: BATCH_CLI_OPTION_METADATA,
-			),
+			optionMetadata: Object.values(REVIEW_CLI_OPTION_METADATA),
 		}).join("\n");
 	}
 
@@ -316,11 +206,6 @@ export function getHelpText(
 		...buildCommandHelp({
 			commandName: "review",
 			optionMetadata: Object.values(REVIEW_CLI_OPTION_METADATA),
-		}),
-		"",
-		...buildCommandHelp({
-			commandName: "batch",
-			optionMetadata: Object.values(BATCH_CLI_OPTION_METADATA),
 		}),
 	].join("\n");
 }

@@ -26,7 +26,6 @@ runStep("pnpm", ["test"], "Test suite");
 runStep("pnpm", ["build"], "Production build");
 runStep("node", ["dist/cli.js", "--help"], "Built CLI top-level help");
 runStep("node", ["dist/cli.js", "review", "--help"], "Built CLI review help");
-runStep("node", ["dist/cli.js", "batch", "--help"], "Built CLI batch help");
 
 process.stdout.write("\n==> npm pack --dry-run\n");
 const packOutput = execFileSync("npm", ["pack", "--dry-run", "--json"], {

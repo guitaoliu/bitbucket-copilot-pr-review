@@ -20,7 +20,7 @@ This guide collects the implementation and operator detail that is intentionally
 
 Official Copilot SDK auth docs: <https://github.com/github/copilot-sdk/blob/main/docs/auth/index.md>
 
-`REPO_ROOT` is optional for single-PR review. If you run the CLI from the target repository root, the current working directory is used automatically. Set `REPO_ROOT` or pass `--repo-root` only when the local checkout you want to review lives somewhere else. Batch mode does not use `REPO_ROOT`; it provisions its own temp clones.
+`REPO_ROOT` is optional for single-PR review. If you run the CLI from the target repository root, the current working directory is used automatically. Set `REPO_ROOT` or pass `--repo-root` only when the local checkout you want to review lives somewhere else.
 
 ## Configuration Model
 
@@ -39,9 +39,8 @@ Setting sources at a glance:
 
 | Setting area | CLI | Environment | Trusted repo config |
 | --- | --- | --- | --- |
-| PR URL / repository URL | required positional arg | - | - |
+| PR URL | required positional arg | - | - |
 | `repoRoot` | `--repo-root` | `REPO_ROOT` | - |
-| batch workspace controls | `--temp-root`, `--max-parallel`, `--keep-workdirs` | - | - |
 | Bitbucket auth and TLS | - | yes | - |
 | Copilot model / reasoning / timeout | - | yes | yes |
 | report title / comment strategy | - | yes | yes |
@@ -67,25 +66,6 @@ Usage: `bitbucket-copilot-pr-review review <pull-request-url> [options]`
 Argument: `<pull-request-url>`
 
 Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pull-requests/123 or a PR tab URL like /overview, /diff, /commits, or /builds.
-
-### Batch command
-
-Review all open pull requests for one Bitbucket repository URL
-
-Usage: `bitbucket-copilot-pr-review batch <repository-url> [options]`
-
-| Option | Description |
-| --- | --- |
-| `--dry-run` | Run without publishing results to Bitbucket |
-| `--force-review` | Re-run even if the current PR revision already has published results |
-| `--temp-root <path>` | Parent directory for mirror and workspace clones |
-| `--max-parallel <count>` | Maximum concurrent review workers |
-| `--keep-workdirs` | Keep per-PR workdirs after the run completes |
-| `-h`, `--help` | Show this help text |
-
-Argument: `<repository-url>`
-
-Bitbucket repository URL, for example https://host/projects/PROJ/repos/my-repo.
 
 ### Environment variables
 
@@ -137,17 +117,6 @@ NODE_USE_SYSTEM_CA=1 npx bitbucket-copilot-pr-review review \
   --dry-run
 ```
 
-For batch review:
-
-```bash
-export BITBUCKET_TOKEN="<bitbucket token>"
-
-NODE_USE_SYSTEM_CA=1 npx bitbucket-copilot-pr-review batch \
-  https://bitbucket.example.com/projects/PROJ/repos/my-repo \
-  --dry-run \
-  --max-parallel 2
-```
-
 If your environment needs access to a custom CA bundle, keep using `NODE_USE_SYSTEM_CA=1` or set `BITBUCKET_CA_CERT_PATH`.
 
 ## Single Pull Request Review
@@ -164,33 +133,6 @@ Publish once the dry-run output looks correct:
 pnpm review -- https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
-## Batch Review
-
-Batch mode clones a Bitbucket repository into a temp working area, discovers open pull requests, and spawns one isolated review subprocess per PR.
-
-Quickest option:
-
-```bash
-scripts/run-local-batch-review.sh \
-  https://bitbucket.example.com/projects/PROJ/repos/my-repo
-```
-
-Or run the CLI directly:
-
-```bash
-export BITBUCKET_TOKEN="<bitbucket token>"
-
-NODE_USE_SYSTEM_CA=1 node dist/cli.js batch https://bitbucket.example.com/projects/PROJ/repos/my-repo --dry-run --max-parallel 2
-```
-
-Batch mode keeps a shared bare mirror cache under the temp root and creates one disposable workspace per PR from that cache. Use `--temp-root` to choose the parent directory or `--keep-workdirs` to preserve per-PR clones for debugging.
-
-The batch JSON output includes `metrics.mirror` and `metrics.workspaces`. Single-review JSON output includes `metrics.toolTelemetry` so you can inspect which Copilot tools were requested, allowed, denied, and completed.
-
-The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and forwards common controls such as `MAX_PARALLEL`, `TEMP_ROOT`, `KEEP_WORKDIRS=1`, and either `FORCE_REVIEW=1` or `REVIEW_FORCE=1`.
-
-Pull requests whose source branch starts with `renovate/` are skipped automatically by default. You can override the skipped branch prefixes with `REVIEW_SKIP_BRANCH_PREFIXES` or repo-level `review.skipBranchPrefixes`, including clearing the list entirely.
-
 ## Testing Against a Real Repo and PR
 
 The reviewer can run from this repo while reading git data from a different local checkout through `REPO_ROOT` or `--repo-root`.
@@ -203,6 +145,10 @@ scripts/run-local-review.sh /path/to/local/my-repo \
 ```
 
 The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and accepts either `FORCE_REVIEW=1` or `REVIEW_FORCE=1` to bypass a cached revision skip.
+
+The review JSON output includes `metrics.toolTelemetry` so you can inspect which Copilot tools were requested, allowed, denied, and completed.
+
+Pull requests whose source branch starts with `renovate/` are skipped automatically by default. You can override the skipped branch prefixes with `REVIEW_SKIP_BRANCH_PREFIXES` or repo-level `review.skipBranchPrefixes`, including clearing the list entirely.
 
 If your Bitbucket Data Center uses an internal or self-signed certificate, prefer setting `BITBUCKET_CA_CERT_PATH` to a PEM file containing your CA bundle. When the CA is already installed on the machine, `NODE_USE_SYSTEM_CA=1` lets Node use the system trust store. Strict TLS verification is enabled by default.
 

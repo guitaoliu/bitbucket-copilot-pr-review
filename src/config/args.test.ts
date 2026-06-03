@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-	getHelpText,
-	isBatchCliOptions,
-	isReviewCliOptions,
-	parseCliArgs,
-} from "./args.ts";
+import { getHelpText, isReviewCliOptions, parseCliArgs } from "./args.ts";
 
 describe("parseCliArgs", () => {
 	it("parses review command options", () => {
@@ -31,31 +26,6 @@ describe("parseCliArgs", () => {
 			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
 		);
 		assert.equal(parsed.repoRoot, "/tmp/repo");
-	});
-
-	it("parses batch command options", () => {
-		const parsed = parseCliArgs([
-			"batch",
-			"https://bitbucket.example.com/projects/PROJ/repos/my-repo",
-			"--temp-root",
-			"/tmp/batch",
-			"--max-parallel",
-			"3",
-			"--keep-workdirs",
-		]);
-
-		assert.equal(isBatchCliOptions(parsed), true);
-		if (!isBatchCliOptions(parsed)) {
-			throw new Error("Expected batch options.");
-		}
-
-		assert.equal(
-			parsed.repositoryUrl,
-			"https://bitbucket.example.com/projects/PROJ/repos/my-repo",
-		);
-		assert.equal(parsed.tempRoot, "/tmp/batch");
-		assert.equal(parsed.maxParallel, 3);
-		assert.equal(parsed.keepWorkdirs, true);
 	});
 
 	it("returns help for top-level help", () => {
@@ -90,20 +60,18 @@ describe("parseCliArgs", () => {
 	it("rejects unknown commands with an actionable message", () => {
 		assert.throws(
 			() => parseCliArgs(["scan"]),
-			/Unknown command: scan\. Expected 'review' or 'batch'\./,
+			/Unknown command: scan\. Expected 'review'\./,
 		);
 	});
 
-	it("rejects invalid max-parallel values", () => {
+	it("rejects the removed batch command", () => {
 		assert.throws(
 			() =>
 				parseCliArgs([
 					"batch",
 					"https://bitbucket.example.com/projects/PROJ/repos/my-repo",
-					"--max-parallel",
-					"zero",
 				]),
-			/--max-parallel must be a positive integer/,
+			/Unknown command: batch\. Expected 'review'\./,
 		);
 	});
 });
@@ -121,16 +89,11 @@ describe("getHelpText", () => {
 			helpText,
 			/bitbucket-copilot-pr-review review <pull-request-url> \[options\]/,
 		);
-		assert.match(
-			helpText,
-			/bitbucket-copilot-pr-review batch <repository-url> \[options\]/,
-		);
 		assert.match(helpText, /REVIEW/);
-		assert.match(helpText, /BATCH/);
 		assert.match(helpText, /Argument: <pull-request-url>/);
-		assert.match(helpText, /Argument: <repository-url>/);
 		assert.match(helpText, /--repo-root <path>/);
-		assert.match(helpText, /--keep-workdirs/);
+		assert.doesNotMatch(helpText, /batch/);
+		assert.doesNotMatch(helpText, /--keep-workdirs/);
 	});
 
 	it("renders command-specific help for the review subcommand", () => {
