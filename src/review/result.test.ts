@@ -195,20 +195,17 @@ describe("buildReviewArtifacts", () => {
 			artifacts.commentBody,
 			/### What Changed\nHardens the service validation path before merge\./,
 		);
-		assert.match(artifacts.commentBody, /### Conclusion/);
-		assert.match(
-			artifacts.commentBody,
-			/- Recommendation: address 1 reportable issue before merge\./,
-		);
+		assert.doesNotMatch(artifacts.commentBody, /### Conclusion/);
+		assert.match(artifacts.commentBody, /### Findings/);
+		assert.match(artifacts.commentBody, /- 1 reportable issue: 1 bug/);
 		assert.match(artifacts.commentBody, /### Review Scope/);
-		assert.match(artifacts.commentBody, /### Main Concerns/);
-		assert.match(artifacts.commentBody, /### Reviewed Changes/);
+		assert.doesNotMatch(artifacts.commentBody, /### Main Concerns/);
+		assert.match(artifacts.commentBody, /### File Changes/);
 		assert.match(artifacts.commentBody, /### Outside Review Scope/);
 		assert.match(
 			artifacts.commentBody,
 			/src\/service\.ts.*Adds a null guard before dereferencing the service response\./s,
 		);
-		assert.match(artifacts.commentBody, /- Main risks: 1 bug/);
 		assert.match(
 			artifacts.commentBody,
 			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\].*Null handling is broken/s,
@@ -359,9 +356,9 @@ describe("buildReviewArtifacts", () => {
 			fileSummaries: [],
 		});
 
-		assert.doesNotMatch(artifacts.commentBody, /### Reviewed Changes/);
+		assert.doesNotMatch(artifacts.commentBody, /### File Changes/);
 		assert.match(artifacts.commentBody, /### What Changed/);
-		assert.match(artifacts.commentBody, /### Main Concerns/);
+		assert.match(artifacts.commentBody, /### Findings/);
 	});
 });
 

@@ -115,6 +115,11 @@ function buildCodeChangeRulesSection(
 		perFileSummariesEnabled
 			? "- After the main review coverage is complete, record exactly one PR-purpose summary with record_pr_summary, and one file summary with record_file_summary for every reviewed file you understand. When the PR has a few distinct changes, prefer short bullet points for the PR summary."
 			: `- After the main review coverage is complete, record exactly one PR-purpose summary with record_pr_summary. When the PR has a few distinct changes, prefer short bullet points for that summary. Per-file summaries are disabled when reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES}, so do not call record_file_summary for this review.`,
+		...(perFileSummariesEnabled
+			? [
+					"- Files in the same logical change may reuse identical file-summary text so the published comment can group them together.",
+				]
+			: []),
 		"- Use emit_finding only for concrete validated issues. If a concern is high-signal but not yet proven, investigate further before dropping it.",
 		"- Use list_recorded_findings before adding more if you need to avoid duplicates or confirm coverage; use replace_recorded_finding to strengthen a draft or remove_recorded_finding to drop a weak one.",
 		"- Emit one finding per root cause. The path must be a reviewed file; skipped files are never valid targets.",

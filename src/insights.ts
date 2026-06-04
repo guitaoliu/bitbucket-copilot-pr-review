@@ -4,7 +4,6 @@ import type {
 	InsightReportPayload,
 } from "./bitbucket/types.ts";
 import type { ReviewerConfig } from "./config/types.ts";
-import type { ChangedFile, SkippedFile } from "./git/types.ts";
 import {
 	buildPullRequestCommentMetadataMarkers,
 	buildPullRequestCommentTagMarker,
@@ -14,7 +13,6 @@ import {
 	buildDefaultPullRequestSummary,
 	buildSkippedFileSummary,
 	shouldCreatePerFileSummaries,
-	summarizeSkippedReason,
 } from "./review/summary.ts";
 import type {
 	ReviewContext,
@@ -25,25 +23,7 @@ import type {
 import { omitUndefined } from "./shared/object.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS, truncateText } from "./shared/text.ts";
 
-const FILE_STATUS_ORDER = [
-	"added",
-	"modified",
-	"renamed",
-	"copied",
-	"deleted",
-] as const;
 const FINDING_TYPE_ORDER = ["BUG", "VULNERABILITY", "CODE_SMELL"] as const;
-const SKIP_REASON_ORDER = [
-	"deleted file",
-	"binary diff",
-	"generated or vendored path",
-	"binary or generated extension",
-	"ignored path pattern",
-	"lockfile",
-	"potential secret-bearing path",
-	"empty textual diff",
-] as const;
-type FileLike = Pick<ChangedFile | SkippedFile, "path" | "oldPath" | "status">;
 
 const COMMENT_SECTION_SEPARATOR = "\n\n";
 
@@ -200,72 +180,17 @@ function buildCommentFindingSummaryLines(
 	});
 }
 
-function buildCommentFindingSummaryHeaderLines(
-	findings: ReviewFinding[],
-): string[] {
+function buildCommentFindingHeaderLines(findings: ReviewFinding[]): string[] {
 	if (findings.length === 0) {
-		return [];
+		return ["- No reportable issues found."];
 	}
 
 	const typeSummary = buildFindingTypeSummary(findings);
-	return typeSummary ? [`- Main risks: ${typeSummary}`] : [];
-}
-
-function buildChangedFileStatusSummary(
-	changedFiles: FileLike[],
-): string | undefined {
-	if (changedFiles.length === 0) {
-		return undefined;
-	}
-
-	const counts = new Map<string, number>();
-	for (const file of changedFiles) {
-		counts.set(file.status, (counts.get(file.status) ?? 0) + 1);
-	}
-
-	const parts = FILE_STATUS_ORDER.flatMap((status) => {
-		const count = counts.get(status) ?? 0;
-		if (count === 0) {
-			return [];
-		}
-
-		return `${count} ${pluralize(count, `${status} file`, `${status} files`)}`;
-	});
-
-	return parts.length > 0 ? parts.join(", ") : undefined;
-}
-
-function buildSkippedReasonSummary(
-	skippedFiles: SkippedFile[],
-): string | undefined {
-	if (skippedFiles.length === 0) {
-		return undefined;
-	}
-
-	const counts = new Map<string, number>();
-	for (const file of skippedFiles) {
-		const label = summarizeSkippedReason(file.reason);
-		counts.set(label, (counts.get(label) ?? 0) + 1);
-	}
-
-	const orderedLabels = [
-		...SKIP_REASON_ORDER.filter((reason) => counts.has(reason)),
-		...[...counts.keys()]
-			.filter(
-				(reason) =>
-					!SKIP_REASON_ORDER.includes(
-						reason as (typeof SKIP_REASON_ORDER)[number],
-					),
-			)
-			.sort(),
-	];
-
-	const parts = orderedLabels.map((reason) => {
-		const count = counts.get(reason) ?? 0;
-		return `${reason} (${count})`;
-	});
-
-	return parts.length > 0 ? parts.join(", ") : undefined;
+	const findingsCount = findings.length;
+	const findingSummary = `${findingsCount} reportable ${pluralize(findingsCount, "issue")}`;
+	return typeSummary
+		? [`- ${findingSummary}: ${typeSummary}`]
+		: [`- ${findingSummary}`];
 }
 
 function buildReviewScopeDataValue(context: ReviewContext): string {
@@ -282,22 +207,6 @@ function buildPrIntentSection(
 	].join("\n");
 }
 
-function buildCommentConclusionSection(outcome: ReviewOutcome): string {
-	const findingsCount = outcome.findings.length;
-	const typeSummary = buildFindingTypeSummary(outcome.findings);
-
-	return [
-		"### Conclusion",
-		outcome.summary,
-		findingsCount > 0
-			? `- Recommendation: address ${findingsCount} reportable ${pluralize(findingsCount, "issue")} before merge.`
-			: "- Recommendation: no reportable issues found in the reviewed scope.",
-		...(findingsCount > 0 && typeSummary
-			? [`- Main risks: ${typeSummary}`]
-			: []),
-	].join("\n");
-}
-
 function buildFileChangeSummaryLines(
 	context: ReviewContext,
 	outcome: ReviewOutcome,
@@ -310,12 +219,20 @@ function buildFileChangeSummaryLines(
 		(outcome.fileSummaries ?? []).map((entry) => [entry.path, entry.summary]),
 	);
 
-	const reviewedLines = context.reviewedFiles.map((file) => {
-		const label = formatCommentReference(
-			file.path,
-			buildPullRequestDiffLink(context.pr.link, file.path),
-		);
-		return `- ${label}: ${reviewedSummaryMap.get(file.path) ?? "Reviewed change."}`;
+	const groups = new Map<string, string[]>();
+	for (const file of context.reviewedFiles) {
+		const summary = reviewedSummaryMap.get(file.path) ?? "Reviewed change.";
+		const paths = groups.get(summary);
+		if (paths) {
+			paths.push(file.path);
+		} else {
+			groups.set(summary, [file.path]);
+		}
+	}
+
+	const reviewedLines = [...groups].map(([summary, paths]) => {
+		const label = formatFileSummaryReference(paths, context.pr.link);
+		return `- ${label}: ${summary}`;
 	});
 
 	if (reviewedLines.length === 0) {
@@ -323,6 +240,41 @@ function buildFileChangeSummaryLines(
 	}
 
 	return reviewedLines;
+}
+
+function formatFileSummaryReference(
+	paths: string[],
+	prLink: string | undefined,
+): string {
+	if (paths.length === 1) {
+		const path = paths[0] ?? "";
+		return formatCommentReference(path, buildPullRequestDiffLink(prLink, path));
+	}
+
+	return formatCommentReference(formatGroupedPathLabel(paths), undefined);
+}
+
+function getDirectoryName(path: string): string {
+	const lastSeparatorIndex = path.lastIndexOf("/");
+	return lastSeparatorIndex >= 0 ? path.slice(0, lastSeparatorIndex) : "";
+}
+
+function getBaseName(path: string): string {
+	const lastSeparatorIndex = path.lastIndexOf("/");
+	return lastSeparatorIndex >= 0 ? path.slice(lastSeparatorIndex + 1) : path;
+}
+
+function formatGroupedPathLabel(paths: string[]): string {
+	const firstDirectory = getDirectoryName(paths[0] ?? "");
+	const hasSameDirectory = paths.every(
+		(path) => getDirectoryName(path) === firstDirectory,
+	);
+	if (hasSameDirectory) {
+		const names = paths.map((path) => getBaseName(path)).join(",");
+		return firstDirectory ? `${firstDirectory}/{${names}}` : `{${names}}`;
+	}
+
+	return `{${paths.join(",")}}`;
 }
 
 function buildSkippedFilesLines(context: ReviewContext): string[] {
@@ -385,23 +337,10 @@ function fitCommentSection(options: {
 }
 
 function buildPullRequestSummarySection(context: ReviewContext): string {
-	const changedFiles = [...context.reviewedFiles, ...context.skippedFiles];
-	const changedFileStatusSummary = buildChangedFileStatusSummary(changedFiles);
-	const skippedReasonSummary = buildSkippedReasonSummary(context.skippedFiles);
 	const prLabel = `#${context.pr.id} ${context.pr.title}`;
 	const lines = [
 		"### Review Scope",
-		`- PR: ${formatCommentReference(prLabel, context.pr.link, false)}`,
-		`- Branches: \`${context.pr.source.displayId}\` -> \`${context.pr.target.displayId}\``,
-		`- Diff size: ${context.diffStats.fileCount} ${pluralize(context.diffStats.fileCount, "file")}, +${context.diffStats.additions}, -${context.diffStats.deletions}`,
-		...(changedFileStatusSummary
-			? [`- Change mix: ${changedFileStatusSummary}`]
-			: []),
-		`- Reviewed in scope: ${context.reviewedFiles.length} ${pluralize(context.reviewedFiles.length, "file")}`,
-		`- Outside scope: ${context.skippedFiles.length} ${pluralize(context.skippedFiles.length, "file")}`,
-		...(skippedReasonSummary
-			? [`- Outside-scope reasons: ${skippedReasonSummary}`]
-			: []),
+		`- PR: ${formatCommentReference(prLabel, context.pr.link, false)}; branches: \`${context.pr.source.displayId}\` -> \`${context.pr.target.displayId}\`; diff: ${context.diffStats.fileCount} ${pluralize(context.diffStats.fileCount, "file")} (+${context.diffStats.additions}/-${context.diffStats.deletions}); reviewed: ${context.reviewedFiles.length}; skipped: ${context.skippedFiles.length}.`,
 	];
 
 	return lines.join("\n");
@@ -497,47 +436,30 @@ export function buildPullRequestComment(
 		}),
 	});
 	const title = `## ${config.report.title}`;
-	const conclusion = buildCommentConclusionSection(outcome);
 	const prIntent = buildPrIntentSection(context, outcome);
 	const prSummary = buildPullRequestSummarySection(context);
-	const stableSections = [
-		header,
-		...metadataMarkers,
-		title,
-		conclusion,
-		prIntent,
-		prSummary,
-	]
+	const leadingSections = [header, ...metadataMarkers, title, prIntent]
 		.filter((section) => section && section.trim().length > 0)
 		.map((section) => section.trim());
 
 	const optionalSections: string[] = [];
 	for (const [heading, lines, omittedLabel] of [
 		[
-			"### Main Concerns",
+			"### Findings",
 			buildCommentFindingSummaryLines(context.pr.link, outcome.findings),
 			pluralize(outcome.findings.length, "finding"),
 		],
 		[
-			"### Reviewed Changes",
+			"### File Changes",
 			buildFileChangeSummaryLines(context, outcome),
 			pluralize(context.reviewedFiles.length, "file summary", "file summaries"),
 		],
-		[
-			"### Outside Review Scope",
-			buildSkippedFilesLines(context),
-			pluralize(context.skippedFiles.length, "skipped file", "skipped files"),
-		],
 	] as const) {
 		const section = fitCommentSection({
-			baseSections: [...stableSections, ...optionalSections],
+			baseSections: [...leadingSections, ...optionalSections, prSummary],
 			heading,
-			...(heading === "### Main Concerns"
-				? {
-						pinnedLines: buildCommentFindingSummaryHeaderLines(
-							outcome.findings,
-						),
-					}
+			...(heading === "### Findings"
+				? { pinnedLines: buildCommentFindingHeaderLines(outcome.findings) }
 				: {}),
 			lines,
 			omittedLabel,
@@ -548,8 +470,22 @@ export function buildPullRequestComment(
 		}
 	}
 
+	const visibleSections = [...leadingSections, ...optionalSections, prSummary];
+	const skippedFilesSection = fitCommentSection({
+		baseSections: visibleSections,
+		heading: "### Outside Review Scope",
+		lines: buildSkippedFilesLines(context),
+		omittedLabel: pluralize(
+			context.skippedFiles.length,
+			"skipped file",
+			"skipped files",
+		),
+		maxChars: BITBUCKET_PR_COMMENT_MAX_CHARS,
+	});
+
 	return truncateText(
-		[...stableSections, ...optionalSections]
+		[...visibleSections, skippedFilesSection]
+			.filter((section) => section && section.trim().length > 0)
 			.join(COMMENT_SECTION_SEPARATOR)
 			.trim(),
 		BITBUCKET_PR_COMMENT_MAX_CHARS,

@@ -225,36 +225,23 @@ describe("buildPullRequestComment", () => {
 			createOutcome(),
 		);
 
-		assert.match(comment, /### Conclusion/);
+		assert.doesNotMatch(comment, /### Conclusion/);
 		assert.match(
 			comment,
 			/### What Changed\nTightens request validation in the service flow and cleans up renamed modules before merge\./,
 		);
-		assert.match(
-			comment,
-			/- Recommendation: address 2 reportable issues before merge\./,
-		);
+		assert.match(comment, /### Findings/);
+		assert.match(comment, /- 2 reportable issues: 1 bug, 1 code smell/);
 		assert.match(comment, /### Review Scope/);
 		assert.match(
 			comment,
-			/- PR: \[#123 Test PR\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\)/,
+			/- PR: \[#123 Test PR\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\); branches: `feature` -> `main`; diff: 6 files \(\+4\/-1\); reviewed: 3; skipped: 4\./,
 		);
-		assert.match(comment, /- Branches: `feature` -> `main`/);
-		assert.match(comment, /- Diff size: 6 files, \+4, -1/);
-		assert.match(
-			comment,
-			/- Change mix: 1 added file, 3 modified files, 1 renamed file, 1 copied file, 1 deleted file/,
-		);
-		assert.match(comment, /- Reviewed in scope: 3 files/);
-		assert.match(comment, /- Outside scope: 4 files/);
-		assert.match(
-			comment,
-			/- Outside-scope reasons: deleted file \(1\), generated or vendored path \(1\), ignored path pattern \(1\), max-files limit \(1\)/,
-		);
+		assert.doesNotMatch(comment, /- Change mix:/);
+		assert.doesNotMatch(comment, /- Outside-scope reasons:/);
 		assert.doesNotMatch(comment, /Changed files:/);
-		assert.match(comment, /### Main Concerns/);
-		assert.match(comment, /- Main risks: 1 bug, 1 code smell/);
-		assert.match(comment, /### Reviewed Changes/);
+		assert.doesNotMatch(comment, /### Main Concerns/);
+		assert.match(comment, /### File Changes/);
 		assert.match(
 			comment,
 			/- \[src\/service\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fservice\.ts\): Adds stricter null handling and updates the main service branch behavior\./,
@@ -306,17 +293,12 @@ describe("buildPullRequestComment", () => {
 			comment,
 			/### What Changed\nTightens request validation in the service flow and cleans up renamed modules before merge\./,
 		);
-		assert.match(
-			comment,
-			/- Recommendation: address 2 reportable issues before merge\./,
-		);
-		assert.match(
-			comment,
-			/- Outside-scope reasons: deleted file \(1\), generated or vendored path \(1\), ignored path pattern \(1\), max-files limit \(1\)/,
-		);
+		assert.match(comment, /### Findings/);
+		assert.doesNotMatch(comment, /### Conclusion/);
+		assert.doesNotMatch(comment, /- Outside-scope reasons:/);
 		assert.doesNotMatch(comment, /- `src\/service\.ts` - modified/);
-		assert.match(comment, /### Main Concerns/);
-		assert.match(comment, /- Main risks: 1 bug, 1 code smell/);
+		assert.doesNotMatch(comment, /### Main Concerns/);
+		assert.match(comment, /### File Changes/);
 		assert.match(
 			comment,
 			/- `src\/service\.ts`: Adds stricter null handling and updates the main service branch behavior\./,
@@ -344,6 +326,55 @@ describe("buildPullRequestComment", () => {
 		assert.match(
 			comment,
 			/### What Changed\n- Tightens request validation in the service flow\n- Cleans up renamed module wiring before merge/,
+		);
+	});
+
+	it("groups reviewed files with identical summaries", () => {
+		const context = createContext(undefined);
+		const [serviceFile, newFile, renamedFile] = context.reviewedFiles;
+		assert.ok(serviceFile);
+		assert.ok(newFile);
+		assert.ok(renamedFile);
+		context.reviewedFiles = [
+			{
+				...serviceFile,
+				path: "src/auth/login.ts",
+			},
+			{
+				...newFile,
+				path: "src/auth/logout.ts",
+			},
+			{
+				...renamedFile,
+				path: "src/session.ts",
+			},
+		];
+
+		const comment = buildPullRequestComment(config, context, {
+			...createOutcome(),
+			fileSummaries: [
+				{
+					path: "src/auth/login.ts",
+					summary: "Threads password-state metadata through auth flows.",
+				},
+				{
+					path: "src/auth/logout.ts",
+					summary: "Threads password-state metadata through auth flows.",
+				},
+				{
+					path: "src/session.ts",
+					summary: "Persists session metadata for changed users.",
+				},
+			],
+		});
+
+		assert.match(
+			comment,
+			/- `src\/auth\/{login\.ts,logout\.ts}`: Threads password-state metadata through auth flows\./,
+		);
+		assert.match(
+			comment,
+			/- `src\/session\.ts`: Persists session metadata for changed users\./,
 		);
 	});
 
@@ -442,7 +473,6 @@ describe("buildPullRequestComment", () => {
 		assert.match(comment, /<!-- copilot-pr-review -->/);
 		assert.match(comment, /<!-- copilot-pr-review:revision:review-rev-123 -->/);
 		assert.match(comment, /<!-- copilot-pr-review:findings-json:/);
-		assert.match(comment, /### Conclusion/);
 		assert.match(comment, /### What Changed/);
 		assert.match(comment, /### Review Scope/);
 		assert.match(comment, /omitted to fit Bitbucket comment limit/);
@@ -485,9 +515,8 @@ describe("buildPullRequestComment", () => {
 			fileSummaries: [],
 		});
 
-		assert.match(comment, /### Conclusion/);
 		assert.match(comment, /### What Changed/);
 		assert.match(comment, /### Review Scope/);
-		assert.doesNotMatch(comment, /### Reviewed Changes/);
+		assert.doesNotMatch(comment, /### File Changes/);
 	});
 });

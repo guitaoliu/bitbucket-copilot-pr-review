@@ -359,6 +359,10 @@ describe("buildSystemMessage", () => {
 			/After the main review coverage is complete, record exactly one PR-purpose summary with record_pr_summary/i,
 		);
 		assert.match(
+			systemMessage.sections?.code_change_rules?.content ?? "",
+			/Files in the same logical change may reuse identical file-summary text/,
+		);
+		assert.match(
 			systemMessage.sections?.tool_efficiency?.content ?? "",
 			/Call get_pr_overview once to load canonical review scope, including reviewed files you may target and skipped files you must ignore/,
 		);
