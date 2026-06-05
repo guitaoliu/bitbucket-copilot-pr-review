@@ -8,7 +8,7 @@
 	},
 	"license": "Apache-2.0",
 	"type": "module",
-	"packageManager": "pnpm@11.3.0",
+	"packageManager": "pnpm@11.5.1",
 	"bin": {
 		"bitbucket-copilot-pr-review": "dist/cli.js"
 	},
