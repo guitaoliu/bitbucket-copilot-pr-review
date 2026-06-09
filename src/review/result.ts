@@ -1,10 +1,6 @@
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
-import {
-	buildInsightAnnotations,
-	buildInsightReport,
-	buildPullRequestComment,
-} from "../insights.ts";
+import { buildInsightReport, buildPullRequestComment } from "../insights.ts";
 import { omitUndefined } from "../shared/object.ts";
 import type { ReviewRunOutput } from "./output-types.ts";
 import type { ReviewArtifacts } from "./runner-types.ts";
@@ -43,7 +39,6 @@ export function buildSkippedReviewOutput(
 			result: "PASS",
 			reporter: config.report.reporter,
 		},
-		annotations: [],
 		published: false,
 		skipped: true,
 		skipReason,
@@ -57,7 +52,6 @@ export function buildReviewArtifacts(
 ): ReviewArtifacts {
 	return {
 		report: buildInsightReport(config, context, review),
-		annotations: buildInsightAnnotations(config, review.findings),
 		commentBody: buildPullRequestComment(config, context, review),
 	};
 }
@@ -99,7 +93,6 @@ export function buildReviewRunOutput(
 		}),
 		review: reviewWithoutTelemetry,
 		report: artifacts.report,
-		annotations: artifacts.annotations,
 		commentBody: artifacts.commentBody,
 		published,
 		...(publication

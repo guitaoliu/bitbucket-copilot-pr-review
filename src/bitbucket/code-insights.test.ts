@@ -36,7 +36,7 @@ describe("CodeInsightsApi", () => {
 		assert.equal(result, undefined);
 	});
 
-	it("publishes by deleting, recreating, and annotating in order", async () => {
+	it("publishes by deleting and recreating the report only", async () => {
 		const calls: string[] = [];
 		const api = new CodeInsightsApi(
 			"PROJ",
@@ -49,99 +49,16 @@ describe("CodeInsightsApi", () => {
 			async () => ({}) as never,
 		);
 
-		await api.publishCodeInsights(
-			"commit-1",
-			"report-key",
-			{ title: "Copilot PR Review", result: "FAIL", reporter: "Copilot" },
-			[{ externalId: "finding-1", message: "broken", severity: "HIGH" }],
-		);
+		await api.publishCodeInsights("commit-1", "report-key", {
+			title: "Copilot PR Review",
+			result: "FAIL",
+			reporter: "Copilot",
+		});
 
 		assert.deepEqual(calls, [
 			"DELETE /rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key",
 			"PUT /rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key",
-			"POST /rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key/annotations",
 		]);
-	});
-
-	it("chunks annotation uploads to avoid oversized publish requests", async () => {
-		const calls: string[] = [];
-		const api = new CodeInsightsApi(
-			"PROJ",
-			"repo",
-			logger,
-			async (pathname, init) => {
-				calls.push(`${init?.method ?? "GET"} ${pathname}`);
-				return "";
-			},
-			async () => ({}) as never,
-		);
-
-		await api.addAnnotations(
-			"commit-1",
-			"report-key",
-			Array.from({ length: 45 }, (_, index) => ({
-				externalId: `finding-${index + 1}`,
-				message: `broken ${index + 1}`,
-				severity: "HIGH" as const,
-			})),
-		);
-
-		assert.deepEqual(calls, [
-			"POST /rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key/annotations",
-			"POST /rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key/annotations",
-			"POST /rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key/annotations",
-		]);
-	});
-
-	it("chunks annotation uploads when one request body would grow too large", async () => {
-		const requestBodies: string[] = [];
-		const api = new CodeInsightsApi(
-			"PROJ",
-			"repo",
-			logger,
-			async (_pathname, init) => {
-				requestBodies.push(String(init?.body ?? ""));
-				return "";
-			},
-			async () => ({}) as never,
-		);
-
-		await api.addAnnotations(
-			"commit-1",
-			"report-key",
-			Array.from({ length: 2 }, (_, index) => ({
-				externalId: `finding-${index + 1}`,
-				message: "x".repeat(25_000),
-				severity: "HIGH" as const,
-			})),
-		);
-
-		assert.equal(requestBodies.length, 2);
-		for (const body of requestBodies) {
-			assert.ok(body.length <= 40_000);
-		}
-	});
-
-	it("rejects a single annotation that exceeds the payload limit", async () => {
-		const api = new CodeInsightsApi(
-			"PROJ",
-			"repo",
-			logger,
-			async () => "",
-			async () => ({}) as never,
-		);
-
-		await assert.rejects(
-			() =>
-				api.addAnnotations("commit-1", "report-key", [
-					{
-						externalId: "finding-1",
-						message: "x".repeat(45_000),
-						severity: "HIGH",
-					},
-				]),
-			/annotation payload exceeds 40000 characters/,
-		);
 	});
 
 	it("rejects report payloads with more than six data fields before sending", async () => {
@@ -173,181 +90,5 @@ describe("CodeInsightsApi", () => {
 		);
 
 		assert.deepEqual(calls, []);
-	});
-
-	it("lists annotations across paged results", async () => {
-		const requestedPaths: string[] = [];
-		const api = new CodeInsightsApi(
-			"PROJ",
-			"repo",
-			logger,
-			async () => "",
-			async (pathname) => {
-				requestedPaths.push(pathname);
-
-				if (pathname.includes("start=0")) {
-					return {
-						annotations: [
-							{
-								externalId: "finding-1",
-								message: "broken",
-								severity: "HIGH",
-							},
-							{
-								externalId: "finding-2",
-								message: "also broken",
-								severity: "MEDIUM",
-							},
-						],
-						isLastPage: false,
-						nextPageStart: 2,
-					} as never;
-				}
-
-				return {
-					annotations: [
-						{
-							externalId: "finding-3",
-							message: "third issue",
-							severity: "LOW",
-						},
-					],
-					isLastPage: true,
-				} as never;
-			},
-		);
-
-		const result = await api.listCodeInsightsAnnotations(
-			"commit-1",
-			"report-key",
-		);
-
-		assert.equal(result.length, 3);
-		assert.deepEqual(
-			result.map((annotation) => annotation.externalId),
-			["finding-1", "finding-2", "finding-3"],
-		);
-		assert.deepEqual(requestedPaths, [
-			"/rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key/annotations?limit=1000&start=0",
-			"/rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key/annotations?limit=1000&start=2",
-		]);
-	});
-
-	it("counts raw annotations across paged results", async () => {
-		const requestedPaths: string[] = [];
-		const api = new CodeInsightsApi(
-			"PROJ",
-			"repo",
-			logger,
-			async () => "",
-			async (pathname) => {
-				requestedPaths.push(pathname);
-
-				if (pathname.includes("start=0")) {
-					return {
-						annotations: [{ id: 1 }, { id: 2 }],
-						isLastPage: false,
-						nextPageStart: 2,
-					} as never;
-				}
-
-				return {
-					annotations: [{ id: 3 }],
-					isLastPage: true,
-				} as never;
-			},
-		);
-
-		const result = await api.getCodeInsightsAnnotationCount(
-			"commit-1",
-			"report-key",
-		);
-
-		assert.equal(result, 3);
-		assert.deepEqual(requestedPaths, [
-			"/rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key/annotations?limit=1000&start=0",
-			"/rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key/annotations?limit=1000&start=2",
-		]);
-	});
-
-	it("does not double-count repeated totalCount values across pages", async () => {
-		const api = new CodeInsightsApi(
-			"PROJ",
-			"repo",
-			logger,
-			async () => "",
-			async (pathname) => {
-				if (pathname.includes("start=0")) {
-					return {
-						totalCount: 3,
-						annotations: [{ id: 1 }, { id: 2 }],
-						isLastPage: false,
-						nextPageStart: 2,
-					} as never;
-				}
-
-				return {
-					totalCount: 3,
-					annotations: [{ id: 3 }],
-					isLastPage: true,
-				} as never;
-			},
-		);
-
-		const result = await api.getCodeInsightsAnnotationCount(
-			"commit-1",
-			"report-key",
-		);
-
-		assert.equal(result, 3);
-	});
-
-	it("uses totalCount when Bitbucket omits annotation bodies", async () => {
-		const api = new CodeInsightsApi(
-			"PROJ",
-			"repo",
-			logger,
-			async () => "",
-			async () =>
-				({
-					totalCount: 1,
-					annotations: [],
-				}) as never,
-		);
-
-		const result = await api.getCodeInsightsAnnotationCount(
-			"commit-1",
-			"report-key",
-		);
-
-		assert.equal(result, 1);
-	});
-
-	it("accepts legacy values arrays when listing annotations", async () => {
-		const api = new CodeInsightsApi(
-			"PROJ",
-			"repo",
-			logger,
-			async () => "",
-			async () =>
-				({
-					values: [
-						{
-							externalId: "finding-1",
-							message: "broken",
-							severity: "HIGH",
-						},
-					],
-					isLastPage: true,
-				}) as never,
-		);
-
-		const result = await api.listCodeInsightsAnnotations(
-			"commit-1",
-			"report-key",
-		);
-
-		assert.equal(result.length, 1);
-		assert.equal(result[0]?.externalId, "finding-1");
 	});
 });

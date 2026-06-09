@@ -1,5 +1,4 @@
 import type {
-	InsightAnnotationPayload,
 	InsightReportPayload,
 	PullRequestInfo,
 	RawBitbucketCodeInsightsReport,
@@ -17,14 +16,6 @@ export interface ReviewBitbucketClient {
 		commitId: string,
 		reportKey: string,
 	): Promise<RawBitbucketCodeInsightsReport | undefined>;
-	getCodeInsightsAnnotationCount(
-		commitId: string,
-		reportKey: string,
-	): Promise<number>;
-	listCodeInsightsAnnotations(
-		commitId: string,
-		reportKey: string,
-	): Promise<InsightAnnotationPayload[]>;
 	findPullRequestCommentByTag(
 		tag: string,
 	): Promise<{ text: string; version?: number; id?: number } | undefined>;
@@ -32,7 +23,11 @@ export interface ReviewBitbucketClient {
 		commitId: string,
 		reportKey: string,
 		report: InsightReportPayload,
-		annotations: InsightAnnotationPayload[],
+	): Promise<void>;
+	reconcilePullRequestFindingComments(
+		tag: string,
+		findings: ReviewOutcome["findings"],
+		metadata: { revision: string; reviewedCommit: string },
 	): Promise<void>;
 	upsertPullRequestComment(
 		tag: string,
@@ -45,7 +40,6 @@ export interface ReviewBitbucketClient {
 
 export interface ReviewArtifacts {
 	report: InsightReportPayload;
-	annotations: InsightAnnotationPayload[];
 	commentBody: string;
 }
 

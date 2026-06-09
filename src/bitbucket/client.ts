@@ -1,11 +1,11 @@
 import type { ReviewerConfig } from "../config/types.ts";
+import type { ReviewFinding } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { CodeInsightsApi } from "./code-insights.ts";
 import { PullRequestCommentsApi } from "./comments.ts";
 import { PullRequestApi } from "./pull-request.ts";
 import { BitbucketTransport } from "./transport.ts";
 import type {
-	InsightAnnotationPayload,
 	InsightReportPayload,
 	PullRequestComment,
 	PullRequestInfo,
@@ -54,23 +54,6 @@ export class BitbucketClient {
 		return this.codeInsights.getCodeInsightsReport(commitId, reportKey);
 	}
 
-	async getCodeInsightsAnnotationCount(
-		commitId: string,
-		reportKey: string,
-	): Promise<number> {
-		return this.codeInsights.getCodeInsightsAnnotationCount(
-			commitId,
-			reportKey,
-		);
-	}
-
-	async listCodeInsightsAnnotations(
-		commitId: string,
-		reportKey: string,
-	): Promise<InsightAnnotationPayload[]> {
-		return this.codeInsights.listCodeInsightsAnnotations(commitId, reportKey);
-	}
-
 	async listPullRequestComments(): Promise<PullRequestComment[]> {
 		return this.comments.listPullRequestComments();
 	}
@@ -103,6 +86,18 @@ export class BitbucketClient {
 		return this.comments.upsertPullRequestComment(tag, text, options);
 	}
 
+	async reconcilePullRequestFindingComments(
+		tag: string,
+		findings: ReviewFinding[],
+		metadata: { revision: string; reviewedCommit: string },
+	): Promise<void> {
+		return this.comments.reconcilePullRequestFindingComments(
+			tag,
+			findings,
+			metadata,
+		);
+	}
+
 	async deleteReport(commitId: string, reportKey: string): Promise<void> {
 		return this.codeInsights.deleteReport(commitId, reportKey);
 	}
@@ -115,25 +110,11 @@ export class BitbucketClient {
 		return this.codeInsights.createReport(commitId, reportKey, payload);
 	}
 
-	async addAnnotations(
-		commitId: string,
-		reportKey: string,
-		annotations: InsightAnnotationPayload[],
-	): Promise<void> {
-		return this.codeInsights.addAnnotations(commitId, reportKey, annotations);
-	}
-
 	async publishCodeInsights(
 		commitId: string,
 		reportKey: string,
 		report: InsightReportPayload,
-		annotations: InsightAnnotationPayload[],
 	): Promise<void> {
-		return this.codeInsights.publishCodeInsights(
-			commitId,
-			reportKey,
-			report,
-			annotations,
-		);
+		return this.codeInsights.publishCodeInsights(commitId, reportKey, report);
 	}
 }

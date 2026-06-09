@@ -10,7 +10,7 @@ export function createEmitFindingTool(toolContext: ReviewToolContext) {
 
 	return defineTool("emit_finding", {
 		description:
-			"Record a validated review finding for later publication to Bitbucket Code Insights.",
+			"Record a validated review finding for later publication to Bitbucket.",
 		parameters: {
 			type: "object",
 			additionalProperties: false,

@@ -11,7 +11,7 @@ describe("buildReviewRevision", () => {
 			rawDiff: "diff --git a/src/file.ts b/src/file.ts",
 			promptVersion: "2026-05-accuracy-stability-1",
 			copilot: {
-				model: "gpt-5.4",
+				model: "gpt-5.3-codex",
 				reasoningEffort: "xhigh",
 			},
 			reviewConfig: {
@@ -45,7 +45,7 @@ describe("buildReviewRevision", () => {
 			rawDiff: "diff --git a/src/file.ts b/src/file.ts",
 			promptVersion: "2026-05-accuracy-stability-1",
 			copilot: {
-				model: "gpt-5.4",
+				model: "gpt-5.3-codex",
 				reasoningEffort: "xhigh",
 			},
 			reviewConfig: {
@@ -65,7 +65,7 @@ describe("buildReviewRevision", () => {
 			rawDiff: "diff --git a/src/file.ts b/src/file.ts",
 			promptVersion: "2026-05-accuracy-stability-1",
 			copilot: {
-				model: "gpt-5.4",
+				model: "gpt-5.3-codex",
 				reasoningEffort: "xhigh",
 			},
 			reviewConfig: {

@@ -19,9 +19,29 @@ import {
 import type { ReviewRunnerDependencies } from "./runner-types.ts";
 import {
 	buildReviewReusePlan,
+	type ExistingPublicationStatus,
 	getExistingPublicationStatus,
 } from "./skip-policy.ts";
+import type { ReviewContext } from "./types.ts";
 import { createDetachedReviewWorkspace } from "./workspace.ts";
+
+function withPreviousReviewReference(
+	context: ReviewContext,
+	status: ExistingPublicationStatus,
+): ReviewContext {
+	if (!status.commentReviewedCommit || !status.commentStoredFindings?.length) {
+		return context;
+	}
+
+	return {
+		...context,
+		previousReview: {
+			...(status.commentRevision ? { revision: status.commentRevision } : {}),
+			reviewedCommit: status.commentReviewedCommit,
+			findings: status.commentStoredFindings,
+		},
+	};
+}
 
 export async function runReview(
 	config: ReviewerConfig,
@@ -144,6 +164,10 @@ export async function runReview(
 		reusePlan.action !== "republish" &&
 		(dependencies.createDetachedReviewWorkspace !== undefined ||
 			dependencies.runCopilotReview === undefined);
+	const reviewContext =
+		reusePlan.action === "review"
+			? withPreviousReviewReference(context, publicationStatus)
+			: context;
 	let review = reusePlan.reusedReview;
 	if (!(reusePlan.action === "republish" && reusePlan.reusedReview)) {
 		let detachedWorkspace:
@@ -179,10 +203,10 @@ export async function runReview(
 					: effectiveConfig,
 				shouldUseDetachedReviewWorkspace
 					? {
-							...context,
+							...reviewContext,
 							repoRoot: reviewRepoRoot,
 						}
-					: context,
+					: reviewContext,
 				reviewGit,
 				logger,
 			);

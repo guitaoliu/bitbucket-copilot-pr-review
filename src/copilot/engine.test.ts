@@ -48,7 +48,7 @@ const config: ReviewerConfig = {
 		tls: { insecureSkipVerify: false },
 	},
 	copilot: {
-		model: "gpt-5.4",
+		model: "gpt-5.3-codex",
 		reasoningEffort: "xhigh",
 		timeoutMs: 1800000,
 	},

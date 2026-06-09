@@ -24,7 +24,7 @@ const config: ReviewerConfig = {
 		},
 	},
 	copilot: {
-		model: "gpt-5.4",
+		model: "gpt-5.3-codex",
 		reasoningEffort: "xhigh",
 		timeoutMs: 1800000,
 	},

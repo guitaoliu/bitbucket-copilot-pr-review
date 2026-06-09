@@ -23,16 +23,11 @@ function createBitbucketClient(
 		async getCodeInsightsReport() {
 			return undefined;
 		},
-		async listCodeInsightsAnnotations() {
-			return [];
-		},
-		async getCodeInsightsAnnotationCount() {
-			return 0;
-		},
 		async findPullRequestCommentByTag() {
 			return undefined;
 		},
 		async publishCodeInsights() {},
+		async reconcilePullRequestFindingComments() {},
 		async upsertPullRequestComment() {},
 		...overrides,
 	};
@@ -70,6 +65,7 @@ describe("publishReview", () => {
 				status: "dry_run",
 				attempted: false,
 				codeInsightsPublished: false,
+				findingCommentsUpdated: false,
 				pullRequestCommentUpdated: false,
 			},
 			review: createReviewOutcome(),
@@ -114,6 +110,7 @@ describe("publishReview", () => {
 				status: "stale",
 				attempted: false,
 				codeInsightsPublished: false,
+				findingCommentsUpdated: false,
 				pullRequestCommentUpdated: false,
 			},
 			review: {
@@ -200,16 +197,34 @@ describe("publishReview", () => {
 		);
 	});
 
-	it("publishes insights and updates the tagged comment for the current head", async () => {
+	it("publishes the report, finding comments, and tagged comment for the current head", async () => {
 		const pr = createPullRequest();
 		const context = createReviewContext(pr);
-		const review = createReviewOutcome();
+		const review = createReviewOutcome({
+			findings: [
+				{
+					externalId: "finding-1",
+					path: "src/example.ts",
+					line: 10,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Null handling is broken",
+					details: "The new branch dereferences a possibly null response.",
+				},
+			],
+		});
 		const artifacts = createReviewArtifacts();
 		const publishCalls: Array<{
 			commitId: string;
 			reportKey: string;
 			report: ReturnType<typeof createReviewArtifacts>["report"];
-			annotations: ReturnType<typeof createReviewArtifacts>["annotations"];
+		}> = [];
+		const findingCommentCalls: Array<{
+			tag: string;
+			findings: typeof review.findings;
+			revision: string;
+			reviewedCommit: string;
 		}> = [];
 		const commentCalls: Array<{
 			tag: string;
@@ -222,8 +237,16 @@ describe("publishReview", () => {
 				async getPullRequest() {
 					return pr;
 				},
-				async publishCodeInsights(commitId, reportKey, report, annotations) {
-					publishCalls.push({ commitId, reportKey, report, annotations });
+				async publishCodeInsights(commitId, reportKey, report) {
+					publishCalls.push({ commitId, reportKey, report });
+				},
+				async reconcilePullRequestFindingComments(tag, findings, metadata) {
+					findingCommentCalls.push({
+						tag,
+						findings,
+						revision: metadata.revision,
+						reviewedCommit: metadata.reviewedCommit,
+					});
 				},
 				async upsertPullRequestComment(tag, text, options) {
 					commentCalls.push({ tag, text, strategy: options?.strategy });
@@ -242,6 +265,7 @@ describe("publishReview", () => {
 				status: "published",
 				attempted: true,
 				codeInsightsPublished: true,
+				findingCommentsUpdated: true,
 				pullRequestCommentUpdated: true,
 			},
 			review,
@@ -251,7 +275,14 @@ describe("publishReview", () => {
 				commitId: context.headCommit,
 				reportKey: baseReviewerConfig.report.key,
 				report: artifacts.report,
-				annotations: artifacts.annotations,
+			},
+		]);
+		assert.deepEqual(findingCommentCalls, [
+			{
+				tag: baseReviewerConfig.report.commentTag,
+				findings: review.findings,
+				revision: context.reviewRevision,
+				reviewedCommit: context.headCommit,
 			},
 		]);
 		assert.deepEqual(commentCalls, [
@@ -285,6 +316,7 @@ describe("publishReview", () => {
 			status: "failed",
 			attempted: true,
 			codeInsightsPublished: false,
+			findingCommentsUpdated: false,
 			pullRequestCommentUpdated: false,
 			error: {
 				stage: "code_insights",
@@ -294,6 +326,44 @@ describe("publishReview", () => {
 		assert.match(
 			errorMessages[0] ?? "",
 			/Bitbucket publication failed before the PR comment update/,
+		);
+	});
+
+	it("returns a partial publication result when finding comment reconciliation fails", async () => {
+		let summaryCommentCalled = false;
+		const { logger, errorMessages } = createLoggerSpy();
+		const result = await publishReview(
+			createBitbucketClient({
+				async reconcilePullRequestFindingComments() {
+					throw new Error("finding comment failure");
+				},
+				async upsertPullRequestComment() {
+					summaryCommentCalled = true;
+				},
+			}),
+			baseReviewerConfig,
+			createReviewContext(),
+			createReviewOutcome(),
+			createReviewArtifacts(),
+			logger,
+		);
+
+		assert.equal(summaryCommentCalled, false);
+		assert.equal(result.published, false);
+		assert.deepEqual(result.publication, {
+			status: "partial",
+			attempted: true,
+			codeInsightsPublished: true,
+			findingCommentsUpdated: false,
+			pullRequestCommentUpdated: false,
+			error: {
+				stage: "finding_comments",
+				message: "finding comment failure",
+			},
+		});
+		assert.match(
+			errorMessages[0] ?? "",
+			/failed during finding comment reconciliation/,
 		);
 	});
 
@@ -320,6 +390,7 @@ describe("publishReview", () => {
 			status: "partial",
 			attempted: true,
 			codeInsightsPublished: true,
+			findingCommentsUpdated: true,
 			pullRequestCommentUpdated: false,
 			error: {
 				stage: "pull_request_comment",

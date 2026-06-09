@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type {
-	InsightAnnotationPayload,
 	PullRequestInfo,
 	RawBitbucketCodeInsightsReport,
 } from "../bitbucket/types.ts";
@@ -17,7 +16,7 @@ import {
 	buildReviewReusePlan,
 	getExistingPublicationStatus,
 } from "./skip-policy.ts";
-import type { ReviewContext } from "./types.ts";
+import type { ReviewContext, StoredReviewFinding } from "./types.ts";
 
 const baseConfig: ReviewerConfig = {
 	repoRoot: "/tmp/repo",
@@ -37,7 +36,7 @@ const baseConfig: ReviewerConfig = {
 		},
 	},
 	copilot: {
-		model: "gpt-5.4",
+		model: "gpt-5.3-codex",
 		reasoningEffort: "xhigh",
 		timeoutMs: 1800000,
 	},
@@ -141,19 +140,17 @@ function createReport(
 	};
 }
 
-function createAnnotations(): InsightAnnotationPayload[] {
+function createStoredFindings(): StoredReviewFinding[] {
 	return [
 		{
 			externalId: "finding-1",
 			path: "src/example.ts",
 			line: 10,
-			message: [
-				"Null handling is broken",
-				"Type: BUG | Severity: HIGH | Confidence: high",
-				"The new branch dereferences a possibly null response.",
-			].join("\n"),
 			severity: "HIGH",
 			type: "BUG",
+			confidence: "high",
+			title: "Null handling is broken",
+			details: "The new branch dereferences a possibly null response.",
 		},
 	];
 }
@@ -164,6 +161,7 @@ function createTaggedComment(
 		revision?: string;
 		reviewedCommit?: string;
 		publishedCommit?: string;
+		storedFindings?: StoredReviewFinding[];
 	} = {},
 ): { text: string; id: number; version: number } {
 	const tag = options.tag ?? baseConfig.report.commentTag;
@@ -177,6 +175,9 @@ function createTaggedComment(
 				revision: options.revision ?? "review-rev-123",
 				reviewedCommit: options.reviewedCommit ?? "head-123",
 				publishedCommit: options.publishedCommit ?? "head-123",
+				...(options.storedFindings
+					? { findingsJson: JSON.stringify(options.storedFindings) }
+					: {}),
 			}),
 			"## Copilot PR Review",
 		].join("\n"),
@@ -193,16 +194,11 @@ function createBitbucketClient(
 		async getCodeInsightsReport() {
 			return undefined;
 		},
-		async getCodeInsightsAnnotationCount() {
-			return 0;
-		},
-		async listCodeInsightsAnnotations() {
-			return [];
-		},
 		async findPullRequestCommentByTag() {
 			return undefined;
 		},
 		async publishCodeInsights() {},
+		async reconcilePullRequestFindingComments() {},
 		async upsertPullRequestComment() {},
 		...overrides,
 	};
@@ -212,7 +208,6 @@ describe("getExistingPublicationStatus", () => {
 	it("loads the current-head report state and marks an exact revision match complete", async () => {
 		const context = createContext();
 		const report = createReport(context);
-		const annotations = createAnnotations();
 		const calls: string[] = [];
 
 		const status = await getExistingPublicationStatus(
@@ -221,17 +216,11 @@ describe("getExistingPublicationStatus", () => {
 					calls.push(`report:${commitId}:${reportKey}`);
 					return report;
 				},
-				async listCodeInsightsAnnotations(commitId, reportKey) {
-					calls.push(`annotations:${commitId}:${reportKey}`);
-					return annotations;
-				},
-				async getCodeInsightsAnnotationCount(commitId, reportKey) {
-					calls.push(`annotation-count:${commitId}:${reportKey}`);
-					return annotations.length;
-				},
 				async findPullRequestCommentByTag(tag) {
 					calls.push(`comment:${tag}`);
-					return createTaggedComment();
+					return createTaggedComment({
+						storedFindings: createStoredFindings(),
+					});
 				},
 			}),
 			baseConfig,
@@ -239,13 +228,11 @@ describe("getExistingPublicationStatus", () => {
 		);
 
 		assert.equal(status.existingReport, report);
-		assert.equal(status.storedAnnotationCount, 1);
+		assert.deepEqual(status.commentStoredFindings, createStoredFindings());
 		assert.equal(status.existingPublicationComplete, true);
 		assert.deepEqual(calls, [
 			`comment:${baseConfig.report.commentTag}`,
 			`report:${context.headCommit}:${baseConfig.report.key}`,
-			`annotation-count:${context.headCommit}:${baseConfig.report.key}`,
-			`annotations:${context.headCommit}:${baseConfig.report.key}`,
 		]);
 	});
 
@@ -258,16 +245,11 @@ describe("getExistingPublicationStatus", () => {
 				async getCodeInsightsReport(commitId) {
 					return commitId === reusedCommit ? report : undefined;
 				},
-				async listCodeInsightsAnnotations() {
-					return createAnnotations();
-				},
-				async getCodeInsightsAnnotationCount() {
-					return 1;
-				},
 				async findPullRequestCommentByTag() {
 					return createTaggedComment({
 						reviewedCommit: reusedCommit,
 						publishedCommit: context.headCommit,
+						storedFindings: createStoredFindings(),
 					});
 				},
 			}),
@@ -278,7 +260,7 @@ describe("getExistingPublicationStatus", () => {
 		assert.equal(status.existingPublicationComplete, false);
 		assert.equal(status.reportCommit, reusedCommit);
 		assert.equal(status.reportReviewedCommit, reusedCommit);
-		assert.equal(status.storedAnnotationCount, 1);
+		assert.deepEqual(status.commentStoredFindings, createStoredFindings());
 	});
 });
 
@@ -287,9 +269,10 @@ describe("buildReviewReusePlan", () => {
 		const context = createContext();
 		const plan = buildReviewReusePlan(baseConfig, context, {
 			existingReport: createReport(context),
-			storedAnnotationCount: 1,
-			existingAnnotations: createAnnotations(),
-			existingComment: createTaggedComment(),
+			existingComment: createTaggedComment({
+				storedFindings: createStoredFindings(),
+			}),
+			commentStoredFindings: createStoredFindings(),
 			existingPublicationComplete: true,
 			reportCommit: context.headCommit,
 			reportRevision: context.reviewRevision,
@@ -310,12 +293,12 @@ describe("buildReviewReusePlan", () => {
 		const oldHead = "head-old";
 		const plan = buildReviewReusePlan(baseConfig, context, {
 			existingReport: createReport(context, { reviewedCommit: oldHead }),
-			storedAnnotationCount: 1,
-			existingAnnotations: createAnnotations(),
 			existingComment: createTaggedComment({
 				reviewedCommit: oldHead,
 				publishedCommit: context.headCommit,
+				storedFindings: createStoredFindings(),
 			}),
+			commentStoredFindings: createStoredFindings(),
 			existingPublicationComplete: false,
 			reportCommit: oldHead,
 			reportRevision: context.reviewRevision,
@@ -345,28 +328,16 @@ describe("buildReviewReusePlan", () => {
 		);
 	});
 
-	it("reuses stored findings from the tagged comment when annotations are unavailable", () => {
+	it("reuses stored findings from the tagged comment", () => {
 		const context = createContext();
 		const plan = buildReviewReusePlan(baseConfig, context, {
 			existingReport: createReport(context),
-			storedAnnotationCount: 1,
-			existingAnnotations: [],
 			existingComment: createTaggedComment({
 				reviewedCommit: context.headCommit,
 				publishedCommit: context.headCommit,
+				storedFindings: createStoredFindings(),
 			}),
-			commentStoredFindings: [
-				{
-					path: "src/example.ts",
-					line: 10,
-					severity: "HIGH",
-					type: "BUG",
-					confidence: "high",
-					title: "Null handling is broken",
-					details: "The new branch dereferences a possibly null response.",
-					externalId: "finding-1",
-				},
-			],
+			commentStoredFindings: createStoredFindings(),
 			existingPublicationComplete: false,
 			reportCommit: context.headCommit,
 			reportRevision: context.reviewRevision,
@@ -391,7 +362,6 @@ describe("buildReviewReusePlan", () => {
 				details: "The new branch dereferences a possibly null response.",
 			},
 		]);
-		assert.equal(plan.reusedArtifacts?.annotations.length, 1);
 		assert.match(
 			plan.reusedArtifacts?.commentBody ?? "",
 			/<!-- copilot-pr-review:findings-json:/,
@@ -403,24 +373,12 @@ describe("buildReviewReusePlan", () => {
 		const oldHead = "head-old";
 		const plan = buildReviewReusePlan(baseConfig, context, {
 			existingReport: createReport(context),
-			storedAnnotationCount: 1,
-			existingAnnotations: [],
 			existingComment: createTaggedComment({
 				reviewedCommit: oldHead,
 				publishedCommit: context.headCommit,
+				storedFindings: createStoredFindings(),
 			}),
-			commentStoredFindings: [
-				{
-					path: "src/example.ts",
-					line: 10,
-					severity: "HIGH",
-					type: "BUG",
-					confidence: "high",
-					title: "Null handling is broken",
-					details: "The new branch dereferences a possibly null response.",
-					externalId: "finding-1",
-				},
-			],
+			commentStoredFindings: createStoredFindings(),
 			existingPublicationComplete: false,
 			reportCommit: context.headCommit,
 			reportRevision: context.reviewRevision,
@@ -431,7 +389,7 @@ describe("buildReviewReusePlan", () => {
 			commentReviewedCommit: oldHead,
 			unusableReasons: [
 				`comment reviewed commit ${oldHead} != ${context.headCommit}`,
-				"reusable finding count 0 != findings 1",
+				"stored finding count 0 != findings 1",
 			],
 		});
 
@@ -443,8 +401,6 @@ describe("buildReviewReusePlan", () => {
 		const context = createContext();
 		const plan = buildReviewReusePlan(baseConfig, context, {
 			existingReport: createReport(context),
-			storedAnnotationCount: 1,
-			existingAnnotations: [],
 			existingComment: createTaggedComment({ revision: "other-revision" }),
 			existingPublicationComplete: false,
 			reportCommit: context.headCommit,
@@ -456,7 +412,7 @@ describe("buildReviewReusePlan", () => {
 			commentReviewedCommit: context.headCommit,
 			unusableReasons: [
 				"comment revision other-revision != review-rev-123",
-				"reusable finding count 0 != findings 1",
+				"stored finding count 0 != findings 1",
 			],
 		});
 
@@ -465,7 +421,7 @@ describe("buildReviewReusePlan", () => {
 		assert.match(plan.repairWarning ?? "", /comment revision other-revision/);
 		assert.match(
 			plan.repairWarning ?? "",
-			/reusable finding count 0 != findings 1/,
+			/stored finding count 0 != findings 1/,
 		);
 		assert.match(plan.confirmMessage ?? "", /Existing cached artifacts/);
 	});
@@ -474,8 +430,6 @@ describe("buildReviewReusePlan", () => {
 		const context = createContext();
 		const plan = buildReviewReusePlan(baseConfig, context, {
 			existingReport: createReport(context),
-			storedAnnotationCount: 1,
-			existingAnnotations: [],
 			existingComment: createTaggedComment(),
 			existingPublicationComplete: false,
 			reportCommit: context.headCommit,
@@ -485,7 +439,7 @@ describe("buildReviewReusePlan", () => {
 			commentRevision: context.reviewRevision,
 			commentPublishedCommit: context.headCommit,
 			commentReviewedCommit: context.headCommit,
-			unusableReasons: ["reusable finding count 0 != findings 1"],
+			unusableReasons: ["stored finding count 0 != findings 1"],
 		});
 
 		assert.equal(plan.action, "review");
@@ -497,8 +451,6 @@ describe("buildReviewReusePlan", () => {
 		const oldHead = "head-old";
 		const plan = buildReviewReusePlan(baseConfig, context, {
 			existingReport: createReport(context, { reviewedCommit: oldHead }),
-			storedAnnotationCount: 1,
-			existingAnnotations: [],
 			existingComment: createTaggedComment({
 				reviewedCommit: oldHead,
 				publishedCommit: oldHead,
@@ -513,7 +465,7 @@ describe("buildReviewReusePlan", () => {
 			commentReviewedCommit: oldHead,
 			unusableReasons: [
 				`comment reviewed commit ${oldHead} != ${context.headCommit}`,
-				"reusable finding count 0 != findings 1",
+				"stored finding count 0 != findings 1",
 			],
 		});
 
@@ -526,8 +478,6 @@ describe("buildReviewReusePlan", () => {
 		const oldRevision = "review-rev-old";
 		const plan = buildReviewReusePlan(baseConfig, context, {
 			existingReport: createReport(context),
-			storedAnnotationCount: 1,
-			existingAnnotations: [],
 			existingComment: createTaggedComment({
 				revision: oldRevision,
 			}),
@@ -542,7 +492,7 @@ describe("buildReviewReusePlan", () => {
 			unusableReasons: [
 				`report revision ${oldRevision} != ${context.reviewRevision}`,
 				`comment revision ${oldRevision} != ${context.reviewRevision}`,
-				"reusable finding count 0 != findings 1",
+				"stored finding count 0 != findings 1",
 			],
 		});
 

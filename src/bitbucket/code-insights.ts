@@ -1,65 +1,11 @@
 import type { Logger } from "../shared/logger.ts";
-import { omitUndefined } from "../shared/object.ts";
 import { BitbucketApiError } from "./transport.ts";
 import type {
-	InsightAnnotationPayload,
 	InsightReportPayload,
-	RawBitbucketAnnotationsResponse,
 	RawBitbucketCodeInsightsReport,
-	RawBitbucketInsightAnnotation,
 } from "./types.ts";
 
 const MAX_INSIGHT_REPORT_DATA_FIELDS = 6;
-const MAX_INSIGHT_ANNOTATIONS_PER_REQUEST = 20;
-const MAX_INSIGHT_ANNOTATIONS_PAYLOAD_CHARS = 40_000;
-
-function normalizeInsightAnnotation(
-	annotation: RawBitbucketInsightAnnotation,
-): InsightAnnotationPayload | undefined {
-	if (
-		typeof annotation.externalId !== "string" ||
-		annotation.externalId.length === 0 ||
-		typeof annotation.message !== "string" ||
-		annotation.message.length === 0 ||
-		typeof annotation.severity !== "string"
-	) {
-		return undefined;
-	}
-
-	return omitUndefined({
-		externalId: annotation.externalId,
-		path: annotation.path,
-		line: annotation.line,
-		message: annotation.message,
-		severity: annotation.severity,
-		type: annotation.type,
-		link: annotation.link,
-	}) satisfies InsightAnnotationPayload;
-}
-
-function getAnnotationsPageAnnotations(
-	payload: RawBitbucketAnnotationsResponse,
-): RawBitbucketInsightAnnotation[] {
-	return payload.annotations ?? payload.values ?? [];
-}
-
-function getAnnotationsPageCount(
-	payload: RawBitbucketAnnotationsResponse,
-): number {
-	const pageAnnotations = getAnnotationsPageAnnotations(payload);
-	if (pageAnnotations.length > 0) {
-		return pageAnnotations.length;
-	}
-
-	if (
-		typeof payload.totalCount === "number" &&
-		Number.isFinite(payload.totalCount)
-	) {
-		return payload.totalCount;
-	}
-
-	return 0;
-}
 
 function validateInsightReportPayload(payload: InsightReportPayload): void {
 	if (
@@ -70,52 +16,6 @@ function validateInsightReportPayload(payload: InsightReportPayload): void {
 			`Bitbucket Code Insights supports at most ${MAX_INSIGHT_REPORT_DATA_FIELDS} report data fields, but got ${payload.data.length}.`,
 		);
 	}
-}
-
-function getInsightAnnotationsPayloadSize(
-	annotations: InsightAnnotationPayload[],
-): number {
-	return JSON.stringify({ annotations }).length;
-}
-
-function chunkInsightAnnotations(
-	annotations: InsightAnnotationPayload[],
-): InsightAnnotationPayload[][] {
-	const batches: InsightAnnotationPayload[][] = [];
-	let currentBatch: InsightAnnotationPayload[] = [];
-
-	for (const annotation of annotations) {
-		const singleAnnotationSize = getInsightAnnotationsPayloadSize([annotation]);
-		if (singleAnnotationSize > MAX_INSIGHT_ANNOTATIONS_PAYLOAD_CHARS) {
-			throw new Error(
-				`Bitbucket Code Insights annotation payload exceeds ${MAX_INSIGHT_ANNOTATIONS_PAYLOAD_CHARS} characters for ${annotation.externalId}.`,
-			);
-		}
-
-		if (currentBatch.length === 0) {
-			currentBatch = [annotation];
-			continue;
-		}
-
-		const candidateBatch = [...currentBatch, annotation];
-		if (
-			candidateBatch.length > MAX_INSIGHT_ANNOTATIONS_PER_REQUEST ||
-			getInsightAnnotationsPayloadSize(candidateBatch) >
-				MAX_INSIGHT_ANNOTATIONS_PAYLOAD_CHARS
-		) {
-			batches.push(currentBatch);
-			currentBatch = [annotation];
-			continue;
-		}
-
-		currentBatch = candidateBatch;
-	}
-
-	if (currentBatch.length > 0) {
-		batches.push(currentBatch);
-	}
-
-	return batches;
 }
 
 export class CodeInsightsApi {
@@ -162,62 +62,6 @@ export class CodeInsightsApi {
 		}
 	}
 
-	async listCodeInsightsAnnotations(
-		commitId: string,
-		reportKey: string,
-	): Promise<InsightAnnotationPayload[]> {
-		let start = 0;
-		const annotations: InsightAnnotationPayload[] = [];
-
-		while (true) {
-			const pathname = `/rest/insights/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/commits/${encodeURIComponent(commitId)}/reports/${encodeURIComponent(reportKey)}/annotations?limit=1000&start=${start}`;
-			const payload =
-				await this.requestJson<RawBitbucketAnnotationsResponse>(pathname);
-			const pageAnnotations = getAnnotationsPageAnnotations(payload);
-
-			if (payload.totalCount && pageAnnotations.length === 0) {
-				this.logger.debug(
-					`Bitbucket returned annotation totalCount=${payload.totalCount} but no annotation bodies for report ${reportKey} on commit ${commitId}`,
-				);
-			}
-
-			for (const annotation of pageAnnotations) {
-				const normalized = normalizeInsightAnnotation(annotation);
-				if (normalized) {
-					annotations.push(normalized);
-				}
-			}
-
-			if (payload.isLastPage === true || payload.nextPageStart === undefined) {
-				return annotations;
-			}
-
-			start = payload.nextPageStart;
-		}
-	}
-
-	async getCodeInsightsAnnotationCount(
-		commitId: string,
-		reportKey: string,
-	): Promise<number> {
-		let start = 0;
-		let count = 0;
-
-		while (true) {
-			const pathname = `/rest/insights/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/commits/${encodeURIComponent(commitId)}/reports/${encodeURIComponent(reportKey)}/annotations?limit=1000&start=${start}`;
-			const payload =
-				await this.requestJson<RawBitbucketAnnotationsResponse>(pathname);
-
-			count += getAnnotationsPageCount(payload);
-
-			if (payload.isLastPage === true || payload.nextPageStart === undefined) {
-				return count;
-			}
-
-			start = payload.nextPageStart;
-		}
-	}
-
 	async deleteReport(commitId: string, reportKey: string): Promise<void> {
 		const pathname = `/rest/insights/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/commits/${encodeURIComponent(commitId)}/reports/${encodeURIComponent(reportKey)}`;
 
@@ -247,36 +91,10 @@ export class CodeInsightsApi {
 		});
 	}
 
-	async addAnnotations(
-		commitId: string,
-		reportKey: string,
-		annotations: InsightAnnotationPayload[],
-	): Promise<void> {
-		if (annotations.length === 0) {
-			return;
-		}
-
-		const pathname = `/rest/insights/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/commits/${encodeURIComponent(commitId)}/reports/${encodeURIComponent(reportKey)}/annotations`;
-		const annotationBatches = chunkInsightAnnotations(annotations);
-		if (annotationBatches.length > 1) {
-			this.logger.debug(
-				`Uploading ${annotations.length} annotations in ${annotationBatches.length} Code Insights batches for report ${reportKey} on commit ${commitId}`,
-			);
-		}
-
-		for (const annotationBatch of annotationBatches) {
-			await this.request(pathname, {
-				method: "POST",
-				body: JSON.stringify({ annotations: annotationBatch }),
-			});
-		}
-	}
-
 	async publishCodeInsights(
 		commitId: string,
 		reportKey: string,
 		report: InsightReportPayload,
-		annotations: InsightAnnotationPayload[],
 	): Promise<void> {
 		this.logger.info(
 			`Publishing Code Insights report ${reportKey} for commit ${commitId}`,
@@ -284,6 +102,5 @@ export class CodeInsightsApi {
 		validateInsightReportPayload(report);
 		await this.deleteReport(commitId, reportKey);
 		await this.createReport(commitId, reportKey, report);
-		await this.addAnnotations(commitId, reportKey, annotations);
 	}
 }

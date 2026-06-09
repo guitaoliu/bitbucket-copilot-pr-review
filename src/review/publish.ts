@@ -84,6 +84,7 @@ export async function publishReview(
 				status: "dry_run",
 				attempted: false,
 				codeInsightsPublished: false,
+				findingCommentsUpdated: false,
 				pullRequestCommentUpdated: false,
 			},
 			review,
@@ -100,6 +101,7 @@ export async function publishReview(
 				status: "stale",
 				attempted: false,
 				codeInsightsPublished: false,
+				findingCommentsUpdated: false,
 				pullRequestCommentUpdated: false,
 			},
 			review: {
@@ -114,7 +116,6 @@ export async function publishReview(
 			context.headCommit,
 			config.report.key,
 			artifacts.report,
-			artifacts.annotations,
 		);
 	} catch (error) {
 		const publicationError = createPublicationError("code_insights", error);
@@ -128,6 +129,36 @@ export async function publishReview(
 				status: "failed",
 				attempted: true,
 				codeInsightsPublished: false,
+				findingCommentsUpdated: false,
+				pullRequestCommentUpdated: false,
+				error: publicationError,
+			},
+			review,
+		};
+	}
+
+	try {
+		await bitbucket.reconcilePullRequestFindingComments(
+			config.report.commentTag,
+			review.findings,
+			{
+				revision: context.reviewRevision,
+				reviewedCommit: context.headCommit,
+			},
+		);
+	} catch (error) {
+		const publicationError = createPublicationError("finding_comments", error);
+		logger.error(
+			`Bitbucket publication completed the report publish but failed during finding comment reconciliation: ${publicationError.message}`,
+			error,
+		);
+		return {
+			published: false,
+			publication: {
+				status: "partial",
+				attempted: true,
+				codeInsightsPublished: true,
+				findingCommentsUpdated: false,
 				pullRequestCommentUpdated: false,
 				error: publicationError,
 			},
@@ -157,6 +188,7 @@ export async function publishReview(
 				status: "partial",
 				attempted: true,
 				codeInsightsPublished: true,
+				findingCommentsUpdated: true,
 				pullRequestCommentUpdated: false,
 				error: publicationError,
 			},
@@ -170,6 +202,7 @@ export async function publishReview(
 			status: "published",
 			attempted: true,
 			codeInsightsPublished: true,
+			findingCommentsUpdated: true,
 			pullRequestCommentUpdated: true,
 		},
 		review,

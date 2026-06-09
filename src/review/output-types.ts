@@ -1,7 +1,4 @@
-import type {
-	InsightAnnotationPayload,
-	InsightReportPayload,
-} from "../bitbucket/types.ts";
+import type { InsightReportPayload } from "../bitbucket/types.ts";
 import type {
 	ReviewOutcome,
 	ReviewPublication,
@@ -31,7 +28,6 @@ export interface ReviewRunOutput {
 	};
 	review: ReviewRunOutputReview;
 	report: InsightReportPayload;
-	annotations: InsightAnnotationPayload[];
 	commentBody?: string;
 	published: boolean;
 	publication?: ReviewPublication;

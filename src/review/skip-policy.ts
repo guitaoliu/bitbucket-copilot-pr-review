@@ -1,7 +1,4 @@
-import type {
-	InsightAnnotationPayload,
-	RawBitbucketCodeInsightsReport,
-} from "../bitbucket/types.ts";
+import type { RawBitbucketCodeInsightsReport } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import {
 	getInsightReportFindingCount,
@@ -27,8 +24,6 @@ type StoredComment = Awaited<
 
 export interface ExistingPublicationStatus {
 	existingReport: RawBitbucketCodeInsightsReport | undefined;
-	storedAnnotationCount: number;
-	existingAnnotations: InsightAnnotationPayload[];
 	existingComment: StoredComment;
 	commentStoredFindings?: StoredReviewFinding[];
 	reportCommit?: string;
@@ -59,27 +54,6 @@ function shouldConfirmRerun(
 		status.reportCommit === context.headCommit &&
 		status.reportRevision === context.reviewRevision
 	);
-}
-
-function parseAnnotationMessage(annotation: InsightAnnotationPayload): {
-	title: string;
-	confidence?: ReviewFinding["confidence"];
-	details: string;
-} {
-	const [titleLine = annotation.message, metadataLine = "", ...detailLines] =
-		annotation.message.split(/\r?\n/);
-	const confidenceMatch = /Confidence:\s*(low|medium|high)/i.exec(metadataLine);
-
-	return {
-		title: titleLine.trim(),
-		...(confidenceMatch?.[1]
-			? {
-					confidence:
-						confidenceMatch[1].toLowerCase() as ReviewFinding["confidence"],
-				}
-			: {}),
-		details: detailLines.join("\n").trim(),
-	};
 }
 
 function summarizeReportDetails(
@@ -121,13 +95,6 @@ function getReusableStoredFindings(
 	context: ReviewContext,
 	status: ExistingPublicationStatus,
 ): StoredReviewFinding[] | undefined {
-	if (
-		!status.commentStoredFindings ||
-		status.commentStoredFindings.length === 0
-	) {
-		return undefined;
-	}
-
 	if (status.commentRevision !== context.reviewRevision) {
 		return undefined;
 	}
@@ -139,7 +106,7 @@ function getReusableStoredFindings(
 		return undefined;
 	}
 
-	return status.commentStoredFindings;
+	return status.commentStoredFindings ?? [];
 }
 
 function buildReviewOutcomeFromArtifacts(
@@ -147,37 +114,13 @@ function buildReviewOutcomeFromArtifacts(
 	status: ExistingPublicationStatus,
 	config: ReviewerConfig,
 ): ReviewOutcome {
-	const storedFindings = getReusableStoredFindings(context, status);
-	if (storedFindings && storedFindings.length > 0) {
-		return {
-			summary: summarizeReportDetails(status.existingReport),
-			findings: storedFindings.map((finding, index) =>
-				buildReviewFindingFromStoredFinding(finding, index, config),
-			),
-			stale: false,
-			fileSummaries: [],
-		};
-	}
-
-	const findings: ReviewFinding[] = status.existingAnnotations.map(
-		(annotation) => {
-			const parsed = parseAnnotationMessage(annotation);
-			return {
-				externalId: annotation.externalId,
-				path: annotation.path ?? context.reviewedFiles[0]?.path ?? "",
-				line: annotation.line ?? 0,
-				severity: annotation.severity,
-				type: annotation.type ?? "BUG",
-				confidence: parsed.confidence ?? config.review.minConfidence,
-				title: parsed.title,
-				details: parsed.details,
-			};
-		},
-	);
+	const storedFindings = getReusableStoredFindings(context, status) ?? [];
 
 	return {
 		summary: summarizeReportDetails(status.existingReport),
-		findings,
+		findings: storedFindings.map((finding, index) =>
+			buildReviewFindingFromStoredFinding(finding, index, config),
+		),
 		stale: false,
 		fileSummaries: [],
 	};
@@ -212,10 +155,7 @@ function canReuseExistingArtifacts(
 
 	const reusableStoredFindings = getReusableStoredFindings(context, status);
 
-	return (
-		status.existingAnnotations.length === expectedAnnotationCount ||
-		(reusableStoredFindings?.length ?? 0) === expectedAnnotationCount
-	);
+	return reusableStoredFindings?.length === expectedAnnotationCount;
 }
 
 function buildUnusableReasons(
@@ -229,8 +169,6 @@ function buildUnusableReasons(
 		commentReviewedCommit?: string;
 		commentPublishedCommit?: string;
 		storedFindingCount: number;
-		storedAnnotationCount: number;
-		reusableAnnotationCount: number;
 		expectedAnnotationCount?: number;
 	},
 ): string[] {
@@ -274,19 +212,9 @@ function buildUnusableReasons(
 
 	if (status.expectedAnnotationCount === undefined) {
 		reasons.push("report findings field is missing or invalid");
-	} else if (status.storedAnnotationCount !== status.expectedAnnotationCount) {
+	} else if (status.storedFindingCount !== status.expectedAnnotationCount) {
 		reasons.push(
-			`stored annotation count ${status.storedAnnotationCount} != findings ${status.expectedAnnotationCount}`,
-		);
-	}
-
-	if (
-		status.expectedAnnotationCount !== undefined &&
-		Math.max(status.reusableAnnotationCount, status.storedFindingCount) !==
-			status.expectedAnnotationCount
-	) {
-		reasons.push(
-			`reusable finding count ${Math.max(status.reusableAnnotationCount, status.storedFindingCount)} != findings ${status.expectedAnnotationCount}`,
+			`stored finding count ${status.storedFindingCount} != findings ${status.expectedAnnotationCount}`,
 		);
 	}
 
@@ -315,36 +243,12 @@ export async function getExistingPublicationStatus(
 		context.headCommit,
 		config.report.key,
 	);
-	let storedAnnotationCount = existingReport
-		? await bitbucket.getCodeInsightsAnnotationCount(
-				context.headCommit,
-				config.report.key,
-			)
-		: 0;
-	let existingAnnotations = existingReport
-		? await bitbucket.listCodeInsightsAnnotations(
-				context.headCommit,
-				config.report.key,
-			)
-		: [];
 
 	if (!existingReport && candidateReportCommit !== context.headCommit) {
 		existingReport = await bitbucket.getCodeInsightsReport(
 			candidateReportCommit,
 			config.report.key,
 		);
-		storedAnnotationCount = existingReport
-			? await bitbucket.getCodeInsightsAnnotationCount(
-					candidateReportCommit,
-					config.report.key,
-				)
-			: 0;
-		existingAnnotations = existingReport
-			? await bitbucket.listCodeInsightsAnnotations(
-					candidateReportCommit,
-					config.report.key,
-				)
-			: [];
 		reportCommit = candidateReportCommit;
 	}
 
@@ -360,15 +264,12 @@ export async function getExistingPublicationStatus(
 		commentMetadata?.revision === context.reviewRevision &&
 		commentMetadata.reviewedCommit === context.headCommit &&
 		commentMetadata.publishedCommit === context.headCommit &&
-		expectedAnnotationCount === storedAnnotationCount &&
-		(commentMetadata?.storedFindings === undefined ||
-			commentMetadata.storedFindings.length === expectedAnnotationCount);
+		expectedAnnotationCount !== undefined &&
+		(commentMetadata?.storedFindings?.length ?? 0) === expectedAnnotationCount;
 	const unusableReasons = existingReport
 		? buildUnusableReasons(context, {
 				reportCommit,
 				storedFindingCount: commentMetadata?.storedFindings?.length ?? 0,
-				storedAnnotationCount,
-				reusableAnnotationCount: existingAnnotations.length,
 				...(reportSchema ? { reportSchema } : {}),
 				...(reportRevision ? { reportRevision } : {}),
 				...(reportReviewedCommit ? { reportReviewedCommit } : {}),
@@ -389,8 +290,6 @@ export async function getExistingPublicationStatus(
 
 	return {
 		existingReport,
-		storedAnnotationCount,
-		existingAnnotations,
 		existingComment,
 		existingPublicationComplete,
 		...(existingReport ? { reportCommit } : {}),
@@ -459,7 +358,6 @@ export function buildReviewReusePlan(
 			reusedReview,
 			reusedArtifacts: {
 				report: reusedArtifacts.report,
-				annotations: reusedArtifacts.annotations,
 				commentBody,
 			},
 		};

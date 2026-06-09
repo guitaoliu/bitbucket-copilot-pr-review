@@ -1,5 +1,3 @@
-import type { AnnotationType, Severity } from "../review/types.ts";
-
 export interface RawBitbucketLink {
 	href: string;
 	name?: string;
@@ -84,26 +82,6 @@ export interface InsightReportPayload {
 	data?: InsightReportDataField[];
 }
 
-export interface InsightAnnotationPayload {
-	externalId: string;
-	path?: string;
-	line?: number;
-	message: string;
-	severity: Severity;
-	type?: AnnotationType;
-	link?: string;
-}
-
-export interface RawBitbucketInsightAnnotation {
-	externalId?: string;
-	path?: string;
-	line?: number;
-	message?: string;
-	severity?: Severity;
-	type?: AnnotationType;
-	link?: string;
-}
-
 export interface PullRequestComment {
 	id: number;
 	text: string;
@@ -127,14 +105,6 @@ export interface RawBitbucketPagedResponse<T> {
 	nextPageStart?: number;
 }
 
-export interface RawBitbucketAnnotationsResponse {
-	totalCount?: number;
-	annotations?: RawBitbucketInsightAnnotation[];
-	values?: RawBitbucketInsightAnnotation[];
-	isLastPage?: boolean;
-	nextPageStart?: number;
-}
-
 export interface RawBitbucketCommentActivity {
 	action?: string;
 	createdDate?: number;
@@ -146,5 +116,3 @@ export interface RawBitbucketCommentActivity {
 		updatedDate?: number;
 	};
 }
-
-export type { AnnotationType, Severity };

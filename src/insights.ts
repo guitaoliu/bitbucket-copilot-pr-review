@@ -1,5 +1,4 @@
 import type {
-	InsightAnnotationPayload,
 	InsightReportDataField,
 	InsightReportPayload,
 } from "./bitbucket/types.ts";
@@ -69,20 +68,6 @@ function formatCommentReference(
 	return `[${safeLabel}](${link})`;
 }
 
-function buildAnnotationMetadataLine(finding: ReviewFinding): string {
-	const parts = [
-		`Type: ${finding.type}`,
-		`Severity: ${finding.severity}`,
-		`Confidence: ${finding.confidence}`,
-	];
-
-	if (finding.category) {
-		parts.push(`Category: ${finding.category}`);
-	}
-
-	return parts.join(" | ");
-}
-
 function buildFindingBadge(finding: ReviewFinding): string {
 	return `${finding.type}/${finding.severity}/${finding.confidence}`;
 }
@@ -122,14 +107,6 @@ function buildFindingTypeSummary(
 	});
 
 	return parts.length > 0 ? parts.join(", ") : undefined;
-}
-
-function buildAnnotationMessage(finding: ReviewFinding): string {
-	const parts = [finding.title, buildAnnotationMetadataLine(finding)];
-	if (finding.details.length > 0) {
-		parts.push(finding.details);
-	}
-	return truncateText(parts.join("\n"), 1800);
 }
 
 function buildFindingSummaryLines(findings: ReviewFinding[]): string[] {
@@ -400,24 +377,6 @@ export function buildInsightReport(
 		link: config.report.link,
 		data: buildReportData(config, context, outcome),
 	}) satisfies InsightReportPayload;
-}
-
-export function buildInsightAnnotations(
-	config: ReviewerConfig,
-	findings: ReviewFinding[],
-): InsightAnnotationPayload[] {
-	return findings.map(
-		(finding) =>
-			omitUndefined({
-				externalId: finding.externalId,
-				path: finding.path,
-				line: finding.line > 0 ? finding.line : undefined,
-				message: buildAnnotationMessage(finding),
-				severity: finding.severity,
-				type: finding.type,
-				link: config.report.link,
-			}) satisfies InsightAnnotationPayload,
-	);
 }
 
 export function buildPullRequestComment(

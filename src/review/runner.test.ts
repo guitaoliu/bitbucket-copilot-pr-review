@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type {
-	InsightAnnotationPayload,
-	PullRequestInfo,
-} from "../bitbucket/types.ts";
+import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import type { Logger } from "../shared/logger.ts";
@@ -13,7 +10,10 @@ import {
 	createReviewContext,
 	createReviewOutcome,
 } from "../test-support/review-fixtures.ts";
-import { buildReviewMetadataFields } from "./publication-state.ts";
+import {
+	buildPullRequestCommentMetadataMarkers,
+	buildReviewMetadataFields,
+} from "./publication-state.ts";
 import { runReview } from "./runner.ts";
 import type { ReviewContext } from "./types.ts";
 
@@ -40,14 +40,6 @@ type FakeBitbucketClient = {
 		commitId: string,
 		reportKey: string,
 	): Promise<{ data?: Array<{ title: string; value: unknown }> } | undefined>;
-	listCodeInsightsAnnotations(
-		commitId: string,
-		reportKey: string,
-	): Promise<InsightAnnotationPayload[]>;
-	getCodeInsightsAnnotationCount(
-		commitId: string,
-		reportKey: string,
-	): Promise<number>;
 	findPullRequestCommentByTag(
 		tag: string,
 	): Promise<{ text: string; id?: number; version?: number } | undefined>;
@@ -55,7 +47,11 @@ type FakeBitbucketClient = {
 		commitId: string,
 		reportKey: string,
 		report: unknown,
-		annotations: unknown[],
+	): Promise<void>;
+	reconcilePullRequestFindingComments(
+		tag: string,
+		findings: unknown[],
+		metadata: { revision: string; reviewedCommit: string },
 	): Promise<void>;
 	upsertPullRequestComment(
 		tag: string,
@@ -137,16 +133,11 @@ describe("runReview", () => {
 			async getCodeInsightsReport() {
 				return undefined;
 			},
-			async listCodeInsightsAnnotations() {
-				return [];
-			},
-			async getCodeInsightsAnnotationCount() {
-				return 0;
-			},
 			async findPullRequestCommentByTag() {
 				return undefined;
 			},
 			async publishCodeInsights() {},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {},
 		};
 
@@ -182,16 +173,11 @@ describe("runReview", () => {
 			async getCodeInsightsReport() {
 				return undefined;
 			},
-			async listCodeInsightsAnnotations() {
-				return [];
-			},
-			async getCodeInsightsAnnotationCount() {
-				return 0;
-			},
 			async findPullRequestCommentByTag() {
 				return undefined;
 			},
 			async publishCodeInsights() {},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {},
 		};
 
@@ -244,12 +230,6 @@ describe("runReview", () => {
 					data: [{ title: "Findings", value: 0 }, ...metadata],
 				};
 			},
-			async listCodeInsightsAnnotations() {
-				return [];
-			},
-			async getCodeInsightsAnnotationCount() {
-				return 0;
-			},
 			async findPullRequestCommentByTag() {
 				return {
 					text: [
@@ -264,6 +244,7 @@ describe("runReview", () => {
 			async publishCodeInsights() {
 				throw new Error("should not publish");
 			},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {
 				throw new Error("should not update comment");
 			},
@@ -298,18 +279,13 @@ describe("runReview", () => {
 			async getCodeInsightsReport() {
 				return undefined;
 			},
-			async listCodeInsightsAnnotations() {
-				return [];
-			},
-			async getCodeInsightsAnnotationCount() {
-				return 0;
-			},
 			async findPullRequestCommentByTag() {
 				return undefined;
 			},
 			async publishCodeInsights() {
 				publishCalled = true;
 			},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {
 				commentCalled = true;
 			},
@@ -344,16 +320,11 @@ describe("runReview", () => {
 			async getCodeInsightsReport() {
 				return undefined;
 			},
-			async listCodeInsightsAnnotations() {
-				return [];
-			},
-			async getCodeInsightsAnnotationCount() {
-				return 0;
-			},
 			async findPullRequestCommentByTag() {
 				return undefined;
 			},
 			async publishCodeInsights() {},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {
 				commentAttempts += 1;
 				throw new Error(`comment failure ${commentAttempts}`);
@@ -379,6 +350,7 @@ describe("runReview", () => {
 			status: "partial",
 			attempted: true,
 			codeInsightsPublished: true,
+			findingCommentsUpdated: true,
 			pullRequestCommentUpdated: false,
 			error: {
 				stage: "pull_request_comment",
@@ -401,18 +373,13 @@ describe("runReview", () => {
 			async getCodeInsightsReport() {
 				throw new Error("should not read report state");
 			},
-			async listCodeInsightsAnnotations() {
-				throw new Error("should not read annotations");
-			},
-			async getCodeInsightsAnnotationCount() {
-				throw new Error("should not count annotations");
-			},
 			async findPullRequestCommentByTag() {
 				throw new Error("should not read comments");
 			},
 			async publishCodeInsights() {
 				throw new Error("should not publish");
 			},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {
 				throw new Error("should not update comment");
 			},
@@ -454,18 +421,13 @@ describe("runReview", () => {
 			async getCodeInsightsReport() {
 				throw new Error("should not read report state");
 			},
-			async listCodeInsightsAnnotations() {
-				throw new Error("should not read annotations");
-			},
-			async getCodeInsightsAnnotationCount() {
-				throw new Error("should not count annotations");
-			},
 			async findPullRequestCommentByTag() {
 				throw new Error("should not read comments");
 			},
 			async publishCodeInsights() {
 				throw new Error("should not publish");
 			},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {
 				throw new Error("should not update comment");
 			},
@@ -503,18 +465,13 @@ describe("runReview", () => {
 			async getCodeInsightsReport() {
 				throw new Error("should not read report state");
 			},
-			async listCodeInsightsAnnotations() {
-				throw new Error("should not read annotations");
-			},
-			async getCodeInsightsAnnotationCount() {
-				throw new Error("should not count annotations");
-			},
 			async findPullRequestCommentByTag() {
 				throw new Error("should not read comments");
 			},
 			async publishCodeInsights() {
 				throw new Error("should not publish");
 			},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {
 				throw new Error("should not update comment");
 			},
@@ -557,16 +514,11 @@ describe("runReview", () => {
 			async getCodeInsightsReport() {
 				return undefined;
 			},
-			async listCodeInsightsAnnotations() {
-				return [];
-			},
-			async getCodeInsightsAnnotationCount() {
-				return 0;
-			},
 			async findPullRequestCommentByTag() {
 				return undefined;
 			},
 			async publishCodeInsights() {},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {},
 		};
 
@@ -615,18 +567,13 @@ describe("runReview", () => {
 			async getCodeInsightsReport() {
 				return undefined;
 			},
-			async listCodeInsightsAnnotations() {
-				return [];
-			},
-			async getCodeInsightsAnnotationCount() {
-				return 0;
-			},
 			async findPullRequestCommentByTag() {
 				return undefined;
 			},
 			async publishCodeInsights() {
 				throw new Error("should not publish");
 			},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {
 				throw new Error("should not update comment");
 			},
@@ -686,18 +633,13 @@ describe("runReview", () => {
 						async getCodeInsightsReport() {
 							throw new Error("should not read report state");
 						},
-						async listCodeInsightsAnnotations() {
-							throw new Error("should not read annotations");
-						},
-						async getCodeInsightsAnnotationCount() {
-							throw new Error("should not count annotations");
-						},
 						async findPullRequestCommentByTag() {
 							throw new Error("should not read comments");
 						},
 						async publishCodeInsights() {
 							throw new Error("should not publish");
 						},
+						async reconcilePullRequestFindingComments() {},
 						async upsertPullRequestComment() {
 							throw new Error("should not update comment");
 						},
@@ -743,12 +685,6 @@ describe("runReview", () => {
 					data: [{ title: "Findings", value: 1 }, ...metadata],
 				};
 			},
-			async listCodeInsightsAnnotations() {
-				return [];
-			},
-			async getCodeInsightsAnnotationCount() {
-				return 0;
-			},
 			async findPullRequestCommentByTag() {
 				return {
 					text: [
@@ -763,6 +699,7 @@ describe("runReview", () => {
 			async publishCodeInsights() {
 				throw new Error("should not publish");
 			},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {
 				throw new Error("should not update comment");
 			},
@@ -841,12 +778,6 @@ describe("runReview", () => {
 					data: [{ title: "Findings", value: 1 }, ...metadata],
 				};
 			},
-			async listCodeInsightsAnnotations() {
-				return [];
-			},
-			async getCodeInsightsAnnotationCount() {
-				return 0;
-			},
 			async findPullRequestCommentByTag() {
 				return {
 					text: [
@@ -859,6 +790,7 @@ describe("runReview", () => {
 				};
 			},
 			async publishCodeInsights() {},
+			async reconcilePullRequestFindingComments() {},
 			async upsertPullRequestComment() {},
 		};
 		const logSpy: Logger = {
@@ -904,5 +836,81 @@ describe("runReview", () => {
 			warnings[0] ?? "",
 			/rerunning review to refresh the published output/,
 		);
+	});
+
+	it("passes prior stored findings into a fresh review as reference context", async () => {
+		const pr = createPullRequest();
+		const context = createReviewContext(pr);
+		const oldHead = "head-old";
+		const oldRevision = "review-rev-old";
+		let passedContext: ReviewContext | undefined;
+		const storedFindings = [
+			{
+				externalId: "finding-1",
+				path: "src/example.ts",
+				line: 10,
+				severity: "HIGH" as const,
+				type: "BUG" as const,
+				confidence: "high" as const,
+				title: "Null handling is broken",
+				details: "The old review found a null dereference.",
+			},
+		];
+		const client: FakeBitbucketClient = {
+			async getPullRequest() {
+				return pr;
+			},
+			async getCodeInsightsReport(commitId) {
+				if (commitId === context.headCommit) {
+					return undefined;
+				}
+
+				const metadata = buildReviewMetadataFields({
+					revision: oldRevision,
+					reviewedCommit: oldHead,
+				}).map(({ title, value }) => ({ title, value }));
+				return {
+					data: [{ title: "Findings", value: 1 }, ...metadata],
+				};
+			},
+			async findPullRequestCommentByTag() {
+				return {
+					text: [
+						"<!-- copilot-pr-review -->",
+						...buildPullRequestCommentMetadataMarkers({
+							tag: baseConfig.report.commentTag,
+							revision: oldRevision,
+							reviewedCommit: oldHead,
+							publishedCommit: oldHead,
+							findingsJson: JSON.stringify(storedFindings),
+						}),
+						"## Copilot PR Review",
+					].join("\n"),
+				};
+			},
+			async publishCodeInsights() {},
+			async reconcilePullRequestFindingComments() {},
+			async upsertPullRequestComment() {},
+		};
+
+		await runReview(baseConfig, logger, {
+			createBitbucketClient: () => client as never,
+			prepareReviewContext: async () => ({
+				config: baseConfig,
+				git: createGitStub(),
+				mergeBaseCommit: context.mergeBaseCommit,
+			}),
+			buildReviewContext: async () => context,
+			runCopilotReview: async (_config, reviewContext) => {
+				passedContext = reviewContext;
+				return createReviewOutcome();
+			},
+		});
+
+		assert.deepEqual(passedContext?.previousReview, {
+			revision: oldRevision,
+			reviewedCommit: oldHead,
+			findings: storedFindings,
+		});
 	});
 });

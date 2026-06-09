@@ -23,7 +23,7 @@ export const baseReviewerConfig: ReviewerConfig = {
 		},
 	},
 	copilot: {
-		model: "gpt-5.4",
+		model: "gpt-5.3-codex",
 		reasoningEffort: "xhigh",
 		timeoutMs: 1800000,
 	},
@@ -142,7 +142,6 @@ export function createReviewArtifacts(
 			result: "PASS",
 			reporter: config.report.reporter,
 		},
-		annotations: [],
 		commentBody: "review comment",
 		...overrides,
 	};

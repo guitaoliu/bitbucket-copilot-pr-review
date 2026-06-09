@@ -508,3 +508,307 @@ describe("PullRequestCommentsApi.upsertPullRequestComment", () => {
 		]);
 	});
 });
+
+describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
+	it("creates anchored inline finding comments for line-level findings", async () => {
+		const requestCalls: Array<{
+			pathname: string;
+			method: string | undefined;
+			body: unknown;
+		}> = [];
+		const commentsApi = new PullRequestCommentsApi(
+			"PROJ",
+			"repo",
+			123,
+			logger,
+			async (pathname, init) => {
+				requestCalls.push({
+					pathname,
+					method: init?.method,
+					body:
+						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+				});
+				return "";
+			},
+			async () =>
+				({
+					values: [],
+					isLastPage: true,
+				}) as never,
+		);
+
+		await commentsApi.reconcilePullRequestFindingComments(
+			"copilot-pr-review",
+			[
+				{
+					externalId: "finding-1",
+					path: "src/example.ts",
+					line: 10,
+					severity: "LOW",
+					type: "BUG",
+					confidence: "high",
+					title: "Null handling is broken",
+					details: "The new branch dereferences a possibly null response.",
+				},
+			],
+			{ revision: "review-rev-123", reviewedCommit: "head-123" },
+		);
+
+		assert.deepEqual(requestCalls, [
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments",
+				method: "POST",
+				body: {
+					text: [
+						"<!-- copilot-pr-review:finding:finding-1 -->",
+						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
+						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
+						"**🐛 Type: BUG | 🟢 Severity: LOW | 🎯 Confidence: high**",
+						"**Null handling is broken**",
+						"",
+						"Location: `src/example.ts:10`",
+						"",
+						"The new branch dereferences a possibly null response.",
+					].join("\n"),
+					anchor: {
+						diffType: "EFFECTIVE",
+						path: "src/example.ts",
+						line: 10,
+						lineType: "ADDED",
+						fileType: "TO",
+					},
+				},
+			},
+		]);
+	});
+
+	it("creates top-level finding comments for file-level findings", async () => {
+		const requestBodies: unknown[] = [];
+		const commentsApi = new PullRequestCommentsApi(
+			"PROJ",
+			"repo",
+			123,
+			logger,
+			async (_pathname, init) => {
+				requestBodies.push(
+					typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+				);
+				return "";
+			},
+			async () =>
+				({
+					values: [],
+					isLastPage: true,
+				}) as never,
+		);
+
+		await commentsApi.reconcilePullRequestFindingComments(
+			"copilot-pr-review",
+			[
+				{
+					externalId: "finding-file",
+					path: "src/example.ts",
+					line: 0,
+					severity: "MEDIUM",
+					type: "CODE_SMELL",
+					confidence: "medium",
+					title: "File-level issue",
+					details: "",
+				},
+			],
+			{ revision: "review-rev-123", reviewedCommit: "head-123" },
+		);
+
+		assert.deepEqual(requestBodies, [
+			{
+				text: [
+					"<!-- copilot-pr-review:finding:finding-file -->",
+					"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
+					"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
+					"**🧹 Type: CODE_SMELL | 🟡 Severity: MEDIUM | 🎯 Confidence: medium**",
+					"**File-level issue**",
+					"",
+					"Location: `src/example.ts`",
+				].join("\n"),
+			},
+		]);
+	});
+
+	it("updates active finding comments and deletes stale ones", async () => {
+		const requestCalls: Array<{
+			pathname: string;
+			method: string | undefined;
+			body: unknown;
+		}> = [];
+		const commentsApi = new PullRequestCommentsApi(
+			"PROJ",
+			"repo",
+			123,
+			logger,
+			async (pathname, init) => {
+				requestCalls.push({
+					pathname,
+					method: init?.method,
+					body:
+						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+				});
+				return "";
+			},
+			async () =>
+				({
+					values: [
+						{
+							action: "COMMENTED",
+							createdDate: 100,
+							comment: {
+								id: 10,
+								text: "<!-- copilot-pr-review:finding:finding-keep -->\nold finding",
+								version: 2,
+								createdDate: 100,
+								updatedDate: 100,
+							},
+						},
+						{
+							action: "COMMENTED",
+							createdDate: 90,
+							comment: {
+								id: 9,
+								text: "<!-- copilot-pr-review:finding:finding-stale -->\nstale finding",
+								version: 1,
+								createdDate: 90,
+								updatedDate: 90,
+							},
+						},
+					],
+					isLastPage: true,
+				}) as never,
+		);
+
+		await commentsApi.reconcilePullRequestFindingComments(
+			"copilot-pr-review",
+			[
+				{
+					externalId: "finding-keep",
+					path: "src/example.ts",
+					line: 10,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Updated title",
+					details: "Updated details.",
+				},
+			],
+			{ revision: "review-rev-123", reviewedCommit: "head-123" },
+		);
+
+		assert.deepEqual(requestCalls, [
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
+				method: "PUT",
+				body: {
+					version: 2,
+					text: [
+						"<!-- copilot-pr-review:finding:finding-keep -->",
+						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
+						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
+						"**🐛 Type: BUG | 🔴 Severity: HIGH | 🎯 Confidence: high**",
+						"**Updated title**",
+						"",
+						"Location: `src/example.ts:10`",
+						"",
+						"Updated details.",
+					].join("\n"),
+				},
+			},
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/9?version=1",
+				method: "DELETE",
+				body: undefined,
+			},
+		]);
+	});
+
+	it("archives stale finding comments when delete is blocked by replies", async () => {
+		const requestCalls: Array<{
+			pathname: string;
+			method: string | undefined;
+			body: unknown;
+		}> = [];
+		const commentsApi = new PullRequestCommentsApi(
+			"PROJ",
+			"repo",
+			123,
+			logger,
+			async (pathname, init) => {
+				requestCalls.push({
+					pathname,
+					method: init?.method,
+					body:
+						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+				});
+
+				if (init?.method === "DELETE") {
+					throw new BitbucketApiError(
+						409,
+						"Conflict",
+						"DELETE",
+						"https://bitbucket.example.com/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
+						JSON.stringify({
+							errors: [
+								{
+									message:
+										"This comment has replies which must be deleted first.",
+									exceptionName:
+										"com.atlassian.bitbucket.comment.CommentDeletionException",
+								},
+							],
+						}),
+					);
+				}
+
+				return "";
+			},
+			async () =>
+				({
+					values: [
+						{
+							action: "COMMENTED",
+							comment: {
+								id: 10,
+								text: "<!-- copilot-pr-review:finding:finding-stale -->\nstale finding",
+								version: 2,
+							},
+						},
+					],
+					isLastPage: true,
+				}) as never,
+		);
+
+		await commentsApi.reconcilePullRequestFindingComments(
+			"copilot-pr-review",
+			[],
+			{ revision: "review-rev-123", reviewedCommit: "head-123" },
+		);
+
+		assert.deepEqual(requestCalls, [
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
+				method: "DELETE",
+				body: undefined,
+			},
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
+				method: "PUT",
+				body: {
+					version: 2,
+					text: "_Superseded by a newer automated PR review finding. This thread is preserved because Bitbucket will not delete it._",
+				},
+			},
+		]);
+	});
+});

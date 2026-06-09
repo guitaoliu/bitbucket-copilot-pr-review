@@ -2,7 +2,7 @@
 
 CLI-first pull request review automation for Bitbucket Data Center, powered by the GitHub Copilot SDK.
 
-This project computes a PR diff locally, gives Copilot a tightly scoped read-only view of the changed code, and publishes the result back to Bitbucket as Code Insights reports, annotations, and one tagged summary comment.
+This project computes a PR diff locally, gives Copilot a tightly scoped read-only view of the changed code, and publishes the result back to Bitbucket as a Code Insights report, inline finding comments, and one tagged summary comment.
 
 ## Highlights
 
@@ -86,7 +86,7 @@ Use `pnpm review --help` for command-specific help while developing locally.
 - computes the effective PR diff from local git data
 - asks Copilot to inspect only the changed review scope through read-only tools
 - validates findings against changed lines before publication
-- publishes a Bitbucket Code Insights report, annotations, and a tagged PR comment
+- publishes a Bitbucket Code Insights report, inline finding comments, and a tagged PR summary comment
 
 ## Repo Config Example
 
@@ -111,7 +111,7 @@ Expanded example:
 {
   "$schema": "./schemas/copilot-code-review.schema.json",
   "copilot": {
-    "model": "gpt-5.4",
+    "model": "gpt-5.3-codex",
     "reasoningEffort": "xhigh"
   },
   "report": {

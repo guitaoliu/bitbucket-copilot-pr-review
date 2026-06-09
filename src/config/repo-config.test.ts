@@ -41,7 +41,7 @@ const baseConfig: ReviewerConfig = {
 		tls: { insecureSkipVerify: true },
 	},
 	copilot: {
-		model: "gpt-5.4",
+		model: "gpt-5.3-codex",
 		reasoningEffort: "xhigh",
 		timeoutMs: 1800000,
 	},
@@ -82,16 +82,16 @@ describe("parseRepoReviewConfig", () => {
 		    "ignorePaths": ["i18n/locales/**/*.json"],
 		    "maxFiles": 150,
 		    "skipBranchPrefixes": ["renovate/", "deps/"]
-		  },
-		  "copilot": {
-		    "model": "gpt-5.4"
-		  }
-		}`);
+			  },
+			  "copilot": {
+			    "model": "gpt-5.3-codex"
+			  }
+			}`);
 
 		assert.deepEqual(config.review?.ignorePaths, ["i18n/locales/**/*.json"]);
 		assert.equal(config.review?.maxFiles, 150);
 		assert.deepEqual(config.review?.skipBranchPrefixes, ["renovate/", "deps/"]);
-		assert.equal(config.copilot?.model, "gpt-5.4");
+		assert.equal(config.copilot?.model, "gpt-5.3-codex");
 	});
 
 	it("rejects unknown keys", () => {

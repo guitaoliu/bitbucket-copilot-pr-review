@@ -259,7 +259,7 @@ export function parsePullRequestCommentMetadata(
 						});
 					}
 				} catch {
-					// Ignore malformed stored finding metadata and fall back to annotations.
+					// Ignore malformed stored finding metadata and require a fresh review.
 				}
 				break;
 			}
@@ -304,7 +304,6 @@ export function getInsightReportReviewedCommit(
 
 export function isPullRequestPublicationComplete(options: {
 	report: Pick<InsightReportPayload, "data"> | undefined;
-	annotationCount?: number;
 	commentTag: string;
 	headCommit: string;
 	reviewRevision: string;
@@ -315,11 +314,7 @@ export function isPullRequestPublicationComplete(options: {
 	}
 
 	const expectedAnnotationCount = getInsightReportFindingCount(options.report);
-	if (
-		expectedAnnotationCount === undefined ||
-		options.annotationCount === undefined ||
-		expectedAnnotationCount !== options.annotationCount
-	) {
+	if (expectedAnnotationCount === undefined) {
 		return false;
 	}
 
@@ -347,7 +342,8 @@ export function isPullRequestPublicationComplete(options: {
 	return (
 		metadata?.revision === options.reviewRevision &&
 		metadata.reviewedCommit === options.headCommit &&
-		metadata.publishedCommit === options.headCommit
+		metadata.publishedCommit === options.headCommit &&
+		(metadata.storedFindings?.length ?? 0) === expectedAnnotationCount
 	);
 }
 

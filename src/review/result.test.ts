@@ -135,7 +135,6 @@ describe("buildSkippedReviewOutput", () => {
 				result: "PASS",
 				reporter: baseConfig.report.reporter,
 			},
-			annotations: [],
 			published: false,
 			skipped: true,
 			skipReason,
@@ -144,7 +143,7 @@ describe("buildSkippedReviewOutput", () => {
 });
 
 describe("buildReviewArtifacts", () => {
-	it("builds the report, annotations, and tagged pull request comment", () => {
+	it("builds the report and tagged pull request comment", () => {
 		const context = createReviewContext();
 		const review = createReviewOutcome();
 		const artifacts = buildReviewArtifacts(baseConfig, context, review);
@@ -161,19 +160,6 @@ describe("buildReviewArtifacts", () => {
 				["Review scope", "2 reviewed, 1 skipped"],
 			],
 		);
-		assert.equal(artifacts.annotations.length, 1);
-		assert.deepEqual(artifacts.annotations[0], {
-			externalId: "finding-1",
-			path: "src/service.ts",
-			line: 42,
-			message: [
-				"Null handling is broken",
-				"Type: BUG | Severity: HIGH | Confidence: high",
-				"The new branch dereferences a possibly null response.",
-			].join("\n"),
-			severity: "HIGH",
-			type: "BUG",
-		});
 		assert.match(artifacts.commentBody, /<!-- copilot-pr-review -->/);
 		assert.match(
 			artifacts.commentBody,
@@ -211,50 +197,6 @@ describe("buildReviewArtifacts", () => {
 			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\].*Null handling is broken/s,
 		);
 		assert.match(artifacts.commentBody, /Null handling is broken/);
-	});
-
-	it("omits the line property for file-level annotations", () => {
-		const context = createReviewContext();
-		const review: ReviewOutcome = {
-			summary: "Found 1 issue.",
-			prSummary: "Highlights a file-level issue in the related helper.",
-			fileSummaries: [
-				{
-					path: "src/other.ts",
-					summary:
-						"Changes the helper in a way that cannot be pinned to one changed line.",
-				},
-			],
-			findings: [
-				{
-					externalId: "finding-file",
-					path: "src/other.ts",
-					line: 0,
-					severity: "MEDIUM",
-					type: "BUG",
-					confidence: "medium",
-					title: "File-level issue",
-					details: "Cannot be pinned to a single line.",
-				},
-			],
-			stale: false,
-		};
-
-		const artifacts = buildReviewArtifacts(baseConfig, context, review);
-
-		assert.deepEqual(artifacts.annotations, [
-			{
-				externalId: "finding-file",
-				path: "src/other.ts",
-				message: [
-					"File-level issue",
-					"Type: BUG | Severity: MEDIUM | Confidence: medium",
-					"Cannot be pinned to a single line.",
-				].join("\n"),
-				severity: "MEDIUM",
-				type: "BUG",
-			},
-		]);
 	});
 
 	it("bounds large comment bodies under the Bitbucket limit", () => {
@@ -401,22 +343,13 @@ describe("buildReviewRunOutput", () => {
 				result: "FAIL",
 				reporter: baseConfig.report.reporter,
 			},
-			annotations: [
-				{
-					externalId: "finding-1",
-					path: "src/service.ts",
-					line: 42,
-					message: "message",
-					severity: "HIGH",
-					type: "BUG",
-				},
-			],
 			commentBody: "comment body",
 		};
 		const output = buildReviewRunOutput(context, review, artifacts, true, {
 			status: "published",
 			attempted: true,
 			codeInsightsPublished: true,
+			findingCommentsUpdated: true,
 			pullRequestCommentUpdated: true,
 		});
 
@@ -444,13 +377,13 @@ describe("buildReviewRunOutput", () => {
 				stale: review.stale,
 			},
 			report: artifacts.report,
-			annotations: artifacts.annotations,
 			commentBody: "comment body",
 			published: true,
 			publication: {
 				status: "published",
 				attempted: true,
 				codeInsightsPublished: true,
+				findingCommentsUpdated: true,
 				pullRequestCommentUpdated: true,
 			},
 			publicationStatus: "published",

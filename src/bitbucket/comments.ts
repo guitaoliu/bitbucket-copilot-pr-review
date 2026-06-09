@@ -1,4 +1,5 @@
 import type { PullRequestCommentStrategy } from "../config/types.ts";
+import type { ReviewFinding } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
@@ -47,6 +48,33 @@ function comparePullRequestComments(
 
 const SUPERSEDED_PULL_REQUEST_COMMENT_TEXT =
 	"_Superseded by a newer automated PR review summary. This thread is preserved because Bitbucket will not delete it._";
+const SUPERSEDED_FINDING_COMMENT_TEXT =
+	"_Superseded by a newer automated PR review finding. This thread is preserved because Bitbucket will not delete it._";
+
+interface PullRequestCommentAnchor {
+	diffType: "EFFECTIVE";
+	path: string;
+	line: number;
+	lineType: "ADDED";
+	fileType: "TO";
+}
+
+interface FindingCommentMetadata {
+	revision: string;
+	reviewedCommit: string;
+}
+
+const findingTypeEmoji: Record<ReviewFinding["type"], string> = {
+	BUG: "🐛",
+	CODE_SMELL: "🧹",
+	VULNERABILITY: "🔒",
+};
+
+const findingSeverityEmoji: Record<ReviewFinding["severity"], string> = {
+	LOW: "🟢",
+	MEDIUM: "🟡",
+	HIGH: "🔴",
+};
 
 function getErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -75,6 +103,64 @@ function isCommentDeletionBlockedByResolvedThread(
 
 	const detail = `${error.responseBody}\n${error.message}`;
 	return /cannot be deleted from resolved thread/i.test(detail);
+}
+
+function escapeRegexLiteral(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildFindingCommentMarker(tag: string, externalId: string): string {
+	return `<!-- ${tag}:finding:${externalId} -->`;
+}
+
+function parseFindingCommentExternalId(
+	tag: string,
+	text: string,
+): string | undefined {
+	const match = new RegExp(
+		`<!--\\s*${escapeRegexLiteral(tag)}:finding:([^>\\s]+)\\s*-->`,
+	).exec(text);
+	return match?.[1];
+}
+
+function buildFindingCommentText(
+	tag: string,
+	finding: ReviewFinding,
+	metadata: FindingCommentMetadata,
+): string {
+	const location =
+		finding.line > 0 ? `${finding.path}:${finding.line}` : finding.path;
+	const lines = [
+		buildFindingCommentMarker(tag, finding.externalId),
+		`<!-- ${tag}:finding-revision:${metadata.revision} -->`,
+		`<!-- ${tag}:finding-reviewed-commit:${metadata.reviewedCommit} -->`,
+		`**${findingTypeEmoji[finding.type]} Type: ${finding.type} | ${findingSeverityEmoji[finding.severity]} Severity: ${finding.severity} | 🎯 Confidence: ${finding.confidence}**`,
+		`**${finding.title}**`,
+		"",
+		`Location: \`${location}\``,
+	];
+
+	if (finding.details.trim().length > 0) {
+		lines.push("", finding.details);
+	}
+
+	return lines.join("\n");
+}
+
+function buildFindingCommentAnchor(
+	finding: ReviewFinding,
+): PullRequestCommentAnchor | undefined {
+	if (finding.line <= 0) {
+		return undefined;
+	}
+
+	return {
+		diffType: "EFFECTIVE",
+		path: finding.path,
+		line: finding.line,
+		lineType: "ADDED",
+		fileType: "TO",
+	};
 }
 
 export class PullRequestCommentsApi {
@@ -171,12 +257,15 @@ export class PullRequestCommentsApi {
 		return (await this.listPullRequestCommentsByTag(tag))[0];
 	}
 
-	async createPullRequestComment(text: string): Promise<void> {
+	async createPullRequestComment(
+		text: string,
+		options: { anchor?: PullRequestCommentAnchor } = {},
+	): Promise<void> {
 		validatePullRequestCommentText(text);
 		const pathname = `/rest/api/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/pull-requests/${this.prId}/comments`;
 		await this.request(pathname, {
 			method: "POST",
-			body: JSON.stringify({ text }),
+			body: JSON.stringify(omitUndefined({ text, anchor: options.anchor })),
 		});
 	}
 
@@ -274,5 +363,111 @@ export class PullRequestCommentsApi {
 
 		this.logger.info(`Updating pull request summary comment tagged ${tag}`);
 		await this.updatePullRequestComment(existing.id, existing.version, text);
+	}
+
+	private async deleteOrArchiveFindingComment(
+		comment: Pick<PullRequestComment, "id" | "version">,
+		tag: string,
+	): Promise<void> {
+		try {
+			this.logger.info(
+				`Deleting stale pull request finding comment ${comment.id} tagged ${tag}`,
+			);
+			await this.deletePullRequestComment(comment.id, comment.version);
+		} catch (error) {
+			const deleteBlockedByReplies = isCommentDeletionBlockedByReplies(error);
+			const deleteBlockedByResolvedThread =
+				isCommentDeletionBlockedByResolvedThread(error);
+
+			if (deleteBlockedByResolvedThread) {
+				this.logger.debug(
+					`Stale pull request finding comment ${comment.id} tagged ${tag} is in a resolved thread and cannot be deleted or archived; leaving it in place.`,
+				);
+				return;
+			}
+
+			if (deleteBlockedByReplies) {
+				try {
+					this.logger.info(
+						`Stale pull request finding comment ${comment.id} tagged ${tag} has replies; archiving it instead of deleting`,
+					);
+					await this.updatePullRequestComment(
+						comment.id,
+						comment.version,
+						SUPERSEDED_FINDING_COMMENT_TEXT,
+					);
+					return;
+				} catch (archiveError) {
+					this.logger.warn(
+						`Failed to archive stale pull request finding comment ${comment.id} tagged ${tag} after delete was blocked by replies: ${getErrorMessage(archiveError)}`,
+					);
+					return;
+				}
+			}
+
+			this.logger.warn(
+				`Failed to delete stale pull request finding comment ${comment.id} tagged ${tag}: ${getErrorMessage(error)}`,
+			);
+		}
+	}
+
+	private async listPullRequestFindingCommentsByExternalId(
+		tag: string,
+	): Promise<Map<string, PullRequestComment>> {
+		const comments = await this.listPullRequestComments();
+		const commentsByExternalId = new Map<string, PullRequestComment>();
+
+		for (const comment of comments.sort(comparePullRequestComments)) {
+			const externalId = parseFindingCommentExternalId(tag, comment.text);
+			if (!externalId) {
+				continue;
+			}
+
+			const existing = commentsByExternalId.get(externalId);
+			if (existing) {
+				await this.deleteOrArchiveFindingComment(comment, tag);
+				continue;
+			}
+
+			commentsByExternalId.set(externalId, comment);
+		}
+
+		return commentsByExternalId;
+	}
+
+	async reconcilePullRequestFindingComments(
+		tag: string,
+		findings: ReviewFinding[],
+		metadata: FindingCommentMetadata,
+	): Promise<void> {
+		const existingByExternalId =
+			await this.listPullRequestFindingCommentsByExternalId(tag);
+		const desiredExternalIds = new Set(
+			findings.map((finding) => finding.externalId),
+		);
+
+		for (const finding of findings) {
+			const text = buildFindingCommentText(tag, finding, metadata);
+			const existing = existingByExternalId.get(finding.externalId);
+			if (existing) {
+				await this.updatePullRequestComment(
+					existing.id,
+					existing.version,
+					text,
+				);
+				continue;
+			}
+
+			const anchor = buildFindingCommentAnchor(finding);
+			await this.createPullRequestComment(text, anchor ? { anchor } : {});
+		}
+
+		for (const [externalId, comment] of existingByExternalId) {
+			if (desiredExternalIds.has(externalId)) {
+				continue;
+			}
+
+			await this.deleteOrArchiveFindingComment(comment, tag);
+		}
 	}
 }

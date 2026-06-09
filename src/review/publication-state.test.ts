@@ -30,7 +30,7 @@ const config: ReviewerConfig = {
 		},
 	},
 	copilot: {
-		model: "gpt-5.4",
+		model: "gpt-5.3-codex",
 		reasoningEffort: "xhigh",
 		timeoutMs: 1800000,
 	},
@@ -139,7 +139,6 @@ describe("publication completeness", () => {
 		assert.equal(
 			isPullRequestPublicationComplete({
 				report,
-				annotationCount: 2,
 				commentTag: config.report.commentTag,
 				headCommit: context.headCommit,
 				reviewRevision: context.reviewRevision,
@@ -149,8 +148,16 @@ describe("publication completeness", () => {
 		);
 		assert.equal(
 			isPullRequestPublicationComplete({
-				report,
-				annotationCount: 1,
+				report: {
+					...report,
+					data: [
+						{ title: "Findings", type: "NUMBER" as const, value: 1 },
+						...buildReviewMetadataFields({
+							revision: context.reviewRevision,
+							reviewedCommit: context.headCommit,
+						}),
+					],
+				},
 				commentTag: config.report.commentTag,
 				headCommit: context.headCommit,
 				reviewRevision: context.reviewRevision,

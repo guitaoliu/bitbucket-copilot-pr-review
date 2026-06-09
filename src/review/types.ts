@@ -45,6 +45,7 @@ export type ReviewPublicationStatus =
 
 export type ReviewPublicationFailureStage =
 	| "code_insights"
+	| "finding_comments"
 	| "pull_request_comment";
 
 export interface ReviewPublicationError {
@@ -56,6 +57,7 @@ export interface ReviewPublication {
 	status: ReviewPublicationStatus;
 	attempted: boolean;
 	codeInsightsPublished: boolean;
+	findingCommentsUpdated: boolean;
 	pullRequestCommentUpdated: boolean;
 	error?: ReviewPublicationError;
 }
@@ -71,6 +73,7 @@ export interface ReviewContext {
 	diffStats: DiffStats;
 	reviewedFiles: ChangedFile[];
 	skippedFiles: SkippedFile[];
+	previousReview?: PreviousReviewReference;
 	ciSummary?: string;
 }
 
@@ -104,6 +107,12 @@ export interface StoredReviewFinding {
 	details?: string;
 	category?: string;
 	externalId?: string;
+}
+
+export interface PreviousReviewReference {
+	revision?: string;
+	reviewedCommit: string;
+	findings: StoredReviewFinding[];
 }
 
 export interface ReviewSummaryDrafts {
