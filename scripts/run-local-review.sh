@@ -78,7 +78,7 @@ if [[ ! "$PR_URL" =~ ^https?://.+/projects/[^/]+/repos/[^/]+/pull-requests/[0-9]
 fi
 
 export REPO_ROOT="$TARGET_REPO_ROOT"
-export COPILOT_MODEL="${COPILOT_MODEL:-gpt-5.4}"
+export COPILOT_MODEL="${COPILOT_MODEL:-gpt-5.3-codex}"
 export COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 export LOG_LEVEL="${LOG_LEVEL:-debug}"
 export NODE_USE_SYSTEM_CA="${NODE_USE_SYSTEM_CA:-1}"

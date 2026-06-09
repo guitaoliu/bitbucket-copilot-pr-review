@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import type { SystemMessageCustomizeConfig } from "@github/copilot-sdk";
 
 import type { ReviewerConfig } from "../config/types.ts";
-import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "../review/summary.ts";
 import type { ReviewContext } from "../review/types.ts";
 import { buildPrompt, buildSystemMessage } from "./prompt.ts";
 
@@ -182,42 +181,38 @@ describe("buildPrompt", () => {
 		);
 	});
 
-	it("disables per-file summary instructions for large reviews", () => {
+	it("omits per-file summary instructions for large reviews", () => {
 		const prompt = buildPrompt(config, {
 			...context,
-			reviewedFiles: Array.from(
-				{ length: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1 },
-				(_, index) => ({
-					path: `src/example-${index}.ts`,
-					status: "modified" as const,
-					patch: `diff --git a/src/example-${index}.ts b/src/example-${index}.ts`,
-					changedLines: [index + 1],
-					hunks: [
-						{
-							oldStart: index + 1,
-							oldLines: 1,
-							newStart: index + 1,
-							newLines: 1,
-							header: "",
-							changedLines: [index + 1],
-						},
-					],
-					additions: 1,
-					deletions: 0,
-					isBinary: false,
-				}),
-			),
+			reviewedFiles: Array.from({ length: 40 }, (_, index) => ({
+				path: `src/example-${index}.ts`,
+				status: "modified" as const,
+				patch: `diff --git a/src/example-${index}.ts b/src/example-${index}.ts`,
+				changedLines: [index + 1],
+				hunks: [
+					{
+						oldStart: index + 1,
+						oldLines: 1,
+						newStart: index + 1,
+						newLines: 1,
+						header: "",
+						changedLines: [index + 1],
+					},
+				],
+				additions: 1,
+				deletions: 0,
+				isBinary: false,
+			})),
 			diffStats: {
-				fileCount: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1,
-				additions: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1,
+				fileCount: 40,
+				additions: 40,
 				deletions: 0,
 			},
 		});
 
-		assert.match(
-			prompt,
-			/new_file_summaries|per_file_summaries: disabled|per-file summaries are disabled/i,
-		);
+		assert.doesNotMatch(prompt, /record_file_summary/);
+		assert.doesNotMatch(prompt, /new_file_summaries/);
+		assert.doesNotMatch(prompt, /per_file_summaries/);
 		assert.doesNotMatch(prompt, /Finding taxonomy:/);
 		assert.doesNotMatch(prompt, /Review checklist:/);
 	});
@@ -395,11 +390,7 @@ describe("buildSystemMessage", () => {
 		);
 		assert.match(
 			systemMessage.sections?.code_change_rules?.content ?? "",
-			/After the main review coverage is complete, record exactly one PR-purpose summary with record_pr_summary/i,
-		);
-		assert.match(
-			systemMessage.sections?.code_change_rules?.content ?? "",
-			/Files in the same logical change may reuse identical file-summary text/,
+			/Record exactly one PR-purpose summary with record_pr_summary/i,
 		);
 		assert.match(
 			systemMessage.sections?.tool_efficiency?.content ?? "",
@@ -419,8 +410,15 @@ describe("buildSystemMessage", () => {
 		);
 		assert.match(
 			systemMessage.sections?.tool_efficiency?.content ?? "",
-			/After the main review coverage is complete, call record_pr_summary once/i,
+			/Call record_pr_summary once/i,
 		);
+		const combinedSections = Object.values(systemMessage.sections ?? {})
+			.map((section) => section.content)
+			.join("\n");
+		assert.doesNotMatch(combinedSections, /record_file_summary/);
+		assert.doesNotMatch(combinedSections, /list_recorded_findings/);
+		assert.doesNotMatch(combinedSections, /replace_recorded_finding/);
+		assert.doesNotMatch(combinedSections, /remove_recorded_finding/);
 		assert.match(
 			systemMessage.sections?.last_instructions?.content ?? "",
 			/Return only a short plain-text summary, not JSON/,
@@ -458,21 +456,17 @@ describe("buildSystemMessage", () => {
 		);
 	});
 
-	it("turns off per-file summary rules for large reviews in the system message", () => {
+	it("keeps removed tool names out of large-review system messages", () => {
 		const systemMessage = expectCustomizeSystemMessage(
-			buildSystemMessage(
-				config,
-				MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1,
-			),
+			buildSystemMessage(config, 40),
 		);
+		const combinedSections = Object.values(systemMessage.sections ?? {})
+			.map((section) => section.content)
+			.join("\n");
 
-		assert.match(
-			systemMessage.sections?.code_change_rules?.content ?? "",
-			/do not call record_file_summary for this review/,
-		);
-		assert.match(
-			systemMessage.sections?.tool_efficiency?.content ?? "",
-			/Do not record per-file summaries when reviewed files exceed 25/,
-		);
+		assert.doesNotMatch(combinedSections, /record_file_summary/);
+		assert.doesNotMatch(combinedSections, /list_recorded_findings/);
+		assert.doesNotMatch(combinedSections, /replace_recorded_finding/);
+		assert.doesNotMatch(combinedSections, /remove_recorded_finding/);
 	});
 });

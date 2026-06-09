@@ -117,7 +117,6 @@ export interface PreviousReviewReference {
 
 export interface ReviewSummaryDrafts {
 	prSummary?: string;
-	fileSummaries: FileChangeSummary[];
 }
 
 export interface ReviewOutcome {

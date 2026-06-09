@@ -1,10 +1,6 @@
 import type { SectionOverride, SystemMessageConfig } from "@github/copilot-sdk";
 
 import type { ReviewerConfig } from "../config/types.ts";
-import {
-	MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES,
-	shouldCreatePerFileSummaries,
-} from "../review/summary.ts";
 import type { ReviewContext } from "../review/types.ts";
 import { truncateText } from "../shared/text.ts";
 import {
@@ -142,25 +138,11 @@ function buildEnvironmentContextSection(): string {
 	].join("\n");
 }
 
-function buildCodeChangeRulesSection(
-	config: ReviewerConfig,
-	reviewedFileCount: number,
-): string {
-	const perFileSummariesEnabled =
-		shouldCreatePerFileSummaries(reviewedFileCount);
-
+function buildCodeChangeRulesSection(config: ReviewerConfig): string {
 	return [
 		"Finding rules:",
-		perFileSummariesEnabled
-			? "- After the main review coverage is complete, record exactly one PR-purpose summary with record_pr_summary, and one file summary with record_file_summary for every reviewed file you understand. When the PR has a few distinct changes, prefer short bullet points for the PR summary."
-			: `- After the main review coverage is complete, record exactly one PR-purpose summary with record_pr_summary. When the PR has a few distinct changes, prefer short bullet points for that summary. Per-file summaries are disabled when reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES}, so do not call record_file_summary for this review.`,
-		...(perFileSummariesEnabled
-			? [
-					"- Files in the same logical change may reuse identical file-summary text so the published comment can group them together.",
-				]
-			: []),
+		"- Record exactly one PR-purpose summary with record_pr_summary. When the PR has a few distinct changes, prefer short bullet points for the PR summary.",
 		"- Use emit_finding only for concrete validated issues. If a concern is high-signal but not yet proven, investigate further before dropping it.",
-		"- Use list_recorded_findings before adding more if you need to avoid duplicates or confirm coverage; use replace_recorded_finding to strengthen a draft or remove_recorded_finding to drop a weak one.",
 		"- Emit one finding per root cause. The path must be a reviewed file; skipped files are never valid targets.",
 		"- For cross-file issues validated with unchanged code, anchor the finding to the changed reviewed file that introduced or materially worsened the risk.",
 		"- Prefer a changed head-side line. Use line 0 only for a true file-level issue that cannot be pinned to one changed line.",
@@ -173,20 +155,14 @@ function buildCodeChangeRulesSection(
 	].join("\n");
 }
 
-function buildToolEfficiencySection(reviewedFileCount: number): string {
-	const perFileSummariesEnabled =
-		shouldCreatePerFileSummaries(reviewedFileCount);
-
+function buildToolEfficiencySection(): string {
 	return [
 		"Recommended workflow:",
 		"1. Call get_pr_overview once to load canonical review scope, including reviewed files you may target and skipped files you must ignore.",
 		"2. Use readonly builtin shell tools to inspect the riskiest diffs, relevant head/base code, nearby tests, and impacted paths until the changed behavior is clear. Remember that the working tree is base content; use git diff/show with the provided commits for PR-head content. Reuse evidence you already gathered instead of re-reading the same ranges, and avoid shell formatting wrappers unless they add real inspection value.",
 		"3. For shared contracts, public interfaces, validation, auth, persistence, serialization, async flow, or unclear call paths, expand with targeted readonly git and repo inspection until the main hypotheses are resolved.",
-		perFileSummariesEnabled
-			? "4. After the main review coverage is complete, call record_pr_summary once, using short bullet points when they better capture separate changes, and record_file_summary for each reviewed file."
-			: `4. After the main review coverage is complete, call record_pr_summary once, using short bullet points when they better capture separate changes. Do not record per-file summaries when reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES}.`,
-		"5. Use list_recorded_findings, replace_recorded_finding, or remove_recorded_finding when refining the final distinct set and checking for remaining coverage gaps.",
-		"6. Call emit_finding for every validated distinct issue you find, then sanity-check that the reviewed files and major risk areas were covered before ending with a concise plain-text conclusion.",
+		"4. Call record_pr_summary once, using short bullet points when they better capture separate changes.",
+		"5. Call emit_finding for every validated distinct issue you find, then end with a concise plain-text conclusion.",
 	].join("\n");
 }
 
@@ -203,7 +179,7 @@ function buildLastInstructionsSection(): string {
 
 export function buildSystemMessage(
 	config: ReviewerConfig,
-	reviewedFileCount: number,
+	_reviewedFileCount: number,
 ): SystemMessageConfig {
 	return {
 		mode: "customize",
@@ -225,11 +201,9 @@ export function buildSystemMessage(
 			),
 			guidelines: appendSystemSection(buildGuidelinesSection()),
 			code_change_rules: appendSystemSection(
-				buildCodeChangeRulesSection(config, reviewedFileCount),
+				buildCodeChangeRulesSection(config),
 			),
-			tool_efficiency: appendSystemSection(
-				buildToolEfficiencySection(reviewedFileCount),
-			),
+			tool_efficiency: appendSystemSection(buildToolEfficiencySection()),
 			last_instructions: appendSystemSection(buildLastInstructionsSection()),
 		},
 	};
@@ -239,9 +213,6 @@ export function buildPrompt(
 	_config: ReviewerConfig,
 	context: ReviewContext,
 ): string {
-	const perFileSummariesEnabled = shouldCreatePerFileSummaries(
-		context.reviewedFiles.length,
-	);
 	const pullRequestTitle = escapePromptMarkupText(context.pr.title);
 	const sourceBranch = escapePromptMarkupText(context.pr.source.displayId);
 	const targetBranch = escapePromptMarkupText(context.pr.target.displayId);
@@ -272,11 +243,6 @@ export function buildPrompt(
 		`merge_base_commit: ${context.mergeBaseCommit}`,
 		`reviewed_files: ${context.reviewedFiles.length}`,
 		`skipped_files: ${context.skippedFiles.length}`,
-		`per_file_summaries: ${
-			perFileSummariesEnabled
-				? "enabled"
-				: `disabled (reviewed files exceed ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES})`
-		}`,
 		"</pull_request_context>",
 		...prDescriptionSection,
 		...ciSummarySection,

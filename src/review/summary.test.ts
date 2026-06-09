@@ -85,23 +85,20 @@ describe("shouldCreatePerFileSummaries", () => {
 });
 
 describe("finalizeReviewSummary", () => {
-	it("keeps per-file summaries for smaller reviews", () => {
+	it("builds deterministic per-file summaries for smaller reviews", () => {
 		const context = createContext(2);
 		const drafts: ReviewSummaryDrafts = {
 			prSummary: "Tightens request validation before merge.",
-			fileSummaries: [
-				{
-					path: "src/file-0.ts",
-					summary: "Adds an early null guard.",
-				},
-			],
 		};
 
 		const result = finalizeReviewSummary(context, drafts);
 
 		assert.equal(result.prSummary, "Tightens request validation before merge.");
 		assert.equal(result.fileSummaries.length, 2);
-		assert.equal(result.fileSummaries[0]?.summary, "Adds an early null guard.");
+		assert.match(
+			result.fileSummaries[0]?.summary ?? "",
+			/Updates 1 changed line/,
+		);
 		assert.match(
 			result.fileSummaries[1]?.summary ?? "",
 			/Updates 1 changed line/,
@@ -113,7 +110,6 @@ describe("finalizeReviewSummary", () => {
 		const drafts: ReviewSummaryDrafts = {
 			prSummary:
 				"  - Tightens request validation\n\n - Cleans up renamed module handling  ",
-			fileSummaries: [],
 		};
 
 		const result = finalizeReviewSummary(context, drafts);
@@ -130,12 +126,6 @@ describe("finalizeReviewSummary", () => {
 		);
 		const drafts: ReviewSummaryDrafts = {
 			prSummary: "Expands validation across many modules.",
-			fileSummaries: [
-				{
-					path: "src/file-0.ts",
-					summary: "Adds a guard.",
-				},
-			],
 		};
 
 		const result = finalizeReviewSummary(context, drafts);

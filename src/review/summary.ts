@@ -1,6 +1,5 @@
 import type { ChangedFile, SkippedFile } from "../git/types.ts";
 import { truncateText } from "../shared/text.ts";
-import { createReviewedFileLookup } from "./file.ts";
 import type {
 	FileChangeSummary,
 	ReviewContext,
@@ -10,7 +9,6 @@ import type {
 export const MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES = 25;
 
 const MAX_PR_SUMMARY_LENGTH = 500;
-const MAX_FILE_SUMMARY_LENGTH = 220;
 
 export function shouldCreatePerFileSummaries(
 	reviewedFileCount: number,
@@ -152,7 +150,7 @@ export function buildSkippedFileSummary(file: SkippedFile): string {
 export function finalizeReviewSummary(
 	context: ReviewContext,
 	drafts: ReviewSummaryDrafts,
-): Pick<ReviewSummaryDrafts, "prSummary" | "fileSummaries"> {
+): { prSummary: string; fileSummaries: FileChangeSummary[] } {
 	const prSummary =
 		normalizeMultilineSummaryText(drafts.prSummary, MAX_PR_SUMMARY_LENGTH) ??
 		buildDefaultPullRequestSummary(context);
@@ -164,28 +162,10 @@ export function finalizeReviewSummary(
 		};
 	}
 
-	const reviewedFileMap = createReviewedFileLookup(context.reviewedFiles);
-	const normalizedFileSummaries = new Map<string, string>();
-
-	for (const draft of drafts.fileSummaries) {
-		const file = reviewedFileMap.get(draft.path);
-		const summary = normalizeInlineSummaryText(
-			draft.summary,
-			MAX_FILE_SUMMARY_LENGTH,
-		);
-		if (!file || !summary) {
-			continue;
-		}
-
-		normalizedFileSummaries.set(file.path, summary);
-	}
-
 	const fileSummaries: FileChangeSummary[] = context.reviewedFiles.map(
 		(file) => ({
 			path: file.path,
-			summary:
-				normalizedFileSummaries.get(file.path) ??
-				buildDefaultReviewedFileSummary(file),
+			summary: buildDefaultReviewedFileSummary(file),
 		}),
 	);
 

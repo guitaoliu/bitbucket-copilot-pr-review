@@ -14,11 +14,7 @@ import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import { finalizeFindings } from "../policy/findings.ts";
-import {
-	finalizeReviewSummary,
-	MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES,
-	shouldCreatePerFileSummaries,
-} from "../review/summary.ts";
+import { finalizeReviewSummary } from "../review/summary.ts";
 import type {
 	FindingDraft,
 	ReviewContext,
@@ -80,18 +76,13 @@ export interface CopilotSessionLike {
 
 type ReviewProgressState = {
 	reviewedFileCount: number;
-	reviewedFilePaths?: Set<string>;
-	reviewedFilePathAliases?: Map<string, string>;
 	summaryDrafts: ReviewSummaryDrafts;
 	toolTelemetry?: ReviewToolTelemetry;
 	toolStartedAtMsByName?: Map<string, number[]>;
-	reviewScopeSeenPaths?: Set<string>;
-	directlyInspectedReviewedFilePaths?: Set<string>;
 	droppedFindingCounts?: {
 		invalidPayload: number;
 		invalidLocation: number;
 	};
-	partialScopeResponses?: number;
 };
 
 export interface RunCopilotReviewDependencies {
@@ -124,92 +115,6 @@ function isBuiltinReviewToolName(
 
 function isAllowedReviewToolName(toolName: string): boolean {
 	return isReviewToolName(toolName) || isBuiltinReviewToolName(toolName);
-}
-
-function getReviewScopeSeenPaths(
-	progressState: ReviewProgressState,
-): Set<string> {
-	if (progressState.reviewScopeSeenPaths) {
-		return progressState.reviewScopeSeenPaths;
-	}
-
-	const seenPaths = new Set<string>();
-	progressState.reviewScopeSeenPaths = seenPaths;
-	return seenPaths;
-}
-
-function getReviewScopeSeenCount(progressState: ReviewProgressState): number {
-	return getReviewScopeSeenPaths(progressState).size;
-}
-
-function getDirectlyInspectedReviewedFilePaths(
-	progressState: ReviewProgressState,
-): Set<string> {
-	if (progressState.directlyInspectedReviewedFilePaths) {
-		return progressState.directlyInspectedReviewedFilePaths;
-	}
-
-	const inspectedPaths = new Set<string>();
-	progressState.directlyInspectedReviewedFilePaths = inspectedPaths;
-	return inspectedPaths;
-}
-
-function getDirectlyInspectedReviewedFileCount(
-	progressState: ReviewProgressState,
-): number {
-	return getDirectlyInspectedReviewedFilePaths(progressState).size;
-}
-
-function resolveTrackedReviewedFilePath(
-	progressState: ReviewProgressState,
-	path: string,
-): string | undefined {
-	return progressState.reviewedFilePathAliases?.get(path);
-}
-
-function markReviewedFileAsDirectlyInspected(
-	progressState: ReviewProgressState,
-	path: string,
-): void {
-	const trackedPath = resolveTrackedReviewedFilePath(progressState, path);
-	if (!trackedPath) {
-		return;
-	}
-
-	getDirectlyInspectedReviewedFilePaths(progressState).add(trackedPath);
-}
-
-function hasDirectlyInspectedAllReviewedFiles(
-	progressState: ReviewProgressState,
-): boolean {
-	return (
-		progressState.reviewedFilePaths === undefined ||
-		progressState.reviewedFileCount === 0 ||
-		getDirectlyInspectedReviewedFileCount(progressState) >=
-			progressState.reviewedFileCount
-	);
-}
-
-function getUncheckedReviewedFilePaths(
-	progressState: ReviewProgressState,
-): string[] {
-	if (!progressState.reviewedFilePaths) {
-		return [];
-	}
-
-	const directlyInspectedPaths =
-		getDirectlyInspectedReviewedFilePaths(progressState);
-	return [...progressState.reviewedFilePaths].filter(
-		(path) => !directlyInspectedPaths.has(path),
-	);
-}
-
-function formatReviewedFileList(paths: string[], maxPaths = 5): string {
-	if (paths.length <= maxPaths) {
-		return paths.join(", ");
-	}
-
-	return `${paths.slice(0, maxPaths).join(", ")} +${paths.length - maxPaths} more`;
 }
 
 type ExecFileAsyncLike = (
@@ -345,76 +250,12 @@ export async function resolveCopilotGitHubToken(
 	return undefined;
 }
 
-function getScopeSeenCount(progressState: ReviewProgressState): number {
-	return getReviewScopeSeenCount(progressState);
-}
-
-function getCoverageProgressSnapshot(
-	progressState: ReviewProgressState,
-): string {
-	return `${getScopeSeenCount(progressState)}:${getDirectlyInspectedReviewedFileCount(progressState)}`;
-}
-
-function hasLoadedReviewScope(progressState: ReviewProgressState): boolean {
-	return (
-		progressState.reviewedFileCount === 0 ||
-		getScopeSeenCount(progressState) > 0
-	);
-}
-
-function hasLoadedFullReviewScope(progressState: ReviewProgressState): boolean {
-	return (
-		progressState.reviewedFileCount === 0 ||
-		getScopeSeenCount(progressState) >= progressState.reviewedFileCount
-	);
-}
-
-function getPartialScopeResponseCount(
-	progressState: ReviewProgressState,
-): number {
-	return progressState.partialScopeResponses ?? 0;
-}
-
-function markPartialScopeResponse(progressState: ReviewProgressState): void {
-	progressState.partialScopeResponses =
-		(progressState.partialScopeResponses ?? 0) + 1;
-}
-
-function buildIncompletePrSummaryHint(
-	progressState: ReviewProgressState,
-): string {
-	const metadataComplete = hasLoadedReviewScope(progressState);
-	const inspectionComplete =
-		hasDirectlyInspectedAllReviewedFiles(progressState);
-	const metadataProgress = `Loaded canonical review scope for ${getScopeSeenCount(progressState)}/${progressState.reviewedFileCount} reviewed files so far.`;
-	const inspectionProgress = `Inspected reviewed files: ${getDirectlyInspectedReviewedFileCount(progressState)}/${progressState.reviewedFileCount}.`;
-	const uncheckedPaths = getUncheckedReviewedFilePaths(progressState);
-	const uncheckedPathsSentence =
-		uncheckedPaths.length > 0
-			? ` Remaining reviewed files: ${formatReviewedFileList(uncheckedPaths)}.`
-			: "";
-
-	if (!metadataComplete && inspectionComplete) {
-		return `You can record the PR summary now if it helps, but review coverage is still incomplete. ${metadataProgress} Call get_pr_overview to load the full review scope first.`;
-	}
-
-	if (metadataComplete && !inspectionComplete) {
-		return `You can record the PR summary now if it helps, but review coverage is still incomplete. ${inspectionProgress}${uncheckedPathsSentence} Inspect each remaining file with git diff/show or targeted repo searches before finishing.`;
-	}
-
-	return `You can record the PR summary now if it helps, but review coverage is still incomplete. ${metadataProgress} ${inspectionProgress}${uncheckedPathsSentence} Call get_pr_overview first, then inspect each remaining file with git diff/show or targeted repo searches before finishing.`;
-}
-
 function buildSessionHint(
 	config: ReviewerConfig,
-	reviewedFileCount: number,
+	_reviewedFileCount: number,
 ): string {
-	const perFileSummariesEnabled =
-		shouldCreatePerFileSummaries(reviewedFileCount);
-
 	return [
 		"Review all distinct validated issues introduced or materially worsened by this pull request that are strong enough to publish under the configured threshold.",
-		"The review is not complete until the reviewed files and their main risk areas have been checked.",
 		"Call get_pr_overview once to load canonical reviewed/skipped file scope, then use readonly builtin shell tools to inspect git diff, git history, nearby tests, and relevant code paths before emitting any finding.",
 		"Prefer targeted shell inspection over repeated rereads of the same ranges, and avoid shell wrappers that only reformat output without adding evidence.",
 		"Inspect diff plus relevant head/base code before emitting any finding, and follow the most plausible risky hypotheses through nearby callers, callees, or tests when needed.",
@@ -429,11 +270,6 @@ function buildSessionHint(
 		"Use category only when it is obvious and helpful; otherwise omit it.",
 		FINDING_TAXONOMY_HINT,
 		QUESTION_SHAPED_FINDING_HINT,
-		...(perFileSummariesEnabled
-			? []
-			: [
-					`Per-file summaries are disabled for large reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files; keep the PR summary current and continue reviewing without file summaries.`,
-				]),
 		"Cover the reviewed risk areas and continue after the first finding when more distinct issues may exist.",
 		`If more than ${config.review.maxFindings} distinct issues exist, keep reviewing and preserve or replace the strongest published set instead of stopping early. The publish cap is not a signal to stop searching.`,
 		`Keep findings distinct, evidence-backed, and limited to ${config.review.minConfidence} confidence or better for publication, up to ${config.review.maxFindings} total published findings.`,
@@ -442,28 +278,13 @@ function buildSessionHint(
 
 function buildPreToolHint(
 	toolName: ReviewToolName,
-	reviewedFileCount: number,
+	_reviewedFileCount: number,
 ): string {
-	const perFileSummariesEnabled =
-		shouldCreatePerFileSummaries(reviewedFileCount);
-
 	switch (toolName) {
 		case "get_pr_overview":
 			return "Use the overview once to load canonical reviewed/skipped file scope, then inspect risky reviewed files with builtin readonly shell tools.";
 		case "record_pr_summary":
-			return perFileSummariesEnabled
-				? "Capture the PR's intended behavior change in one concise, evidence-backed summary after the main review coverage is complete. Use short bullet points when the PR has a few distinct changes."
-				: `Capture the PR's intended behavior change in one concise, evidence-backed summary after the main review coverage is complete. Use short bullet points when the PR has a few distinct changes. Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files.`;
-		case "record_file_summary":
-			return perFileSummariesEnabled
-				? "Record a short, concrete summary of what changed in a reviewed file after you have covered the main review work for that file."
-				: `Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files; do not use this tool.`;
-		case "list_recorded_findings":
-			return "Check recorded findings before adding more to avoid duplicates and confirm whether important reviewed areas still lack coverage.";
-		case "remove_recorded_finding":
-			return "Remove a recorded finding only when it is duplicate, superseded, or too weak to keep in the final set.";
-		case "replace_recorded_finding":
-			return "Replace a recorded finding only when the new draft is clearly stronger, more accurate, or better located.";
+			return "Capture the PR's intended behavior change in one concise, evidence-backed summary. Use short bullet points when the PR has a few distinct changes.";
 		case "emit_finding":
 			return `Only emit a finding after inspecting enough code to support the claim from code evidence. ${FINDING_TAXONOMY_HINT} ${QUESTION_SHAPED_FINDING_HINT} Use one finding per root cause, anchor cross-file issues to the changed reviewed file that introduced the risk, prefer a changed head-side line, and keep looking for additional distinct issues after recording one.`;
 		default:
@@ -480,44 +301,23 @@ function buildPostToolHint(
 	_toolResult: ToolResultObject,
 	findingCount: number,
 	config: ReviewerConfig["review"],
-	progressState: ReviewProgressState,
+	_progressState: ReviewProgressState,
 ): string {
-	const reviewedFileCount = progressState.reviewedFileCount;
-	const perFileSummariesEnabled =
-		shouldCreatePerFileSummaries(reviewedFileCount);
-	const scopeProgress = `${getScopeSeenCount(progressState)}/${reviewedFileCount}`;
-
 	switch (toolName) {
 		case "get_pr_overview":
-			if (!hasLoadedFullReviewScope(progressState)) {
-				return `Canonical review scope loaded: ${scopeProgress}. Scope response appears partial, so keep reviewing with current scope and inspect the riskiest reviewed files with readonly git and repo inspection before recording the PR summary.`;
-			}
-
-			return `Canonical review scope loaded: ${scopeProgress}. Use it to inspect the riskiest reviewed files with readonly git and repo inspection before recording the PR summary.`;
+			return "Use the canonical review scope to inspect the riskiest reviewed files with readonly git and repo inspection.";
 		case "record_pr_summary":
-			return perFileSummariesEnabled
-				? "Keep the PR summary concise and factual. Use short bullet points when they make separate changes easier to scan, then continue until each reviewed file also has a clear file-change summary."
-				: `Keep the PR summary concise and factual. Use short bullet points when they make separate changes easier to scan. Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files, so continue reviewing without recording them.`;
-		case "record_file_summary":
-			return perFileSummariesEnabled
-				? "Keep file summaries concrete and per-file; continue until all reviewed files have coverage."
-				: `Per-file summaries are disabled for reviews with more than ${MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES} reviewed files; continue reviewing without recording them.`;
-		case "list_recorded_findings":
-			return `Recorded findings: ${findingCount}/${config.maxFindings}. Avoid duplicates, use this list to spot coverage gaps, and continue looking if reviewed risky areas remain unchecked.`;
-		case "remove_recorded_finding":
-			return `Recorded findings: ${findingCount}/${config.maxFindings}. Keep only distinct issues, then continue covering remaining risky reviewed changes.`;
-		case "replace_recorded_finding":
-			return `Recorded findings: ${findingCount}/${config.maxFindings}. Keep the strongest distinct set without stopping the review early.`;
+			return "Keep the PR summary concise and factual. Use short bullet points when they make separate changes easier to scan.";
 		case "emit_finding":
 			return findingCount >= config.maxFindings
-				? `You have reached the configured maximum of ${config.maxFindings} published findings. Do not add more unless a clearly stronger issue replaces a weaker one, but continue reviewing for any unchecked risky areas.`
-				: `Findings recorded: ${findingCount}/${config.maxFindings}. Keep findings distinct and evidence-backed, then continue with unchecked reviewed files, interfaces, and tests.`;
+				? `You have reached the configured maximum of ${config.maxFindings} published findings. Do not add more findings unless you have a clearly stronger, distinct issue.`
+				: `Findings recorded: ${findingCount}/${config.maxFindings}. Keep findings distinct and evidence-backed.`;
 		default:
 			if (toolName === "bash") {
 				return "Use this shell output to confirm or reject a specific hypothesis. Reuse evidence you already gathered, keep commands readonly, repo-scoped, and network-free, and avoid presentation-only reruns while you validate the changed behavior.";
 			}
 
-			return "Keep findings distinct, evidence-backed, and continue until the reviewed risky changes have been covered.";
+			return "Keep findings distinct and evidence-backed.";
 	}
 }
 
@@ -647,89 +447,6 @@ function getToolResultRecord(
 	return toolResult as Record<string, unknown>;
 }
 
-function getReviewedFilePathsFromToolResult(
-	toolResult: ToolResultObject,
-): string[] {
-	const record = getToolResultRecord(toolResult);
-	if (!Array.isArray(record.reviewedFiles)) {
-		return [];
-	}
-
-	return record.reviewedFiles.flatMap((entry) => {
-		if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-			return [];
-		}
-
-		const path = (entry as { path?: unknown }).path;
-		return typeof path === "string" ? [path] : [];
-	});
-}
-
-function getPathValueFromShellCommandText(
-	commandText: string,
-	progressState: ReviewProgressState,
-): string[] {
-	const trackedPaths = new Set<string>();
-	const noteCandidatePath = (candidatePath: string | undefined) => {
-		if (!candidatePath) {
-			return;
-		}
-
-		const normalizedCandidates = new Set<string>([
-			candidatePath.replace(/^\.\//, ""),
-		]);
-		const colonIndex = candidatePath.indexOf(":");
-		if (
-			colonIndex > 0 &&
-			colonIndex < candidatePath.length - 1 &&
-			!candidatePath.startsWith("http:") &&
-			!candidatePath.startsWith("https:")
-		) {
-			normalizedCandidates.add(candidatePath.slice(colonIndex + 1));
-		}
-
-		for (const normalizedCandidate of normalizedCandidates) {
-			const trackedPath = resolveTrackedReviewedFilePath(
-				progressState,
-				normalizedCandidate,
-			);
-			if (trackedPath) {
-				trackedPaths.add(trackedPath);
-			}
-		}
-	};
-
-	const quotedPathMatches = [...commandText.matchAll(/['"]([^'"\n]+)['"]/g)];
-	for (const match of quotedPathMatches) {
-		noteCandidatePath(match[1]);
-	}
-
-	for (const token of commandText.split(/\s+/)) {
-		const cleanedToken = token.replace(/^[('"`]+|[)'"`,;]+$/g, "");
-		if (cleanedToken.length === 0) {
-			continue;
-		}
-
-		noteCandidatePath(cleanedToken);
-	}
-
-	return [...trackedPaths];
-}
-
-function getReviewedFilePathsFromBashArgs(
-	toolArgs: unknown,
-	progressState: ReviewProgressState,
-): string[] {
-	const record = getToolArgsRecord(toolArgs);
-	const command =
-		typeof record.command === "string" ? record.command : undefined;
-	if (!command) {
-		return [];
-	}
-
-	return getPathValueFromShellCommandText(command, progressState);
-}
-
 function getDroppedFindingCounts(progressState: ReviewProgressState): {
 	invalidPayload: number;
 	invalidLocation: number;
@@ -753,55 +470,12 @@ function markDroppedFinding(
 	getDroppedFindingCounts(progressState)[reason] += 1;
 }
 
-function updateReviewCoverageProgress(
-	input: PostToolUseInput,
-	progressState: ReviewProgressState,
-): void {
-	if (
-		(!isReviewToolName(input.toolName) && input.toolName !== "bash") ||
-		input.toolResult.resultType !== "success"
-	) {
-		return;
-	}
-
-	switch (input.toolName) {
-		case "get_pr_overview": {
-			const seenPaths = getReviewScopeSeenPaths(progressState);
-			const reviewedFilePaths = getReviewedFilePathsFromToolResult(
-				input.toolResult,
-			);
-			for (const path of reviewedFilePaths) {
-				seenPaths.add(path);
-			}
-			if (
-				reviewedFilePaths.length > 0 &&
-				reviewedFilePaths.length < progressState.reviewedFileCount
-			) {
-				markPartialScopeResponse(progressState);
-			}
-			return;
-		}
-		case "bash": {
-			for (const path of getReviewedFilePathsFromBashArgs(
-				input.toolArgs,
-				progressState,
-			)) {
-				markReviewedFileAsDirectlyInspected(progressState, path);
-			}
-			return;
-		}
-		default:
-			return;
-	}
-}
-
 function updateRejectedFindingProgress(
 	input: PostToolUseInput,
 	progressState: ReviewProgressState,
 ): void {
 	if (
-		(input.toolName !== "emit_finding" &&
-			input.toolName !== "replace_recorded_finding") ||
+		input.toolName !== "emit_finding" ||
 		input.toolResult.resultType !== "rejected"
 	) {
 		return;
@@ -842,20 +516,6 @@ function buildToolLogFields(toolName: string, toolArgs: unknown): string[] {
 						? record.summary.length
 						: undefined,
 				),
-			].filter((entry): entry is string => entry !== undefined);
-		case "record_file_summary":
-			return [field("path", record.path)].filter(
-				(entry): entry is string => entry !== undefined,
-			);
-		case "remove_recorded_finding":
-			return [field("finding", record.findingNumber)].filter(
-				(entry): entry is string => entry !== undefined,
-			);
-		case "replace_recorded_finding":
-			return [
-				field("finding", record.findingNumber),
-				field("path", record.path),
-				field("line", record.line),
 			].filter((entry): entry is string => entry !== undefined);
 		case "emit_finding":
 			return [field("path", record.path), field("line", record.line)].filter(
@@ -905,43 +565,12 @@ function buildProgressFields(
 	drafts: FindingDraft[],
 	progressState: ReviewProgressState,
 ): string[] {
-	const fileSummaryProgress = shouldCreatePerFileSummaries(
-		progressState.reviewedFileCount,
-	)
-		? `file_summaries=${progressState.summaryDrafts.fileSummaries.length}/${progressState.reviewedFileCount}`
-		: "file_summaries=disabled";
-
 	return [
 		`findings=${drafts.length}/${config.review.maxFindings}`,
-		`review_scope_seen=${getScopeSeenCount(progressState)}/${progressState.reviewedFileCount}`,
-		`partial_scope_responses=${getPartialScopeResponseCount(progressState)}`,
-		`inspected_reviewed_files=${getDirectlyInspectedReviewedFileCount(progressState)}/${progressState.reviewedFileCount}`,
 		`dropped_findings_invalid_payload=${getDroppedFindingCounts(progressState).invalidPayload}`,
 		`dropped_findings_invalid_location=${getDroppedFindingCounts(progressState).invalidLocation}`,
-		fileSummaryProgress,
 		`pr_summary=${progressState.summaryDrafts.prSummary ? "recorded" : "missing"}`,
 	];
-}
-
-function shouldContinueReview(progressState: ReviewProgressState): boolean {
-	return (
-		!hasLoadedReviewScope(progressState) ||
-		!hasDirectlyInspectedAllReviewedFiles(progressState)
-	);
-}
-
-function buildCoverageContinuationPrompt(
-	progressState: ReviewProgressState,
-): string {
-	const metadataProgress = `Canonical review scope loaded ${getScopeSeenCount(progressState)}/${progressState.reviewedFileCount}.`;
-	const inspectionProgress = `Directly inspected reviewed files ${getDirectlyInspectedReviewedFileCount(progressState)}/${progressState.reviewedFileCount}.`;
-	const uncheckedPaths = getUncheckedReviewedFilePaths(progressState);
-	const uncheckedSuffix =
-		uncheckedPaths.length > 0
-			? ` Remaining reviewed files: ${formatReviewedFileList(uncheckedPaths)}.`
-			: "";
-
-	return `${metadataProgress} ${inspectionProgress}${uncheckedSuffix} Review coverage incomplete. Continue reviewing: inspect unchecked reviewed files with readonly git diff/show/search before finishing; the working tree is the trusted base checkout, so use explicit commits for PR-head content.`;
 }
 
 const SAFE_READONLY_SHELL_COMMAND_IDENTIFIERS = new Set([
@@ -1271,11 +900,9 @@ export function createReviewSessionHooks(
 	drafts: FindingDraft[],
 	progressState: ReviewProgressState = {
 		reviewedFileCount: 0,
-		summaryDrafts: { fileSummaries: [] },
+		summaryDrafts: {},
 		toolTelemetry: createEmptyReviewToolTelemetry(),
 		toolStartedAtMsByName: new Map(),
-		reviewScopeSeenPaths: new Set(),
-		directlyInspectedReviewedFilePaths: new Set(),
 	},
 ) {
 	return {
@@ -1296,14 +923,9 @@ export function createReviewSessionHooks(
 			if (!isAllowedReviewToolName(input.toolName)) {
 				return {
 					additionalContext:
-						"Use this tool output only when it helps validate reviewed changes. Keep the review evidence-backed and continue covering unchecked risky areas.",
+						"Use this tool output only when it helps validate reviewed changes. Keep the review evidence-backed.",
 				};
 			}
-
-			const shouldWarnOnIncompletePrSummaryCoverage =
-				input.toolName === "record_pr_summary" &&
-				(!hasLoadedReviewScope(progressState) ||
-					!hasDirectlyInspectedAllReviewedFiles(progressState));
 
 			toolTelemetry.totalAllowed += 1;
 			const counter = getToolTelemetryCounter(toolTelemetry, input.toolName);
@@ -1318,11 +940,9 @@ export function createReviewSessionHooks(
 
 			return {
 				permissionDecision: "allow" as const,
-				additionalContext: shouldWarnOnIncompletePrSummaryCoverage
-					? buildIncompletePrSummaryHint(progressState)
-					: isReviewToolName(input.toolName)
-						? buildPreToolHint(input.toolName, progressState.reviewedFileCount)
-						: "Use readonly repo-scoped shell commands to inspect git diff, history, tests, and relevant code paths. The working tree is the trusted base checkout; use explicit commits with git diff/show for PR-head content. Prefer targeted reads over repeated rereads, avoid presentation-only wrappers, and do not use shell commands that write files, mutate git state, or access the network.",
+				additionalContext: isReviewToolName(input.toolName)
+					? buildPreToolHint(input.toolName, progressState.reviewedFileCount)
+					: "Use readonly repo-scoped shell commands to inspect git diff, history, tests, and relevant code paths. The working tree is the trusted base checkout; use explicit commits with git diff/show for PR-head content. Prefer targeted reads over repeated rereads, avoid presentation-only wrappers, and do not use shell commands that write files, mutate git state, or access the network.",
 			};
 		},
 		onPostToolUse: async (input: PostToolUseInput) => {
@@ -1343,7 +963,6 @@ export function createReviewSessionHooks(
 			const resultType = input.toolResult.resultType;
 			counter.resultCounts[resultType] =
 				(counter.resultCounts[resultType] ?? 0) + 1;
-			updateReviewCoverageProgress(input, progressState);
 			updateRejectedFindingProgress(input, progressState);
 
 			logger.info(
@@ -1363,8 +982,7 @@ export function createReviewSessionHooks(
 				}
 
 				return {
-					additionalContext:
-						"Keep findings distinct, evidence-backed, and continue until the reviewed risky changes have been covered.",
+					additionalContext: "Keep findings distinct and evidence-backed.",
 				};
 			}
 
@@ -1381,7 +999,7 @@ export function createReviewSessionHooks(
 		onPostToolUseFailure: async (input: PostToolUseFailureInput) => {
 			logger.info(buildPostToolFailureLogMessage(input));
 			return {
-				additionalContext: `Tool ${input.toolName} failed: ${input.error}. Use the failure to adjust inputs and continue with targeted readonly review coverage.`,
+				additionalContext: `Tool ${input.toolName} failed: ${input.error}. Use the failure to adjust inputs and continue the readonly review.`,
 			};
 		},
 		onErrorOccurred: async (input: {
@@ -1405,18 +1023,9 @@ function summarizeOutcome(
 	context: ReviewContext,
 	assistantMessage: string | undefined,
 	findingsCount: number,
-	reviewCoverageComplete: boolean,
 ): string {
 	if (context.reviewedFiles.length === 0) {
 		return "No reviewable files remained after exclusions, so no AI review was performed.";
-	}
-
-	if (!reviewCoverageComplete) {
-		if (findingsCount === 0) {
-			return "Review coverage remained incomplete before the session ended, so the result may be missing reportable issues.";
-		}
-
-		return `Copilot identified ${findingsCount} reportable issue${findingsCount === 1 ? "" : "s"}, but review coverage remained incomplete before the session ended.`;
 	}
 
 	if (findingsCount === 0) {
@@ -1440,24 +1049,17 @@ export async function runCopilotReview(
 ): Promise<ReviewOutcome> {
 	if (context.reviewedFiles.length === 0) {
 		return {
-			summary: summarizeOutcome(context, undefined, 0, true),
+			summary: summarizeOutcome(context, undefined, 0),
 			findings: [],
 			stale: false,
 		};
 	}
 
 	const drafts: FindingDraft[] = [];
-	const summaryDrafts: ReviewSummaryDrafts = { fileSummaries: [] };
+	const summaryDrafts: ReviewSummaryDrafts = {};
 	const toolTelemetry = createEmptyReviewToolTelemetry();
 	const progressState: ReviewProgressState = {
 		reviewedFileCount: context.reviewedFiles.length,
-		reviewedFilePaths: new Set(context.reviewedFiles.map((file) => file.path)),
-		reviewedFilePathAliases: new Map(
-			context.reviewedFiles.flatMap((file) => [
-				[file.path, file.path] as const,
-				...(file.oldPath ? [[file.oldPath, file.path] as const] : []),
-			]),
-		),
 		summaryDrafts,
 		toolTelemetry,
 	};
@@ -1479,7 +1081,6 @@ export async function runCopilotReview(
 	let clientStarted = false;
 	let session: CopilotSessionLike | undefined;
 	let unsubscribeSessionEvents = (): void => {};
-	let useManagedCoverageContinuation = true;
 	const sessionConfig = {
 		clientName: "bitbucket-copilot-pr-review",
 		model: config.copilot.model,
@@ -1514,7 +1115,6 @@ export async function runCopilotReview(
 				summaryDrafts,
 			});
 			if (createdSession) {
-				useManagedCoverageContinuation = false;
 				session = createdSession;
 			} else {
 				session = await client.createSession(sessionConfig);
@@ -1533,61 +1133,6 @@ export async function runCopilotReview(
 				{ prompt: buildPrompt(config, context) },
 				config.copilot.timeoutMs,
 			);
-
-			if (useManagedCoverageContinuation) {
-				const maxCoverageContinuationTurns = Math.min(
-					4,
-					Math.max(1, context.reviewedFiles.length),
-				);
-				let continuationTurns = 0;
-
-				while (
-					shouldContinueReview(progressState) &&
-					continuationTurns < maxCoverageContinuationTurns
-				) {
-					const progressBeforeTurn = getCoverageProgressSnapshot(progressState);
-					continuationTurns += 1;
-					logger.info(
-						`Continuing Copilot review because coverage is incomplete (${continuationTurns}/${maxCoverageContinuationTurns})`,
-					);
-					response = await session.sendAndWait(
-						{ prompt: buildCoverageContinuationPrompt(progressState) },
-						config.copilot.timeoutMs,
-					);
-					if (
-						getCoverageProgressSnapshot(progressState) === progressBeforeTurn
-					) {
-						logger.warn(
-							"Stopping Copilot review continuation because coverage did not progress",
-							{
-								reviewScopeSeen: getScopeSeenCount(progressState),
-								reviewedFileCount: progressState.reviewedFileCount,
-								directlyInspectedReviewedFiles:
-									getDirectlyInspectedReviewedFileCount(progressState),
-								partialScopeResponses:
-									getPartialScopeResponseCount(progressState),
-							},
-						);
-						break;
-					}
-				}
-
-				if (shouldContinueReview(progressState)) {
-					logger.warn(
-						"Copilot review finished before full reviewed-file coverage was observed",
-						{
-							reviewScopeSeen: getScopeSeenCount(progressState),
-							partialScopeResponses:
-								getPartialScopeResponseCount(progressState),
-							reviewedFileCount: progressState.reviewedFileCount,
-							directlyInspectedReviewedFiles:
-								getDirectlyInspectedReviewedFileCount(progressState),
-							remainingReviewedFiles:
-								getUncheckedReviewedFilePaths(progressState),
-						},
-					);
-				}
-			}
 		} catch (error) {
 			throw wrapCopilotSessionStageError(error, config, "review request");
 		}
@@ -1599,16 +1144,10 @@ export async function runCopilotReview(
 		);
 		const reviewSummary = finalizeReviewSummary(context, summaryDrafts);
 		const assistantMessage = response?.data.content;
-		const reviewCoverageComplete = !shouldContinueReview(progressState);
 		toolTelemetry.sessionDurationMs = Date.now() - reviewStartedAt;
 
 		return omitUndefined({
-			summary: summarizeOutcome(
-				context,
-				assistantMessage,
-				findings.length,
-				reviewCoverageComplete,
-			),
+			summary: summarizeOutcome(context, assistantMessage, findings.length),
 			findings,
 			assistantMessage,
 			prSummary: reviewSummary.prSummary,
