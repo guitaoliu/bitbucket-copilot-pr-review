@@ -64,18 +64,6 @@ interface FindingCommentMetadata {
 	reviewedCommit: string;
 }
 
-const findingTypeEmoji: Record<ReviewFinding["type"], string> = {
-	BUG: "🐛",
-	CODE_SMELL: "🧹",
-	VULNERABILITY: "🔒",
-};
-
-const findingSeverityEmoji: Record<ReviewFinding["severity"], string> = {
-	LOW: "🟢",
-	MEDIUM: "🟡",
-	HIGH: "🔴",
-};
-
 function getErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -134,7 +122,8 @@ function buildFindingCommentText(
 		buildFindingCommentMarker(tag, finding.externalId),
 		`<!-- ${tag}:finding-revision:${metadata.revision} -->`,
 		`<!-- ${tag}:finding-reviewed-commit:${metadata.reviewedCommit} -->`,
-		`**${findingTypeEmoji[finding.type]} Type: ${finding.type} | ${findingSeverityEmoji[finding.severity]} Severity: ${finding.severity} | 🎯 Confidence: ${finding.confidence}**`,
+		`**Type:** ${finding.type} | **Severity:** ${finding.severity} | **Confidence:** ${finding.confidence}`,
+		"",
 		`**${finding.title}**`,
 		"",
 		`Location: \`${location}\``,
