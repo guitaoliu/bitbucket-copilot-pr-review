@@ -12,21 +12,21 @@ const FINDING_TAXONOMY_RULES = [
 		hintClause:
 			" for concrete defects introduced or materially worsened by the PR",
 		promptDetails:
-			"concrete correctness, data integrity, contract, state-transition, error-handling, or performance defects that can cause wrong results, crashes, corruption, stuck behavior, or broken compatibility when introduced or materially worsened by this PR.",
+			"correctness, data integrity, contract, state-transition, error-handling, or performance defects that can cause wrong results, crashes, corruption, stuck behavior, or broken compatibility.",
 	},
 	{
 		type: "VULNERABILITY",
 		hintClause:
 			" for concrete security issues introduced or materially worsened by the PR",
 		promptDetails:
-			"concrete security defects such as auth or authz bypass, injection, secret exposure, unsafe execution, trust-boundary violations, or unintended data disclosure when introduced or materially worsened by this PR.",
+			"security defects such as auth/authz bypass, injection, secret exposure, unsafe execution, trust-boundary violations, or unintended data disclosure.",
 	},
 	{
 		type: "CODE_SMELL",
 		hintClause:
 			" only for substantial merge-relevant fragility introduced or materially worsened by the PR",
 		promptDetails:
-			"only for substantial merge-relevant fragility with concrete impact, such as missing test coverage for a meaningful behavior change or brittle logic likely to break soon, when the PR introduces or materially worsens that risk. Never use it for style, naming, formatting, or preference.",
+			"only for substantial merge-relevant fragility with concrete impact, such as missing test coverage for meaningful behavior or brittle logic likely to break soon. Never use it for style, naming, formatting, or preference.",
 	},
 ] as const satisfies readonly FindingTaxonomyRule[];
 
@@ -56,6 +56,9 @@ export const FINDING_TAXONOMY_PROMPT_LINES = FINDING_TAXONOMY_RULES.map(
 	(rule) => `- ${rule.type}: ${rule.promptDetails}`,
 );
 
+export const FINDING_TAXONOMY_SCOPE_PROMPT_LINE =
+	"- All findings must be PR-introduced, PR-worsened, or newly exposed on a changed path.";
+
 export const FINDING_TAXONOMY_PREFERENCE_PROMPT_LINE =
 	"- Prefer BUG or VULNERABILITY when the PR already makes behavior wrong or widens access. Use CODE_SMELL for missing tests only when the gap adds a separate merge-relevant risk beyond any concrete defect.";
 
@@ -73,6 +76,5 @@ export const TEST_COVERAGE_HINT =
 	"Treat missing tests as a standalone finding only when a meaningful or risky behavior change leaves important positive, negative, or edge-case behavior unvalidated and that gap adds a distinct merge risk. If behavior is already wrong or access is widened, prefer BUG or VULNERABILITY instead of a standalone test-gap finding unless the missing coverage adds a separate merge-relevant risk.";
 
 export const TEST_COVERAGE_PROMPT_LINES = [
-	"- Missing or inadequate tests are reportable only when a meaningful or risky behavior change leaves important positive, negative, or edge-case behavior unvalidated and that gap adds a distinct merge risk, especially in auth, validation, persistence, concurrency, serialization, or public API paths.",
-	"- If the PR already makes behavior wrong or widens access, emit BUG or VULNERABILITY instead of a standalone test-coverage finding unless the missing coverage adds a separate merge-relevant risk that would otherwise be easy to miss.",
+	"- Report missing tests only when meaningful or risky behavior lacks important positive, negative, or edge-case coverage and adds distinct merge risk; prefer BUG or VULNERABILITY when behavior is already wrong or access widened.",
 ] as const;

@@ -478,7 +478,7 @@ describe("runCopilotReview", () => {
 		assert.equal(createdSessionConfigs.length, 1);
 		assert.deepEqual(
 			createdSessionConfigs[0]?.systemMessage,
-			buildSystemMessage(config, context.reviewedFiles.length),
+			buildSystemMessage(config),
 		);
 		assert.equal(createdSessionConfigs[0]?.availableTools, undefined);
 		const permissionHandler = createdSessionConfigs[0]?.onPermissionRequest;

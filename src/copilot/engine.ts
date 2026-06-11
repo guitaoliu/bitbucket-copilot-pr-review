@@ -1083,7 +1083,7 @@ export async function runCopilotReview(
 		clientName: "bitbucket-copilot-pr-review",
 		model: config.copilot.model,
 		reasoningEffort: config.copilot.reasoningEffort,
-		systemMessage: buildSystemMessage(config, context.reviewedFiles.length),
+		systemMessage: buildSystemMessage(config),
 		streaming: true,
 		tools: createReviewTools(config, context, git, drafts, summaryDrafts),
 		onPermissionRequest: (request: PermissionRequest) =>
@@ -1128,7 +1128,7 @@ export async function runCopilotReview(
 		let response: Awaited<ReturnType<CopilotSessionLike["sendAndWait"]>>;
 		try {
 			response = await session.sendAndWait(
-				{ prompt: buildPrompt(config, context) },
+				{ prompt: buildPrompt(context) },
 				config.copilot.timeoutMs,
 			);
 		} catch (error) {
