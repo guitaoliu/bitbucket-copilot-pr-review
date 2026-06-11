@@ -151,15 +151,7 @@ const reviewContext: ReviewContext = {
 
 function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 	return {
-		readFileAtCommit: async () => undefined,
 		readTextFileAtCommit: async () => ({ status: "not_found" as const }),
-		getPathTypeAtCommit: async () => undefined,
-		listFilesAtCommit: async () => [],
-		searchTextAtCommit: async () => ({
-			matches: [],
-			truncated: false,
-			totalMatches: 0,
-		}),
 		...overrides,
 	} as GitRepository;
 }

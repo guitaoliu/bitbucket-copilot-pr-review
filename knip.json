@@ -1,0 +1,16 @@
+{
+	"$schema": "https://unpkg.com/knip@6/schema.json",
+	"ignoreDependencies": ["@github/copilot"],
+	"entry": [
+		"src/cli.ts!",
+		"scripts/generate-config-docs.mjs!",
+		"scripts/generate-repo-config-schema.mjs!",
+		"scripts/release-check.mjs!"
+	],
+	"project": [
+		"src/**/*.ts!",
+		"scripts/**/*.mjs!",
+		"!src/**/*.test.ts!",
+		"!src/test-support/**!"
+	]
+}

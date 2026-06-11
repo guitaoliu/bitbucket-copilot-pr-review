@@ -75,9 +75,7 @@ export function createPullRequest(commit = "head-123"): PullRequestInfo {
 	};
 }
 
-export function createChangedFile(
-	overrides: Partial<ChangedFile> = {},
-): ChangedFile {
+function createChangedFile(overrides: Partial<ChangedFile> = {}): ChangedFile {
 	return {
 		path: "src/example.ts",
 		status: "modified",

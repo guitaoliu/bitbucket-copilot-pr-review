@@ -30,7 +30,6 @@ function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 				"-export const value = 1;",
 				"+export const value = 2;",
 			].join("\n"),
-		listFilesAtCommit: async () => [],
 		readTextFileAtCommit: async () =>
 			({
 				status: "not_found",

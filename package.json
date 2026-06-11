@@ -8,7 +8,7 @@
 	},
 	"license": "Apache-2.0",
 	"type": "module",
-	"packageManager": "pnpm@11.5.2",
+	"packageManager": "pnpm@11.5.3",
 	"bin": {
 		"bitbucket-copilot-pr-review": "dist/cli.js"
 	},
@@ -27,6 +27,7 @@
 		"typecheck": "tsc -p tsconfig.json",
 		"check": "biome check",
 		"check:fix": "biome check --fix",
+		"knip": "knip --production --no-progress",
 		"generate:config-docs": "node scripts/generate-config-docs.mjs",
 		"release:check": "node scripts/release-check.mjs",
 		"verify": "pnpm release:check",
@@ -47,6 +48,7 @@
 		"@biomejs/biome": "2.4.16",
 		"@github/copilot-sdk": "1.0.0",
 		"@types/node": "24.13.0",
+		"knip": "6.16.1",
 		"tsdown": "0.22.2",
 		"typescript": "6.0.3"
 	}

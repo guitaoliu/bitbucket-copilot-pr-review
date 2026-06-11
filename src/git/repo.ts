@@ -1,12 +1,9 @@
-import { execFile, spawn } from "node:child_process";
-import { StringDecoder } from "node:string_decoder";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewGitTelemetry } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
-import type { GitTextSearchMatch, GitTextSearchResult } from "./search.ts";
-import { parseGitGrepLine } from "./search.ts";
 
 const execFileAsync = promisify(execFile);
 const GIT_BASE_ARGS = ["-c", "core.quotePath=false"];
@@ -21,10 +18,6 @@ export type GitReadTextFileResult =
 
 interface GitCommandOptions {
 	allowFailure?: boolean;
-}
-
-interface GitRepositoryDependencies {
-	spawnProcess?: typeof spawn;
 }
 
 interface GitCommandResult {
@@ -42,18 +35,11 @@ export class GitRepository {
 	private readonly logger: Logger;
 	private readonly remoteName: string;
 	private readonly telemetry: ReviewGitTelemetry;
-	private readonly spawnProcess: typeof spawn;
 
-	constructor(
-		repoRoot: string,
-		logger: Logger,
-		remoteName: string,
-		dependencies: GitRepositoryDependencies = {},
-	) {
+	constructor(repoRoot: string, logger: Logger, remoteName: string) {
 		this.repoRoot = repoRoot;
 		this.logger = logger;
 		this.remoteName = remoteName;
-		this.spawnProcess = dependencies.spawnProcess ?? spawn;
 		this.telemetry = {
 			byOperation: {},
 		};
@@ -136,158 +122,6 @@ export class GitRepository {
 		}
 	}
 
-	private async runGitTextSearch(
-		args: string[],
-		limit?: number,
-	): Promise<GitTextSearchResult> {
-		const boundedLimit =
-			limit !== undefined && Number.isSafeInteger(limit) && limit > 0
-				? limit
-				: undefined;
-		const stopAfterUniqueMatches =
-			boundedLimit !== undefined ? boundedLimit + 1 : undefined;
-		const startedAt = Date.now();
-
-		return new Promise<GitTextSearchResult>((resolve, reject) => {
-			const child = this.spawnProcess("git", [...GIT_BASE_ARGS, ...args], {
-				cwd: this.repoRoot,
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-			const matchesByKey = new Map<string, GitTextSearchMatch>();
-			const stdoutDecoder = new StringDecoder("utf8");
-			let stdoutRemainder = "";
-			let stderr = "";
-			let terminatedForLimit = false;
-			let recordedDuration = false;
-			let settled = false;
-
-			const recordDuration = () => {
-				if (recordedDuration) {
-					return;
-				}
-
-				recordedDuration = true;
-				this.recordGitOperationDuration(
-					this.describeGitOperation(args),
-					Date.now() - startedAt,
-				);
-			};
-
-			const finalize = (result: GitTextSearchResult) => {
-				if (settled) {
-					return;
-				}
-
-				settled = true;
-				resolve(result);
-			};
-
-			const fail = (error: Error) => {
-				if (settled) {
-					return;
-				}
-
-				settled = true;
-				reject(error);
-			};
-
-			const noteMatch = (line: string) => {
-				const parsed = parseGitGrepLine(line);
-				if (!parsed) {
-					return;
-				}
-
-				const key = `${parsed.path}:${parsed.line}:${parsed.text}`;
-				if (matchesByKey.has(key)) {
-					return;
-				}
-
-				matchesByKey.set(key, parsed);
-				if (
-					stopAfterUniqueMatches !== undefined &&
-					matchesByKey.size >= stopAfterUniqueMatches &&
-					!terminatedForLimit
-				) {
-					terminatedForLimit = true;
-					child.kill("SIGTERM");
-				}
-			};
-
-			const processStdoutChunk = (text: string) => {
-				const output = `${stdoutRemainder}${text}`;
-				const lines = output.split("\n");
-				stdoutRemainder = lines.pop() ?? "";
-
-				for (const rawLine of lines) {
-					const line = rawLine.replace(/\r$/, "");
-					if (line.length === 0) {
-						continue;
-					}
-
-					noteMatch(line);
-				}
-			};
-
-			const flushStdoutRemainder = () => {
-				const tail = stdoutDecoder.end();
-				if (tail.length > 0) {
-					processStdoutChunk(tail);
-				}
-
-				const line = stdoutRemainder.replace(/\r$/, "");
-				stdoutRemainder = "";
-				if (line.length > 0) {
-					noteMatch(line);
-				}
-			};
-
-			child.stdout.on("data", (chunk: Buffer | string) => {
-				processStdoutChunk(
-					Buffer.isBuffer(chunk) ? stdoutDecoder.write(chunk) : chunk,
-				);
-			});
-
-			child.stderr.setEncoding("utf8");
-			child.stderr.on("data", (chunk: string) => {
-				stderr += chunk;
-			});
-
-			child.on("error", (error) => {
-				recordDuration();
-				fail(error instanceof Error ? error : new Error(String(error)));
-			});
-
-			child.on("close", (exitCode) => {
-				recordDuration();
-				flushStdoutRemainder();
-				const matches = [...matchesByKey.values()];
-				if (terminatedForLimit && boundedLimit !== undefined) {
-					finalize({
-						matches: matches.slice(0, boundedLimit),
-						truncated: true,
-						totalMatches: matches.length,
-					});
-					return;
-				}
-
-				if (exitCode !== 0 && exitCode !== 1) {
-					fail(
-						new Error(
-							`Git search failed: git ${args.join(" ")}\n${stderr || `exit code ${exitCode}`}`,
-						),
-					);
-					return;
-				}
-
-				finalize({
-					matches,
-					truncated: false,
-					totalMatches: matches.length,
-				});
-			});
-		});
-	}
-
 	private async runGit(
 		args: string[],
 		options?: GitCommandOptions,
@@ -315,7 +149,7 @@ export class GitRepository {
 		return this.checkGitObjectExists(`${commit}^{commit}`);
 	}
 
-	async getPathTypeAtCommit(
+	private async getPathTypeAtCommit(
 		commit: string,
 		filePath: string,
 	): Promise<GitCommitPathType | undefined> {
@@ -437,67 +271,6 @@ export class GitRepository {
 		]);
 	}
 
-	async checkoutDetached(commit: string): Promise<void> {
-		await this.runGit(["checkout", "--detach", "--force", commit]);
-	}
-
-	async listFilesAtCommit(
-		commit: string,
-		directoryPaths?: string[],
-	): Promise<string[]> {
-		const pathspecs = (directoryPaths ?? []).filter((path) => path.length > 0);
-		const args =
-			pathspecs.length > 0
-				? ["ls-tree", "-r", "--name-only", commit, "--", ...pathspecs]
-				: ["ls-tree", "-r", "--name-only", commit];
-		const output = await this.runGit(args);
-		if (output.trim().length === 0) {
-			return [];
-		}
-
-		return [
-			...new Set(
-				output
-					.split(/\r?\n/)
-					.map((line) => line.trim())
-					.filter((line) => line.length > 0),
-			),
-		];
-	}
-
-	async searchTextAtCommit(
-		commit: string,
-		query: string,
-		options?: {
-			directoryPaths?: string[];
-			limit?: number;
-			mode?: "literal" | "regex";
-			wholeWord?: boolean;
-		},
-	): Promise<GitTextSearchResult> {
-		const args = ["grep", "-n", "-I", "--full-name", "--null"];
-		const mode = options?.mode ?? "literal";
-
-		if (mode === "literal") {
-			args.push("-F");
-			if (options?.wholeWord) {
-				args.push("-w");
-			}
-		} else {
-			args.push("-E");
-		}
-
-		args.push("-e", query, commit);
-		const pathspecs = (options?.directoryPaths ?? []).filter(
-			(path) => path.length > 0,
-		);
-		if (pathspecs.length > 0) {
-			args.push("--", ...pathspecs);
-		}
-
-		return this.runGitTextSearch(args, options?.limit);
-	}
-
 	async readTextFileAtCommit(
 		commit: string,
 		filePath: string,
@@ -517,13 +290,5 @@ export class GitRepository {
 		}
 
 		return { status: "ok", content };
-	}
-
-	async readFileAtCommit(
-		commit: string,
-		filePath: string,
-	): Promise<string | undefined> {
-		const result = await this.readTextFileAtCommit(commit, filePath);
-		return result.status === "ok" ? result.content : undefined;
 	}
 }

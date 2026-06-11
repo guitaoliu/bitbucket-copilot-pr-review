@@ -63,11 +63,6 @@ const baseConfig: ReviewerConfig = {
 describe("loadTrustedRepoConfig", () => {
 	it("loads trusted repo config from the base commit", async () => {
 		const git = {
-			async readFileAtCommit(commit: string, filePath: string) {
-				assert.equal(commit, "base-123");
-				assert.equal(filePath, "copilot-code-review.json");
-				return '{"review":{"ignorePaths":["i18n/locales/**/*.json"],"maxFiles":150}}';
-			},
 			async readTextFileAtCommit(commit: string, filePath: string) {
 				assert.equal(commit, "base-123");
 				assert.equal(filePath, "copilot-code-review.json");
@@ -97,9 +92,6 @@ describe("loadTrustedRepoConfig", () => {
 
 	it("returns the original config when no trusted repo config exists", async () => {
 		const git = {
-			async readFileAtCommit() {
-				return undefined;
-			},
 			async readTextFileAtCommit() {
 				return { status: "not_found" as const };
 			},
