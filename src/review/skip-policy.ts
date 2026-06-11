@@ -1,5 +1,6 @@
 import type { RawBitbucketCodeInsightsReport } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
+import { buildFindingThreadKey } from "./finding-identity.ts";
 import {
 	getInsightReportFindingCount,
 	getInsightReportReviewedCommit,
@@ -80,6 +81,13 @@ function buildReviewFindingFromStoredFinding(
 ): ReviewFinding {
 	return {
 		externalId: finding.externalId ?? `reused-finding-${index + 1}`,
+		threadKey:
+			finding.threadKey ??
+			buildFindingThreadKey({
+				path: finding.path,
+				line: finding.line ?? 0,
+				type: finding.type,
+			}),
 		path: finding.path,
 		line: finding.line ?? 0,
 		severity: finding.severity,

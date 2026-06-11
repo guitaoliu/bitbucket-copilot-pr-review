@@ -1,4 +1,4 @@
-export function compressLineRanges(
+function compressLineRanges(
 	lines: number[],
 ): Array<{ start: number; end: number }> {
 	if (lines.length === 0) {

@@ -18,7 +18,7 @@ export const LOG_LEVEL_VALUES = [
 	"error",
 ] as const satisfies readonly LogLevel[];
 
-export const BITBUCKET_AUTH_TYPE_VALUES = ["basic", "bearer"] as const;
+const BITBUCKET_AUTH_TYPE_VALUES = ["basic", "bearer"] as const;
 
 export const REASONING_EFFORT_VALUES = [
 	"low",

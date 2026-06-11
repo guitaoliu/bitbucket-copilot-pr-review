@@ -20,10 +20,7 @@ export const REPO_CONFIG_LIMITS = {
 	skipBranchPrefixes: { maxItems: 50, maxPrefixLength: 128 },
 } as const;
 
-export function boundedInteger(
-	name: string,
-	limits: { min: number; max: number },
-) {
+function boundedInteger(name: string, limits: { min: number; max: number }) {
 	return z
 		.int(`${name} must be an integer.`)
 		.min(limits.min, `${name} must be at least ${limits.min}.`)

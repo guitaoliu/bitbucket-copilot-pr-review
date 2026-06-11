@@ -6,7 +6,7 @@ import {
 	REVIEW_CLI_OPTION_METADATA,
 } from "./metadata.ts";
 
-export interface CommonCliOptions {
+interface CommonCliOptions {
 	dryRun: boolean;
 	forceReview: boolean;
 	help: boolean;
@@ -19,9 +19,9 @@ export interface ReviewCliOptions extends CommonCliOptions {
 	repoRoot?: string;
 }
 
-export type CliOptions = ReviewCliOptions;
+type CliOptions = ReviewCliOptions;
 
-export interface HelpCliResult {
+interface HelpCliResult {
 	help: true;
 	commandName?: keyof typeof CLI_COMMAND_METADATA;
 }

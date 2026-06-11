@@ -144,6 +144,9 @@ export async function publishReview(
 			{
 				revision: context.reviewRevision,
 				reviewedCommit: context.headCommit,
+				...(context.previousReview?.findings
+					? { previousReviewFindings: context.previousReview.findings }
+					: {}),
 			},
 		);
 	} catch (error) {

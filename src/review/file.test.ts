@@ -4,63 +4,8 @@ import { describe, it } from "node:test";
 import type { ChangedFile } from "../git/types.ts";
 import {
 	createReviewedFileLookup,
-	getReviewedFilePathForVersion,
 	normalizeFindingDraftLocation,
 } from "./file.ts";
-
-describe("getReviewedFilePathForVersion", () => {
-	it("returns the current path for the head revision", () => {
-		assert.equal(
-			getReviewedFilePathForVersion(
-				{
-					path: "src/new-name.ts",
-					oldPath: "src/old-name.ts",
-					status: "renamed",
-				},
-				"head",
-			),
-			"src/new-name.ts",
-		);
-	});
-
-	it("uses oldPath for base content on renamed files", () => {
-		assert.equal(
-			getReviewedFilePathForVersion(
-				{
-					path: "src/new-name.ts",
-					oldPath: "src/old-name.ts",
-					status: "renamed",
-				},
-				"base",
-			),
-			"src/old-name.ts",
-		);
-	});
-
-	it("uses the current path for base content on copied files", () => {
-		assert.equal(
-			getReviewedFilePathForVersion(
-				{
-					path: "src/copied.ts",
-					oldPath: "src/original.ts",
-					status: "copied",
-				},
-				"base",
-			),
-			"src/copied.ts",
-		);
-	});
-
-	it("falls back to the current path when oldPath is absent", () => {
-		assert.equal(
-			getReviewedFilePathForVersion(
-				{ path: "src/example.ts", status: "modified" },
-				"base",
-			),
-			"src/example.ts",
-		);
-	});
-});
 
 describe("createReviewedFileLookup", () => {
 	it("adds oldPath aliases only for renamed files", () => {

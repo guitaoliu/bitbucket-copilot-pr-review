@@ -41,7 +41,7 @@ function getReviewablePathDecision(
 	return { include: true };
 }
 
-export function shouldReviewFile(
+function shouldReviewFile(
 	file: ChangedFile,
 	ignorePaths: string[] = [],
 ): { include: boolean; reason?: string } {

@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 
 import {
 	parseBitbucketPullRequestUrl,
-	resolveBitbucketAuth,
 	resolveBitbucketConfig,
 } from "./bitbucket-resolver.ts";
 import { REVIEWER_CONFIG_DEFAULTS } from "./defaults.ts";
@@ -305,33 +304,6 @@ describe("resolveRuntimeConfigGroups", () => {
 		});
 
 		assert.equal(resolved.githubHost, "tenant.ghe.com");
-	});
-});
-
-describe("resolveBitbucketAuth", () => {
-	it("resolves bearer auth from explicit auth type", () => {
-		const env = parseEnvironment({
-			BITBUCKET_AUTH_TYPE: "bearer",
-			BITBUCKET_TOKEN: "token",
-		});
-
-		assert.deepEqual(resolveBitbucketAuth(env), {
-			type: "bearer",
-			token: "token",
-		});
-	});
-
-	it("resolves basic auth when username and password are provided", () => {
-		const env = parseEnvironment({
-			BITBUCKET_USERNAME: "ci-user",
-			BITBUCKET_PASSWORD: "secret",
-		});
-
-		assert.deepEqual(resolveBitbucketAuth(env), {
-			type: "basic",
-			username: "ci-user",
-			password: "secret",
-		});
 	});
 });
 

@@ -23,13 +23,3 @@ export function getPullRequestBranchSkipReason(
 
 	return undefined;
 }
-
-export function getPullRequestSkipReason(
-	pullRequest: Pick<PullRequestInfo, "id" | "source" | "draft">,
-	skipBranchPrefixes: ReviewerConfig["review"]["skipBranchPrefixes"],
-): string | undefined {
-	return (
-		getPullRequestDraftSkipReason(pullRequest) ??
-		getPullRequestBranchSkipReason(pullRequest, skipBranchPrefixes)
-	);
-}

@@ -1,5 +1,3 @@
-import type { z } from "zod";
-
 import type { ChangedFile, FileStatus, SkippedFile } from "../../git/types.ts";
 import { formatLineRanges } from "../../policy/line-ranges.ts";
 import { normalizeFindingDraftLocation } from "../../review/file.ts";
@@ -23,10 +21,6 @@ export type SkippedFileScope = OmitUndefined<{
 export interface PrOverviewResult {
 	reviewedFiles: ReviewedFileScope[];
 	skippedFiles: SkippedFileScope[];
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export function summarizeReviewedFileScope(
@@ -89,30 +83,4 @@ export function toRejectedResult(message: string) {
 		textResultForLlm: message,
 		resultType: "rejected" as const,
 	};
-}
-
-export function parseObjectToolArgs<T extends z.ZodType>(
-	args: unknown,
-	schema: T,
-	errorPrefix: string,
-): {
-	data?: z.output<T>;
-	rejection?: ReturnType<typeof toRejectedResult>;
-} {
-	if (!isPlainObject(args)) {
-		return {
-			rejection: toRejectedResult(
-				`${errorPrefix}: expected an object payload.`,
-			),
-		};
-	}
-
-	const parsed = schema.safeParse(args);
-	if (!parsed.success) {
-		return {
-			rejection: toRejectedResult(`${errorPrefix}: ${parsed.error.message}`),
-		};
-	}
-
-	return { data: parsed.data };
 }

@@ -6,6 +6,7 @@ import type {
 	RawBitbucketCodeInsightsReport,
 } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
+import { buildFindingThreadKey } from "./finding-identity.ts";
 import {
 	buildPullRequestCommentMetadataMarkers,
 	buildReviewMetadataFields,
@@ -144,6 +145,11 @@ function createStoredFindings(): StoredReviewFinding[] {
 	return [
 		{
 			externalId: "finding-1",
+			threadKey: buildFindingThreadKey({
+				path: "src/example.ts",
+				line: 10,
+				type: "BUG",
+			}),
 			path: "src/example.ts",
 			line: 10,
 			severity: "HIGH",
@@ -353,6 +359,11 @@ describe("buildReviewReusePlan", () => {
 		assert.deepEqual(plan.reusedReview?.findings, [
 			{
 				externalId: "finding-1",
+				threadKey: buildFindingThreadKey({
+					path: "src/example.ts",
+					line: 10,
+					type: "BUG",
+				}),
 				path: "src/example.ts",
 				line: 10,
 				severity: "HIGH",

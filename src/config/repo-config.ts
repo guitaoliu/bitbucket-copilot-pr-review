@@ -34,7 +34,7 @@ const repoConfigSchema = z
 
 export type RepoReviewConfig = z.output<typeof repoConfigSchema>;
 
-export function toReviewerConfigRepoOverrides(
+function toReviewerConfigRepoOverrides(
 	repoConfig: RepoReviewConfig,
 ): ReviewerConfigRepoOverrides {
 	return pickRepoOverrides(repoConfig);

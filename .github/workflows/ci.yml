@@ -37,6 +37,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Check for unused code
+        run: pnpm knip
+
       - name: Run tests
         run: pnpm test
 

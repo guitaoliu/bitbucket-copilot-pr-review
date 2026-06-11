@@ -4,6 +4,7 @@ import type {
 	InsightReportPayload,
 } from "../bitbucket/types.ts";
 import { omitUndefined } from "../shared/object.ts";
+import { buildFindingThreadKey } from "./finding-identity.ts";
 import { getReviewRevisionSchema } from "./revision.ts";
 import type { StoredReviewFinding } from "./types.ts";
 
@@ -104,6 +105,14 @@ function parseStoredReviewFinding(
 		return undefined;
 	}
 
+	if (
+		candidate.threadKey !== undefined &&
+		(typeof candidate.threadKey !== "string" ||
+			candidate.threadKey.trim().length === 0)
+	) {
+		return undefined;
+	}
+
 	return omitUndefined({
 		path: candidate.path,
 		line: candidate.line as number | undefined,
@@ -116,6 +125,16 @@ function parseStoredReviewFinding(
 		details: candidate.details as string | undefined,
 		category: candidate.category as string | undefined,
 		externalId: candidate.externalId as string | undefined,
+		threadKey:
+			(candidate.threadKey as string | undefined) ??
+			buildFindingThreadKey({
+				path: candidate.path,
+				line:
+					typeof candidate.line === "number" && Number.isInteger(candidate.line)
+						? candidate.line
+						: 0,
+				type: candidate.type as StoredReviewFinding["type"],
+			}),
 	}) satisfies StoredReviewFinding;
 }
 
@@ -300,51 +319,6 @@ export function getInsightReportReviewedCommit(
 	report: Pick<InsightReportPayload, "data"> | undefined,
 ): string | undefined {
 	return getTextReportField(report, REVIEWED_COMMIT_FIELD_TITLE);
-}
-
-export function isPullRequestPublicationComplete(options: {
-	report: Pick<InsightReportPayload, "data"> | undefined;
-	commentTag: string;
-	headCommit: string;
-	reviewRevision: string;
-	commentText?: string;
-}): boolean {
-	if (!options.report || !options.commentText) {
-		return false;
-	}
-
-	const expectedAnnotationCount = getInsightReportFindingCount(options.report);
-	if (expectedAnnotationCount === undefined) {
-		return false;
-	}
-
-	if (
-		getInsightReportReviewSchema(options.report) !== getReviewRevisionSchema()
-	) {
-		return false;
-	}
-
-	if (
-		getInsightReportReviewRevision(options.report) !== options.reviewRevision
-	) {
-		return false;
-	}
-
-	if (getInsightReportReviewedCommit(options.report) !== options.headCommit) {
-		return false;
-	}
-
-	const metadata = parsePullRequestCommentMetadata(
-		options.commentTag,
-		options.commentText,
-	);
-
-	return (
-		metadata?.revision === options.reviewRevision &&
-		metadata.reviewedCommit === options.headCommit &&
-		metadata.publishedCommit === options.headCommit &&
-		(metadata.storedFindings?.length ?? 0) === expectedAnnotationCount
-	);
 }
 
 export function buildReviewMetadataFields(options: {

@@ -1,6 +1,6 @@
 import { truncateText } from "../shared/text.ts";
 
-export const MAX_PR_DESCRIPTION_CHARS = 2000;
+const MAX_PR_DESCRIPTION_CHARS = 2000;
 
 export function escapePromptMarkupText(value: string): string {
 	return value

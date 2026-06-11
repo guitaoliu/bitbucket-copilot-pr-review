@@ -26,7 +26,7 @@ export interface ReviewerConfigRepoOverrides {
 	};
 }
 
-export interface ReviewerConfigInternal {
+interface ReviewerConfigInternal {
 	envRepoOverrides: ReviewerConfigRepoOverrides;
 	trustedRepoConfig?:
 		| {
@@ -36,12 +36,12 @@ export interface ReviewerConfigInternal {
 		| undefined;
 }
 
-export interface BearerAuthConfig {
+interface BearerAuthConfig {
 	type: "bearer";
 	token: string;
 }
 
-export interface BasicAuthConfig {
+interface BasicAuthConfig {
 	type: "basic";
 	username: string;
 	password: string;
@@ -96,14 +96,3 @@ export interface ReviewerConfig {
 }
 
 export type { Confidence, LogLevel };
-
-export interface BitbucketRepositoryIdentity {
-	baseUrl: string;
-	projectKey: string;
-	repoSlug: string;
-}
-
-export interface BitbucketPullRequestIdentity
-	extends BitbucketRepositoryIdentity {
-	prId: number;
-}

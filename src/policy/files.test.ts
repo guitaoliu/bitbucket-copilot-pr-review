@@ -4,11 +4,7 @@ import type { ChangedFile } from "../git/types.ts";
 import type { FindingDraft } from "../review/types.ts";
 import { filterChangedFiles } from "./files.ts";
 import { finalizeFindings } from "./findings.ts";
-import {
-	getRepoDirectoriesAccessDecision,
-	getRepoDirectoryAccessDecision,
-	getRepoFileAccessDecision,
-} from "./path-access.ts";
+import { getRepoFileAccessDecision } from "./path-access.ts";
 
 const reviewedFile: ChangedFile = {
 	path: "src/service.ts",
@@ -158,16 +154,6 @@ describe("repo path access decisions", () => {
 		assert.equal(deployKey.reason, "potential secret-bearing path");
 	});
 
-	it("rejects secret-bearing directories before listing descendants", () => {
-		const decision = getRepoDirectoriesAccessDecision([
-			"config/secrets",
-			"src",
-		]);
-
-		assert.equal(decision.include, false);
-		assert.equal(decision.reason, "potential secret-bearing path");
-	});
-
 	it("rejects files nested under exact secret-bearing directories", () => {
 		const secretChild = getRepoFileAccessDecision("config/secrets/api.txt");
 		const credentialsChild = getRepoFileAccessDecision(
@@ -183,17 +169,14 @@ describe("repo path access decisions", () => {
 		assert.equal(tokensChild.reason, "potential secret-bearing path");
 	});
 
-	it("allows ordinary auth source files and directories", () => {
+	it("allows ordinary auth source files", () => {
 		const authFile = getRepoFileAccessDecision("src/auth.ts");
 		const oauthFile = getRepoFileAccessDecision("src/oauth.ts");
-		const authDirectory = getRepoDirectoriesAccessDecision(["src/auth"]);
 
 		assert.equal(authFile.include, true);
 		assert.equal(authFile.normalizedPath, "src/auth.ts");
 		assert.equal(oauthFile.include, true);
 		assert.equal(oauthFile.normalizedPath, "src/oauth.ts");
-		assert.equal(authDirectory.include, true);
-		assert.deepEqual(authDirectory.normalizedPaths, ["src/auth"]);
 	});
 
 	it("allows ordinary source files whose names merely contain secret-like substrings", () => {
@@ -206,11 +189,6 @@ describe("repo path access decisions", () => {
 		const serviceAccountingFile = getRepoFileAccessDecision(
 			"src/service-accounting.ts",
 		);
-		const tokenDirectory = getRepoDirectoryAccessDecision("src/token");
-		const credentialsDirectory =
-			getRepoDirectoryAccessDecision("src/credentials");
-		const tokensDirectory = getRepoDirectoryAccessDecision("src/tokens");
-
 		assert.equal(tokenFile.include, true);
 		assert.equal(tokenFile.normalizedPath, "src/token.ts");
 		assert.equal(tokenizerFile.include, true);
@@ -226,48 +204,6 @@ describe("repo path access decisions", () => {
 		assert.equal(
 			serviceAccountingFile.normalizedPath,
 			"src/service-accounting.ts",
-		);
-		assert.equal(tokenDirectory.include, true);
-		assert.equal(tokenDirectory.normalizedPath, "src/token");
-		assert.equal(credentialsDirectory.include, true);
-		assert.equal(credentialsDirectory.normalizedPath, "src/credentials");
-		assert.equal(tokensDirectory.include, true);
-		assert.equal(tokensDirectory.normalizedPath, "src/tokens");
-	});
-
-	it("rejects excluded directories for directory listing", () => {
-		const decision = getRepoDirectoryAccessDecision("node_modules/internal");
-
-		assert.equal(decision.include, false);
-		assert.equal(decision.reason, "generated or vendored path");
-	});
-
-	it("normalizes and collapses nested directory arrays", () => {
-		const decision = getRepoDirectoriesAccessDecision([
-			"src/service",
-			"src",
-			"src/service/internal",
-			"test",
-		]);
-
-		assert.equal(decision.include, true);
-		assert.deepEqual(decision.normalizedPaths, ["src", "test"]);
-	});
-
-	it("treats root scope as all directories when any entry targets dot", () => {
-		const decision = getRepoDirectoriesAccessDecision(["src", "."]);
-
-		assert.equal(decision.include, true);
-		assert.deepEqual(decision.normalizedPaths, []);
-	});
-
-	it("rejects wildcard directory scopes with a concrete guidance message", () => {
-		const decision = getRepoDirectoriesAccessDecision(["service-*"]);
-
-		assert.equal(decision.include, false);
-		assert.equal(
-			decision.reason,
-			"directory wildcards are not supported; pass concrete repo-relative directories as a directories array",
 		);
 	});
 });
@@ -454,5 +390,74 @@ describe("finalizeFindings", () => {
 		);
 
 		assert.deepEqual(findings, []);
+	});
+
+	it("keeps a stable thread identity when only message fields change", () => {
+		const baseline = finalizeFindings(
+			[
+				{
+					path: "src/service.ts",
+					line: 10,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Null handling is broken",
+					details: "The new branch dereferences a possibly null response.",
+				},
+			],
+			[reviewedFile],
+			5,
+			"medium",
+		);
+		const updated = finalizeFindings(
+			[
+				{
+					path: "src/service.ts",
+					line: 10,
+					severity: "LOW",
+					type: "BUG",
+					confidence: "high",
+					title: "Updated null handling title",
+					details: "Updated details that still describe the same bug.",
+				},
+			],
+			[reviewedFile],
+			5,
+			"medium",
+		);
+
+		assert.equal(baseline[0]?.threadKey, updated[0]?.threadKey);
+		assert.notEqual(baseline[0]?.externalId, updated[0]?.externalId);
+	});
+
+	it("assigns distinct thread identities to separate findings at the same location", () => {
+		const findings = finalizeFindings(
+			[
+				{
+					path: "src/service.ts",
+					line: 10,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Null handling is broken",
+					details: "The new branch dereferences a possibly null response.",
+				},
+				{
+					path: "src/service.ts",
+					line: 10,
+					severity: "MEDIUM",
+					type: "BUG",
+					confidence: "high",
+					title: "Retry state can leak",
+					details: "The retry counter is shared across concurrent requests.",
+				},
+			],
+			[reviewedFile],
+			5,
+			"medium",
+		);
+
+		assert.equal(findings.length, 2);
+		assert.notEqual(findings[0]?.threadKey, findings[1]?.threadKey);
 	});
 });

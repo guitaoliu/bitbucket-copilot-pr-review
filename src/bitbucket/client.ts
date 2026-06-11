@@ -1,5 +1,5 @@
 import type { ReviewerConfig } from "../config/types.ts";
-import type { ReviewFinding } from "../review/types.ts";
+import type { ReviewFinding, StoredReviewFinding } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { CodeInsightsApi } from "./code-insights.ts";
 import { PullRequestCommentsApi } from "./comments.ts";
@@ -89,7 +89,11 @@ export class BitbucketClient {
 	async reconcilePullRequestFindingComments(
 		tag: string,
 		findings: ReviewFinding[],
-		metadata: { revision: string; reviewedCommit: string },
+		metadata: {
+			revision: string;
+			reviewedCommit: string;
+			previousReviewFindings?: readonly StoredReviewFinding[];
+		},
 	): Promise<void> {
 		return this.comments.reconcilePullRequestFindingComments(
 			tag,

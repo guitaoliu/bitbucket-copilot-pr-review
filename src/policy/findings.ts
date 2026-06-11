@@ -6,6 +6,7 @@ import {
 	createReviewedFileLookup,
 	normalizeFindingDraftLocation,
 } from "../review/file.ts";
+import { buildFindingThreadKey } from "../review/finding-identity.ts";
 import type {
 	Confidence,
 	FindingDraft,
@@ -143,6 +144,11 @@ export function finalizeFindings(
 		const candidate = {
 			...normalizedDraft,
 			externalId: makeExternalId(normalizedDraft),
+			threadKey: buildFindingThreadKey({
+				path: normalizedDraft.path,
+				line: normalizedDraft.line,
+				type: normalizedDraft.type,
+			}),
 		};
 		const existing = acceptedByKey.get(dedupeKey);
 		if (existing) {
@@ -191,7 +197,28 @@ export function finalizeFindings(
 		}
 	}
 
-	const accepted = [...acceptedByKey.values()];
+	const baseAccepted = [...acceptedByKey.values()];
+	const collisionCountByLocationType = new Map<string, number>();
+	const accepted = baseAccepted.map((finding) => {
+		const locationTypeKey = [
+			finding.path,
+			String(finding.line),
+			finding.type,
+		].join("|");
+		const collisionIndex =
+			collisionCountByLocationType.get(locationTypeKey) ?? 0;
+		collisionCountByLocationType.set(locationTypeKey, collisionIndex + 1);
+
+		return {
+			...finding,
+			threadKey: buildFindingThreadKey({
+				path: finding.path,
+				line: finding.line,
+				type: finding.type,
+				...(collisionIndex > 0 ? { collisionIndex } : {}),
+			}),
+		};
+	});
 
 	accepted.sort((left, right) => {
 		const severityDelta =

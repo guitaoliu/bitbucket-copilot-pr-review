@@ -41,17 +41,6 @@ function canUseOldPathForReviewedFileLookup(
 	return file.status === "renamed" && file.oldPath !== undefined;
 }
 
-export function getReviewedFilePathForVersion(
-	file: Pick<ChangedFile, "path" | "oldPath" | "status">,
-	version: "head" | "base",
-): string {
-	if (version === "head") {
-		return file.path;
-	}
-
-	return canUseOldPathForReviewedFileLookup(file) ? file.oldPath : file.path;
-}
-
 export function createReviewedFileLookup(
 	reviewedFiles: ChangedFile[],
 ): Map<string, ChangedFile> {

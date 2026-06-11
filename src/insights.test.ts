@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ReviewerConfig } from "./config/types.ts";
 import { buildInsightReport, buildPullRequestComment } from "./insights.ts";
-import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "./review/summary.ts";
+import { buildFindingThreadKey } from "./review/finding-identity.ts";
 import type { ReviewContext, ReviewOutcome } from "./review/types.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "./shared/text.ts";
+
+const PER_FILE_SUMMARY_LIMIT = 25;
 
 const config: ReviewerConfig = {
 	repoRoot: "/tmp/repo",
@@ -192,6 +194,11 @@ function createOutcome(): ReviewOutcome {
 		findings: [
 			{
 				externalId: "finding-1",
+				threadKey: buildFindingThreadKey({
+					path: "src/service.ts",
+					line: 42,
+					type: "BUG",
+				}),
 				path: "src/service.ts",
 				line: 42,
 				severity: "HIGH",
@@ -202,6 +209,11 @@ function createOutcome(): ReviewOutcome {
 			},
 			{
 				externalId: "finding-2",
+				threadKey: buildFindingThreadKey({
+					path: "src/new-name.ts",
+					line: 0,
+					type: "CODE_SMELL",
+				}),
 				path: "src/new-name.ts",
 				line: 0,
 				severity: "MEDIUM",
@@ -461,6 +473,13 @@ describe("buildPullRequestComment", () => {
 				severity: "HIGH" as const,
 				type: "BUG" as const,
 				confidence: "high" as const,
+				threadKey: buildFindingThreadKey({
+					path:
+						context.reviewedFiles[index % context.reviewedFiles.length]?.path ??
+						"src/service.ts",
+					line: index + 1,
+					type: "BUG",
+				}),
 				title: `Important finding ${index} ${"z".repeat(80)}`,
 				details: "Large review detail.",
 			})),
@@ -483,7 +502,7 @@ describe("buildPullRequestComment", () => {
 			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123";
 		const context = createContext(prLink);
 		context.reviewedFiles = Array.from(
-			{ length: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1 },
+			{ length: PER_FILE_SUMMARY_LIMIT + 1 },
 			(_, index) => ({
 				path: `src/reviewed-${index}.ts`,
 				status: "modified" as const,

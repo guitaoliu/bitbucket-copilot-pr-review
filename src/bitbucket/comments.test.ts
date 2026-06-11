@@ -542,6 +542,7 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 			[
 				{
 					externalId: "finding-1",
+					threadKey: "thread-1",
 					path: "src/example.ts",
 					line: 10,
 					severity: "LOW",
@@ -562,6 +563,7 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 				body: {
 					text: [
 						"<!-- copilot-pr-review:finding:finding-1 -->",
+						"<!-- copilot-pr-review:finding-thread:thread-1 -->",
 						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
 						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
 						"**Type:** BUG | **Severity:** LOW | **Confidence:** high",
@@ -609,6 +611,7 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 			[
 				{
 					externalId: "finding-file",
+					threadKey: "thread-file",
 					path: "src/example.ts",
 					line: 0,
 					severity: "MEDIUM",
@@ -625,6 +628,7 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 			{
 				text: [
 					"<!-- copilot-pr-review:finding:finding-file -->",
+					"<!-- copilot-pr-review:finding-thread:thread-file -->",
 					"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
 					"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
 					"**Type:** CODE_SMELL | **Severity:** MEDIUM | **Confidence:** medium",
@@ -665,7 +669,11 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 							createdDate: 100,
 							comment: {
 								id: 10,
-								text: "<!-- copilot-pr-review:finding:finding-keep -->\nold finding",
+								text: [
+									"<!-- copilot-pr-review:finding:finding-keep -->",
+									"<!-- copilot-pr-review:finding-thread:thread-keep -->",
+									"old finding",
+								].join("\n"),
 								version: 2,
 								createdDate: 100,
 								updatedDate: 100,
@@ -676,7 +684,11 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 							createdDate: 90,
 							comment: {
 								id: 9,
-								text: "<!-- copilot-pr-review:finding:finding-stale -->\nstale finding",
+								text: [
+									"<!-- copilot-pr-review:finding:finding-stale -->",
+									"<!-- copilot-pr-review:finding-thread:thread-stale -->",
+									"stale finding",
+								].join("\n"),
 								version: 1,
 								createdDate: 90,
 								updatedDate: 90,
@@ -692,6 +704,7 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 			[
 				{
 					externalId: "finding-keep",
+					threadKey: "thread-keep",
 					path: "src/example.ts",
 					line: 10,
 					severity: "HIGH",
@@ -713,6 +726,7 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 					version: 2,
 					text: [
 						"<!-- copilot-pr-review:finding:finding-keep -->",
+						"<!-- copilot-pr-review:finding-thread:thread-keep -->",
 						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
 						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
 						"**Type:** BUG | **Severity:** HIGH | **Confidence:** high",
@@ -810,6 +824,187 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 				body: {
 					version: 2,
 					text: "_Superseded by a newer automated PR review finding. This thread is preserved because Bitbucket will not delete it._",
+				},
+			},
+		]);
+	});
+
+	it("updates a legacy finding thread in place when the stable thread key matches", async () => {
+		const requestCalls: Array<{
+			pathname: string;
+			method: string | undefined;
+			body: unknown;
+		}> = [];
+		const commentsApi = new PullRequestCommentsApi(
+			"PROJ",
+			"repo",
+			123,
+			logger,
+			async (pathname, init) => {
+				requestCalls.push({
+					pathname,
+					method: init?.method,
+					body:
+						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+				});
+				return "";
+			},
+			async () =>
+				({
+					values: [
+						{
+							action: "COMMENTED",
+							createdDate: 100,
+							comment: {
+								id: 10,
+								text: "<!-- copilot-pr-review:finding:finding-old -->\nlegacy finding",
+								version: 2,
+								createdDate: 100,
+								updatedDate: 100,
+							},
+						},
+					],
+					isLastPage: true,
+				}) as never,
+		);
+
+		await commentsApi.reconcilePullRequestFindingComments(
+			"copilot-pr-review",
+			[
+				{
+					externalId: "finding-new",
+					threadKey: "thread-keep",
+					path: "src/example.ts",
+					line: 10,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Updated title",
+					details: "Updated details.",
+				},
+			],
+			{
+				revision: "review-rev-123",
+				reviewedCommit: "head-123",
+				previousReviewFindings: [
+					{
+						externalId: "finding-old",
+						threadKey: "thread-keep",
+						path: "src/example.ts",
+						line: 10,
+						severity: "HIGH",
+						type: "BUG",
+						title: "Legacy title",
+					},
+				],
+			},
+		);
+
+		assert.deepEqual(requestCalls, [
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
+				method: "PUT",
+				body: {
+					version: 2,
+					text: [
+						"<!-- copilot-pr-review:finding:finding-new -->",
+						"<!-- copilot-pr-review:finding-thread:thread-keep -->",
+						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
+						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
+						"**Type:** BUG | **Severity:** HIGH | **Confidence:** high",
+						"",
+						"**Updated title**",
+						"",
+						"Location: `src/example.ts:10`",
+						"",
+						"Updated details.",
+					].join("\n"),
+				},
+			},
+		]);
+	});
+
+	it("updates a legacy finding thread in place by externalId when prior metadata is unavailable", async () => {
+		const requestCalls: Array<{
+			pathname: string;
+			method: string | undefined;
+			body: unknown;
+		}> = [];
+		const commentsApi = new PullRequestCommentsApi(
+			"PROJ",
+			"repo",
+			123,
+			logger,
+			async (pathname, init) => {
+				requestCalls.push({
+					pathname,
+					method: init?.method,
+					body:
+						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+				});
+				return "";
+			},
+			async () =>
+				({
+					values: [
+						{
+							action: "COMMENTED",
+							createdDate: 100,
+							comment: {
+								id: 10,
+								text: "<!-- copilot-pr-review:finding:finding-old -->\nlegacy finding",
+								version: 2,
+								createdDate: 100,
+								updatedDate: 100,
+							},
+						},
+					],
+					isLastPage: true,
+				}) as never,
+		);
+
+		await commentsApi.reconcilePullRequestFindingComments(
+			"copilot-pr-review",
+			[
+				{
+					externalId: "finding-old",
+					threadKey: "thread-keep",
+					path: "src/example.ts",
+					line: 10,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Updated title",
+					details: "Updated details.",
+				},
+			],
+			{
+				revision: "review-rev-123",
+				reviewedCommit: "head-123",
+			},
+		);
+
+		assert.deepEqual(requestCalls, [
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
+				method: "PUT",
+				body: {
+					version: 2,
+					text: [
+						"<!-- copilot-pr-review:finding:finding-old -->",
+						"<!-- copilot-pr-review:finding-thread:thread-keep -->",
+						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
+						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
+						"**Type:** BUG | **Severity:** HIGH | **Confidence:** high",
+						"",
+						"**Updated title**",
+						"",
+						"Location: `src/example.ts:10`",
+						"",
+						"Updated details.",
+					].join("\n"),
 				},
 			},
 		]);

@@ -225,11 +225,3 @@ export function parseUnifiedDiff(diffText: string): {
 
 	return { files, stats };
 }
-
-export function escapeRegexLiteral(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-export function buildSymbolSearchPattern(symbol: string): string {
-	return `(^|[^A-Za-z0-9_])${escapeRegexLiteral(symbol)}([^A-Za-z0-9_]|$)`;
-}

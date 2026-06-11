@@ -13,7 +13,7 @@ function toConfigPath(path: ConfigPathInput): ConfigPath {
 	return typeof path === "string" ? splitConfigPath(path) : path;
 }
 
-export function cloneConfigValue<T>(value: T): T {
+function cloneConfigValue<T>(value: T): T {
 	if (Array.isArray(value)) {
 		return [...value] as T;
 	}

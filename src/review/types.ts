@@ -1,7 +1,7 @@
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ChangedFile, DiffStats, SkippedFile } from "../git/types.ts";
 
-export type Severity = "LOW" | "MEDIUM" | "HIGH";
+type Severity = "LOW" | "MEDIUM" | "HIGH";
 
 export type AnnotationType = "BUG" | "CODE_SMELL" | "VULNERABILITY";
 
@@ -27,7 +27,7 @@ export interface ReviewToolTelemetry {
 	byTool: Record<string, ReviewToolTelemetryCounter>;
 }
 
-export interface ReviewGitOperationTelemetry {
+interface ReviewGitOperationTelemetry {
 	count: number;
 	durationMsTotal: number;
 }
@@ -43,7 +43,7 @@ export type ReviewPublicationStatus =
 	| "partial"
 	| "failed";
 
-export type ReviewPublicationFailureStage =
+type ReviewPublicationFailureStage =
 	| "code_insights"
 	| "finding_comments"
 	| "pull_request_comment";
@@ -90,6 +90,7 @@ export interface FindingDraft {
 
 export interface ReviewFinding extends FindingDraft {
 	externalId: string;
+	threadKey: string;
 }
 
 export interface FileChangeSummary {
@@ -107,9 +108,10 @@ export interface StoredReviewFinding {
 	details?: string;
 	category?: string;
 	externalId?: string;
+	threadKey?: string;
 }
 
-export interface PreviousReviewReference {
+interface PreviousReviewReference {
 	revision?: string;
 	reviewedCommit: string;
 	findings: StoredReviewFinding[];

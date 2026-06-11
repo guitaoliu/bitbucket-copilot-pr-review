@@ -3,10 +3,11 @@ import { describe, it } from "node:test";
 
 import {
 	finalizeReviewSummary,
-	MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES,
 	shouldCreatePerFileSummaries,
 } from "./summary.ts";
 import type { ReviewContext, ReviewSummaryDrafts } from "./types.ts";
+
+const PER_FILE_SUMMARY_LIMIT = 25;
 
 function createContext(reviewedFileCount = 2): ReviewContext {
 	return {
@@ -68,17 +69,12 @@ function createContext(reviewedFileCount = 2): ReviewContext {
 
 describe("shouldCreatePerFileSummaries", () => {
 	it("keeps per-file summaries enabled at the cutoff", () => {
-		assert.equal(
-			shouldCreatePerFileSummaries(MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES),
-			true,
-		);
+		assert.equal(shouldCreatePerFileSummaries(PER_FILE_SUMMARY_LIMIT), true);
 	});
 
 	it("disables per-file summaries above the cutoff", () => {
 		assert.equal(
-			shouldCreatePerFileSummaries(
-				MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1,
-			),
+			shouldCreatePerFileSummaries(PER_FILE_SUMMARY_LIMIT + 1),
 			false,
 		);
 	});
@@ -121,9 +117,7 @@ describe("finalizeReviewSummary", () => {
 	});
 
 	it("omits per-file summaries for larger reviews while keeping the PR summary", () => {
-		const context = createContext(
-			MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1,
-		);
+		const context = createContext(PER_FILE_SUMMARY_LIMIT + 1);
 		const drafts: ReviewSummaryDrafts = {
 			prSummary: "Expands validation across many modules.",
 		};

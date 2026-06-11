@@ -1,19 +1,21 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
 import {
 	baseReviewerConfig as baseConfig,
 	createPullRequest,
 } from "../test-support/review-fixtures.ts";
+import { buildFindingThreadKey } from "./finding-identity.ts";
+import { parsePullRequestCommentMetadata } from "./publication-state.ts";
 import {
 	buildReviewArtifacts,
 	buildReviewRunOutput,
 	buildSkippedReviewOutput,
 } from "./result.ts";
 import type { ReviewArtifacts } from "./runner-types.ts";
-import { MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES } from "./summary.ts";
 import type { ReviewContext, ReviewOutcome } from "./types.ts";
+
+const PER_FILE_SUMMARY_LIMIT = 25;
 
 function createReviewContext(): ReviewContext {
 	const pr = createPullRequest();
@@ -95,6 +97,7 @@ function createReviewOutcome(): ReviewOutcome {
 		findings: [
 			{
 				externalId: "finding-1",
+				threadKey: "thread-1",
 				path: "src/service.ts",
 				line: 42,
 				severity: "HIGH",
@@ -197,6 +200,12 @@ describe("buildReviewArtifacts", () => {
 			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\].*Null handling is broken/s,
 		);
 		assert.match(artifacts.commentBody, /Null handling is broken/);
+
+		const metadata = parsePullRequestCommentMetadata(
+			baseConfig.report.commentTag,
+			artifacts.commentBody,
+		);
+		assert.equal(metadata?.storedFindings?.[0]?.threadKey, "thread-1");
 	});
 
 	it("bounds large comment bodies under the Bitbucket limit", () => {
@@ -247,6 +256,13 @@ describe("buildReviewArtifacts", () => {
 				severity: "HIGH",
 				type: "BUG",
 				confidence: "high",
+				threadKey: buildFindingThreadKey({
+					path:
+						context.reviewedFiles[index % context.reviewedFiles.length]?.path ??
+						"src/service.ts",
+					line: index + 1,
+					type: "BUG",
+				}),
 				title: `Finding ${index} ${"r".repeat(80)}`,
 				details: "Large detail.",
 			})),
@@ -266,7 +282,7 @@ describe("buildReviewArtifacts", () => {
 	it("omits reviewed changes in artifacts for reviews above the summary cutoff", () => {
 		const context = createReviewContext();
 		context.reviewedFiles = Array.from(
-			{ length: MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES + 1 },
+			{ length: PER_FILE_SUMMARY_LIMIT + 1 },
 			(_, index) => ({
 				path: `src/file-${index}.ts`,
 				status: "modified" as const,

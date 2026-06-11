@@ -65,7 +65,7 @@ type CopilotClientLike = Pick<
 	"start" | "createSession" | "stop"
 >;
 
-export interface CopilotSessionLike {
+interface CopilotSessionLike {
 	sendAndWait(
 		options: Parameters<CopilotSession["sendAndWait"]>[0],
 		timeout?: Parameters<CopilotSession["sendAndWait"]>[1],
@@ -174,7 +174,7 @@ function normalizeCommandOutput(value: string | Buffer): string | undefined {
 	return normalized.length > 0 ? normalized : undefined;
 }
 
-export async function resolveCopilotGitHubToken(
+async function resolveCopilotGitHubToken(
 	config: ReviewerConfig,
 	logger: Logger,
 	dependencies: {
@@ -321,7 +321,7 @@ function buildPostToolHint(
 	}
 }
 
-export function buildCopilotClientOptions(
+function buildCopilotClientOptions(
 	config: ReviewerConfig,
 	resolveCliPath: () => string = resolveBundledCopilotCliPath,
 	gitHubToken?: string,
@@ -808,8 +808,6 @@ function shiftToolStartTime(
 	return startedAt;
 }
 
-export { createEmptyReviewToolTelemetry };
-
 function createEmptyToolTelemetryCounter(): ReviewToolTelemetryCounter {
 	return {
 		requested: 0,
@@ -894,7 +892,7 @@ function buildPostToolFailureLogMessage(
 		.join(" ");
 }
 
-export function createReviewSessionHooks(
+function createReviewSessionHooks(
 	config: ReviewerConfig,
 	logger: Logger,
 	drafts: FindingDraft[],

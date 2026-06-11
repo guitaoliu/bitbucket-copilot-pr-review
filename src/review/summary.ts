@@ -6,7 +6,7 @@ import type {
 	ReviewSummaryDrafts,
 } from "./types.ts";
 
-export const MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES = 25;
+const MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES = 25;
 
 const MAX_PR_SUMMARY_LENGTH = 500;
 
@@ -69,7 +69,7 @@ function buildDiffSizeSummary(additions: number, deletions: number): string {
 	return `+${additions}/-${deletions}`;
 }
 
-export function summarizeSkippedReason(reason: string): string {
+function summarizeSkippedReason(reason: string): string {
 	if (reason.startsWith("exceeds REVIEW_MAX_FILES limit")) {
 		return "max-files limit";
 	}
@@ -112,7 +112,7 @@ export function buildDefaultPullRequestSummary(context: ReviewContext): string {
 	return `Prepares ${context.pr.source.displayId} for merge into ${context.pr.target.displayId}.`;
 }
 
-export function buildDefaultReviewedFileSummary(file: ChangedFile): string {
+function buildDefaultReviewedFileSummary(file: ChangedFile): string {
 	const diffSize = buildDiffSizeSummary(file.additions, file.deletions);
 	const changedLineSummary = `${file.changedLines.length} changed ${pluralize(file.changedLines.length, "line")}`;
 

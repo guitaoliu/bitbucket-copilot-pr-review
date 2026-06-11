@@ -1,5 +1,5 @@
 import type { PullRequestCommentStrategy } from "../config/types.ts";
-import type { ReviewFinding } from "../review/types.ts";
+import type { ReviewFinding, StoredReviewFinding } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
@@ -62,6 +62,7 @@ interface PullRequestCommentAnchor {
 interface FindingCommentMetadata {
 	revision: string;
 	reviewedCommit: string;
+	previousReviewFindings?: readonly StoredReviewFinding[];
 }
 
 function getErrorMessage(error: unknown): string {
@@ -101,12 +102,29 @@ function buildFindingCommentMarker(tag: string, externalId: string): string {
 	return `<!-- ${tag}:finding:${externalId} -->`;
 }
 
+function buildFindingCommentThreadMarker(
+	tag: string,
+	threadKey: string,
+): string {
+	return `<!-- ${tag}:finding-thread:${threadKey} -->`;
+}
+
 function parseFindingCommentExternalId(
 	tag: string,
 	text: string,
 ): string | undefined {
 	const match = new RegExp(
 		`<!--\\s*${escapeRegexLiteral(tag)}:finding:([^>\\s]+)\\s*-->`,
+	).exec(text);
+	return match?.[1];
+}
+
+function parseFindingCommentThreadKey(
+	tag: string,
+	text: string,
+): string | undefined {
+	const match = new RegExp(
+		`<!--\\s*${escapeRegexLiteral(tag)}:finding-thread:([^>\\s]+)\\s*-->`,
 	).exec(text);
 	return match?.[1];
 }
@@ -120,6 +138,7 @@ function buildFindingCommentText(
 		finding.line > 0 ? `${finding.path}:${finding.line}` : finding.path;
 	const lines = [
 		buildFindingCommentMarker(tag, finding.externalId),
+		buildFindingCommentThreadMarker(tag, finding.threadKey),
 		`<!-- ${tag}:finding-revision:${metadata.revision} -->`,
 		`<!-- ${tag}:finding-reviewed-commit:${metadata.reviewedCommit} -->`,
 		`**Type:** ${finding.type} | **Severity:** ${finding.severity} | **Confidence:** ${finding.confidence}`,
@@ -400,28 +419,56 @@ export class PullRequestCommentsApi {
 		}
 	}
 
-	private async listPullRequestFindingCommentsByExternalId(
+	private async listPullRequestFindingComments(
 		tag: string,
-	): Promise<Map<string, PullRequestComment>> {
+		previousReviewFindings: readonly StoredReviewFinding[] = [],
+	): Promise<{
+		commentsByThreadKey: Map<string, PullRequestComment>;
+		legacyCommentsByExternalId: Map<string, PullRequestComment>;
+	}> {
 		const comments = await this.listPullRequestComments();
-		const commentsByExternalId = new Map<string, PullRequestComment>();
+		const commentsByThreadKey = new Map<string, PullRequestComment>();
+		const legacyCommentsByExternalId = new Map<string, PullRequestComment>();
+		const threadKeyByLegacyExternalId = new Map(
+			previousReviewFindings.flatMap((finding) =>
+				finding.externalId && finding.threadKey
+					? [[finding.externalId, finding.threadKey] as const]
+					: [],
+			),
+		);
 
 		for (const comment of comments.sort(comparePullRequestComments)) {
-			const externalId = parseFindingCommentExternalId(tag, comment.text);
-			if (!externalId) {
+			const legacyExternalId = parseFindingCommentExternalId(tag, comment.text);
+			const threadKey =
+				parseFindingCommentThreadKey(tag, comment.text) ??
+				(legacyExternalId
+					? threadKeyByLegacyExternalId.get(legacyExternalId)
+					: undefined);
+			if (!threadKey) {
+				if (!legacyExternalId) {
+					continue;
+				}
+
+				const existingLegacy = legacyCommentsByExternalId.get(legacyExternalId);
+				if (existingLegacy) {
+					await this.deleteOrArchiveFindingComment(comment, tag);
+					continue;
+				}
+
+				legacyCommentsByExternalId.set(legacyExternalId, comment);
 				continue;
 			}
 
-			const existing = commentsByExternalId.get(externalId);
+			const existing = commentsByThreadKey.get(threadKey);
 			if (existing) {
 				await this.deleteOrArchiveFindingComment(comment, tag);
 				continue;
 			}
 
-			commentsByExternalId.set(externalId, comment);
+			commentsByThreadKey.set(threadKey, comment);
 		}
 
-		return commentsByExternalId;
+		return { commentsByThreadKey, legacyCommentsByExternalId };
 	}
 
 	async reconcilePullRequestFindingComments(
@@ -429,21 +476,30 @@ export class PullRequestCommentsApi {
 		findings: ReviewFinding[],
 		metadata: FindingCommentMetadata,
 	): Promise<void> {
-		const existingByExternalId =
-			await this.listPullRequestFindingCommentsByExternalId(tag);
-		const desiredExternalIds = new Set(
-			findings.map((finding) => finding.externalId),
+		const { commentsByThreadKey, legacyCommentsByExternalId } =
+			await this.listPullRequestFindingComments(
+				tag,
+				metadata.previousReviewFindings,
+			);
+		const desiredThreadKeys = new Set(
+			findings.map((finding) => finding.threadKey),
 		);
+		const matchedLegacyExternalIds = new Set<string>();
 
 		for (const finding of findings) {
 			const text = buildFindingCommentText(tag, finding, metadata);
-			const existing = existingByExternalId.get(finding.externalId);
+			const existing =
+				commentsByThreadKey.get(finding.threadKey) ??
+				legacyCommentsByExternalId.get(finding.externalId);
 			if (existing) {
 				await this.updatePullRequestComment(
 					existing.id,
 					existing.version,
 					text,
 				);
+				if (!commentsByThreadKey.has(finding.threadKey)) {
+					matchedLegacyExternalIds.add(finding.externalId);
+				}
 				continue;
 			}
 
@@ -451,8 +507,16 @@ export class PullRequestCommentsApi {
 			await this.createPullRequestComment(text, anchor ? { anchor } : {});
 		}
 
-		for (const [externalId, comment] of existingByExternalId) {
-			if (desiredExternalIds.has(externalId)) {
+		for (const [threadKey, comment] of commentsByThreadKey) {
+			if (desiredThreadKeys.has(threadKey)) {
+				continue;
+			}
+
+			await this.deleteOrArchiveFindingComment(comment, tag);
+		}
+
+		for (const [externalId, comment] of legacyCommentsByExternalId) {
+			if (matchedLegacyExternalIds.has(externalId)) {
 				continue;
 			}
 

@@ -1,4 +1,4 @@
-export interface RawBitbucketLink {
+interface RawBitbucketLink {
 	href: string;
 	name?: string;
 }
@@ -16,7 +16,7 @@ export interface RawBitbucketRepository {
 	};
 }
 
-export interface RawBitbucketRef {
+interface RawBitbucketRef {
 	id: string;
 	displayId: string;
 	latestCommit: string;

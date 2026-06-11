@@ -401,43 +401,11 @@ function formatEnvironmentError(error: z.ZodError): string {
 	return error.issues.map((issue) => issue.message).join("\n");
 }
 
-export function getRequiredEnvValue<TKey extends keyof ParsedEnvironment>(
-	env: ParsedEnvironment,
-	key: TKey,
-): Exclude<ParsedEnvironment[TKey], undefined> {
-	const field = CONFIG_FIELD_METADATA[keyToMetadataKey(key)];
-	if (!isEnvConfigField(field)) {
-		throw new CliUserError(
-			`Metadata registered for environment key ${String(key)} is incomplete.`,
-		);
-	}
-
-	return requireEnvValue(env[key], `${field.env} is required.`) as Exclude<
-		ParsedEnvironment[TKey],
-		undefined
-	>;
-}
-
 export function getRequiredEnvValueWithMessage<T>(
 	value: T | undefined,
 	message: string,
 ): T {
 	return requireEnvValue(value, message);
-}
-
-function keyToMetadataKey(
-	key: keyof ParsedEnvironment,
-): keyof typeof CONFIG_FIELD_METADATA {
-	const entry = Object.entries(CONFIG_FIELD_METADATA).find(
-		([, field]) => "env" in field && field.env === key,
-	);
-	if (!entry) {
-		throw new CliUserError(
-			`No metadata registered for environment key ${String(key)}.`,
-		);
-	}
-
-	return entry[0] as keyof typeof CONFIG_FIELD_METADATA;
 }
 
 export function parseEnvironment(env: NodeJS.ProcessEnv): ParsedEnvironment {

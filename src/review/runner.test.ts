@@ -10,6 +10,7 @@ import {
 	createReviewContext,
 	createReviewOutcome,
 } from "../test-support/review-fixtures.ts";
+import { buildFindingThreadKey } from "./finding-identity.ts";
 import {
 	buildPullRequestCommentMetadataMarkers,
 	buildReviewMetadataFields,
@@ -847,6 +848,11 @@ describe("runReview", () => {
 		const storedFindings = [
 			{
 				externalId: "finding-1",
+				threadKey: buildFindingThreadKey({
+					path: "src/example.ts",
+					line: 10,
+					type: "BUG",
+				}),
 				path: "src/example.ts",
 				line: 10,
 				severity: "HIGH" as const,

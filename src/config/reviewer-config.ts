@@ -64,7 +64,7 @@ function buildRepoOverrides(
 	return validateReviewerConfigRepoOverrides(overrides);
 }
 
-export const reviewerConfigRepoOverridesSchema = z
+const reviewerConfigRepoOverridesSchema = z
 	.object({
 		copilot: createCopilotOverrideSchema(),
 		report: createReportOverrideSchema(),
@@ -72,7 +72,7 @@ export const reviewerConfigRepoOverridesSchema = z
 	})
 	.strict();
 
-export const reviewerConfigSchema = z
+const reviewerConfigSchema = z
 	.object({
 		repoRoot: z.string().min(1),
 		gitRemoteName: z.string().min(1),

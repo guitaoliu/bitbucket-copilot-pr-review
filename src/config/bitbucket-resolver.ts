@@ -156,9 +156,7 @@ export function parseBitbucketPullRequestUrl(
 	};
 }
 
-export function resolveBitbucketAuth(
-	env: ParsedEnvironment,
-): BitbucketAuthConfig {
+function resolveBitbucketAuth(env: ParsedEnvironment): BitbucketAuthConfig {
 	if (env.BITBUCKET_AUTH_TYPE === "basic") {
 		return {
 			type: "basic",

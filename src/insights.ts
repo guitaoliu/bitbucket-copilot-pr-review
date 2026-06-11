@@ -136,6 +136,7 @@ function buildStoredFindingMetadata(
 				details: finding.details.length > 0 ? finding.details : undefined,
 				category: finding.category,
 				externalId: finding.externalId,
+				threadKey: finding.threadKey,
 			}) satisfies StoredReviewFinding,
 	);
 
