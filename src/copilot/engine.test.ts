@@ -557,6 +557,47 @@ describe("runCopilotReview", () => {
 				"Readonly review mode blocks shell access to potential secret-bearing path config/.env.",
 		});
 
+		for (const fullCommandText of [
+			"git show HEAD:'config/.env'",
+			"git show :config/.env",
+		]) {
+			const deniedQuotedGitShowSecretPath = await permissionHandler(
+				{
+					canOfferSessionApproval: false,
+					kind: "shell",
+					commands: [{ identifier: "git", readOnly: true }],
+					fullCommandText,
+					intention: "Inspect source at commit",
+					hasWriteFileRedirection: false,
+					possiblePaths: [],
+					possibleUrls: [],
+				} as PermissionRequest,
+				{ sessionId: "session-1" },
+			);
+			assert.deepEqual(deniedQuotedGitShowSecretPath, {
+				kind: "reject",
+				feedback:
+					"Readonly review mode blocks shell access to potential secret-bearing path config/.env.",
+			});
+		}
+
+		for (const possibleRootPath of ["/tmp/repo", "."]) {
+			const allowedRepoRootInspection = await permissionHandler(
+				{
+					canOfferSessionApproval: false,
+					kind: "shell",
+					commands: [{ identifier: "ls", readOnly: true }],
+					fullCommandText: "ls .",
+					intention: "Inspect repo root",
+					hasWriteFileRedirection: false,
+					possiblePaths: [possibleRootPath],
+					possibleUrls: [],
+				} as PermissionRequest,
+				{ sessionId: "session-1" },
+			);
+			assert.deepEqual(allowedRepoRootInspection, { kind: "approve-once" });
+		}
+
 		const deniedRead = await permissionHandler(
 			{
 				kind: "read",

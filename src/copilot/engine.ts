@@ -712,6 +712,25 @@ function unquoteShellToken(token: string): string {
 	return token;
 }
 
+function extractGitObjectPathFromToken(token: string): string | undefined {
+	if (!token || token.startsWith("-") || token.includes("://")) {
+		return undefined;
+	}
+
+	if (token.startsWith(":")) {
+		const indexPath = token.slice(1);
+		const stageMatch = /^(?:0|1|2|3):(.+)$/.exec(indexPath);
+		return unquoteShellToken(stageMatch?.[1] ?? indexPath);
+	}
+
+	const separatorIndex = token.indexOf(":");
+	if (separatorIndex <= 0 || separatorIndex === token.length - 1) {
+		return undefined;
+	}
+
+	return unquoteShellToken(token.slice(separatorIndex + 1));
+}
+
 function extractGitObjectPaths(
 	fullCommandText: string | undefined,
 	commands: Array<{ identifier?: string }> | undefined,
@@ -729,16 +748,7 @@ function extractGitObjectPaths(
 	}
 
 	return tokens.flatMap((token) => {
-		if (!token || token.startsWith("-") || token.includes("://")) {
-			return [];
-		}
-
-		const separatorIndex = token.indexOf(":");
-		if (separatorIndex <= 0 || separatorIndex === token.length - 1) {
-			return [];
-		}
-
-		const objectPath = token.slice(separatorIndex + 1);
+		const objectPath = extractGitObjectPathFromToken(token);
 		return objectPath ? [objectPath] : [];
 	});
 }
@@ -881,6 +891,10 @@ function decideReadonlyShell(
 			config.repoRoot,
 			possiblePath,
 		);
+		if (repoRelativePath === "" || repoRelativePath === ".") {
+			continue;
+		}
+
 		const pathDecision = getRepoFileAccessDecision(repoRelativePath);
 		if (!pathDecision.include) {
 			return {
