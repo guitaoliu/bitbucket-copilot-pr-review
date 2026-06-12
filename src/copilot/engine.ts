@@ -14,7 +14,7 @@ import type {
 	SessionEvent,
 	ToolResultObject,
 } from "@github/copilot-sdk";
-import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection, ToolSet } from "@github/copilot-sdk";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import { finalizeFindings } from "../policy/findings.ts";
@@ -120,6 +120,15 @@ function isBuiltinReviewToolName(
 
 function isAllowedReviewToolName(toolName: string): boolean {
 	return isReviewToolName(toolName) || isBuiltinReviewToolName(toolName);
+}
+
+function buildReviewAvailableTools(): string[] {
+	const tools = new ToolSet().addBuiltIn(BUILTIN_REVIEW_TOOL_NAMES);
+	for (const toolName of REVIEW_TOOL_NAMES) {
+		tools.addCustom(toolName);
+	}
+
+	return tools.toArray();
 }
 
 type ExecFileAsyncLike = (
@@ -1243,6 +1252,7 @@ export async function runCopilotReview(
 		systemMessage: buildSystemMessage(config),
 		streaming: true,
 		tools: createReviewTools(config, context, git, drafts, summaryDrafts),
+		availableTools: buildReviewAvailableTools(),
 		onPermissionRequest: (request: PermissionRequest) =>
 			buildReadonlyPermissionDecision(request, config),
 		hooks: createReviewSessionHooks(config, logger, drafts, progressState),

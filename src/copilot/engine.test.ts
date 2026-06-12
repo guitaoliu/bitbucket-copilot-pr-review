@@ -482,7 +482,12 @@ describe("runCopilotReview", () => {
 			createdSessionConfigs[0]?.systemMessage,
 			buildSystemMessage(config),
 		);
-		assert.equal(createdSessionConfigs[0]?.availableTools, undefined);
+		assert.deepEqual(createdSessionConfigs[0]?.availableTools, [
+			"builtin:bash",
+			"custom:get_pr_overview",
+			"custom:record_pr_summary",
+			"custom:emit_finding",
+		]);
 		const permissionHandler = createdSessionConfigs[0]?.onPermissionRequest;
 		assert.equal(typeof permissionHandler, "function");
 		assert(permissionHandler);
