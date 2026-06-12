@@ -2,6 +2,7 @@ import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import { buildInsightReport, buildPullRequestComment } from "../insights.ts";
 import { omitUndefined } from "../shared/object.ts";
+import { sanitizeReviewOutcomeForOutput } from "./output-sanitize.ts";
 import type { ReviewRunOutput } from "./output-types.ts";
 import type { ReviewArtifacts } from "./runner-types.ts";
 import type {
@@ -63,7 +64,9 @@ export function buildReviewRunOutput(
 	published: boolean,
 	publication?: ReviewPublication,
 ): ReviewRunOutput {
-	const { gitTelemetry, toolTelemetry, ...reviewWithoutTelemetry } = review;
+	const sanitizedReview = sanitizeReviewOutcomeForOutput(review);
+	const { gitTelemetry, toolTelemetry, ...reviewWithoutTelemetry } =
+		sanitizedReview;
 	const hasGitTelemetry =
 		gitTelemetry !== undefined &&
 		Object.keys(gitTelemetry.byOperation).length > 0;

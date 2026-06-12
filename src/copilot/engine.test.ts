@@ -533,6 +533,25 @@ describe("runCopilotReview", () => {
 		);
 		assert.deepEqual(allowedGitShow, { kind: "approve-once" });
 
+		const deniedGitShowSecretPath = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git show HEAD:config/.env",
+				intention: "Inspect source at commit",
+				hasWriteFileRedirection: false,
+				possiblePaths: [],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedGitShowSecretPath, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode blocks shell access to potential secret-bearing path config/.env.",
+		});
+
 		const deniedRead = await permissionHandler(
 			{
 				kind: "read",
@@ -674,6 +693,44 @@ describe("runCopilotReview", () => {
 			kind: "reject",
 			feedback:
 				"Readonly review mode blocks shell commands that may access network URLs.",
+		});
+
+		const deniedSecretPossiblePath = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "sed", readOnly: true }],
+				fullCommandText: "sed -n '1,80p' config/.env",
+				intention: "Inspect source",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/tmp/repo/config/.env"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedSecretPossiblePath, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode blocks shell access to potential secret-bearing path config/.env.",
+		});
+
+		const deniedShellExpansion = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git diff $(git rev-parse HEAD)",
+				intention: "Inspect diff with shell expansion",
+				hasWriteFileRedirection: false,
+				possiblePaths: [],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedShellExpansion, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode blocks shell commands with expansion or pipeline syntax.",
 		});
 
 		const deniedEchoWrapper = await permissionHandler(

@@ -18,6 +18,7 @@ import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import { finalizeFindings } from "../policy/findings.ts";
+import { getRepoFileAccessDecision } from "../policy/path-access.ts";
 import { finalizeReviewSummary } from "../review/summary.ts";
 import type {
 	FindingDraft,
@@ -29,7 +30,7 @@ import type {
 } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
-import { truncateText } from "../shared/text.ts";
+import { sanitizeModelAuthoredText, truncateText } from "../shared/text.ts";
 import { resolveBundledCopilotCliPath } from "./cli-path.ts";
 import { buildPrompt, buildSystemMessage } from "./prompt.ts";
 import {
@@ -649,6 +650,19 @@ function isPathWithinRepoRoot(
 	);
 }
 
+function toRepoRelativePermissionPath(
+	repoRoot: string,
+	candidatePath: string,
+): string {
+	if (!path.isAbsolute(candidatePath)) {
+		return candidatePath.replace(/\\/g, "/");
+	}
+
+	return path
+		.relative(path.resolve(repoRoot), candidatePath)
+		.replace(/\\/g, "/");
+}
+
 function extractGitSubcommand(
 	fullCommandText: string | undefined,
 	commands: Array<{ identifier?: string }> | undefined,
@@ -678,6 +692,48 @@ function extractGitSubcommand(
 	return undefined;
 }
 
+function unquoteShellToken(token: string): string {
+	if (
+		(token.startsWith("'") && token.endsWith("'")) ||
+		(token.startsWith('"') && token.endsWith('"'))
+	) {
+		return token.slice(1, -1);
+	}
+
+	return token;
+}
+
+function extractGitObjectPaths(
+	fullCommandText: string | undefined,
+	commands: Array<{ identifier?: string }> | undefined,
+): string[] {
+	if (
+		typeof fullCommandText !== "string" ||
+		commands?.[0]?.identifier !== "git"
+	) {
+		return [];
+	}
+
+	const tokens = fullCommandText.trim().split(/\s+/).map(unquoteShellToken);
+	if ((tokens[0] ?? "") !== "git") {
+		return [];
+	}
+
+	return tokens.flatMap((token) => {
+		if (!token || token.startsWith("-") || token.includes("://")) {
+			return [];
+		}
+
+		const separatorIndex = token.indexOf(":");
+		if (separatorIndex <= 0 || separatorIndex === token.length - 1) {
+			return [];
+		}
+
+		const objectPath = token.slice(separatorIndex + 1);
+		return objectPath ? [objectPath] : [];
+	});
+}
+
 function hasPresentationOnlyShellWrapper(
 	fullCommandText: string | undefined,
 ): boolean {
@@ -690,6 +746,16 @@ function hasPresentationOnlyShellWrapper(
 		/^(?:echo|printf)\b[\s\S]*&&/.test(normalized) ||
 		/&&\s*(?:echo|printf)\b/.test(normalized)
 	);
+}
+
+function hasBlockedShellExpansionOrPipeline(
+	fullCommandText: string | undefined,
+): boolean {
+	if (typeof fullCommandText !== "string") {
+		return false;
+	}
+
+	return /(?:\$\(|<\(|`|\||&&|\|\||;)/.test(fullCommandText);
 }
 
 function rejectReadonlyPermission(kind: string): PermissionRequestResult {
@@ -716,6 +782,14 @@ function decideReadonlyShell(
 			kind: "reject",
 			feedback:
 				"Readonly review mode blocks presentation-only shell wrappers. Run the underlying inspection command directly.",
+		};
+	}
+
+	if (hasBlockedShellExpansionOrPipeline(request.fullCommandText)) {
+		return {
+			kind: "reject",
+			feedback:
+				"Readonly review mode blocks shell commands with expansion or pipeline syntax.",
 		};
 	}
 
@@ -772,12 +846,37 @@ function decideReadonlyShell(
 		};
 	}
 
+	for (const gitObjectPath of extractGitObjectPaths(
+		request.fullCommandText,
+		request.commands,
+	)) {
+		const pathDecision = getRepoFileAccessDecision(gitObjectPath);
+		if (!pathDecision.include) {
+			return {
+				kind: "reject",
+				feedback: `Readonly review mode blocks shell access to ${pathDecision.reason} ${gitObjectPath}.`,
+			};
+		}
+	}
+
 	for (const possiblePath of request.possiblePaths) {
 		if (!isPathWithinRepoRoot(config.repoRoot, possiblePath)) {
 			return {
 				kind: "reject",
 				feedback:
 					"Readonly review mode limits shell access to paths inside the repository root.",
+			};
+		}
+
+		const repoRelativePath = toRepoRelativePermissionPath(
+			config.repoRoot,
+			possiblePath,
+		);
+		const pathDecision = getRepoFileAccessDecision(repoRelativePath);
+		if (!pathDecision.include) {
+			return {
+				kind: "reject",
+				feedback: `Readonly review mode blocks shell access to ${pathDecision.reason} ${repoRelativePath}.`,
 			};
 		}
 	}
@@ -1085,7 +1184,9 @@ function summarizeOutcome(
 	if (findingsCount === 0) {
 		const normalized = assistantMessage?.trim();
 		if (normalized && normalized.length > 0) {
-			return truncateText(normalized, 1200, { suffix: "\n... truncated ..." });
+			return truncateText(sanitizeModelAuthoredText(normalized), 1200, {
+				suffix: "\n... truncated ...",
+			});
 		}
 
 		return `No ${context.reviewedFiles.length > 0 ? "reportable" : "reviewable"} issues found in the reviewed pull request changes at the ${"configured confidence threshold"}.`;

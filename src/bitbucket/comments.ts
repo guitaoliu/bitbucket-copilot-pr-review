@@ -2,7 +2,10 @@ import type { PullRequestCommentStrategy } from "../config/types.ts";
 import type { ReviewFinding, StoredReviewFinding } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
-import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
+import {
+	BITBUCKET_PR_COMMENT_MAX_CHARS,
+	sanitizeModelAuthoredText,
+} from "../shared/text.ts";
 import { BitbucketApiError } from "./transport.ts";
 import type {
 	PullRequestComment,
@@ -143,13 +146,13 @@ function buildFindingCommentText(
 		`<!-- ${tag}:finding-reviewed-commit:${metadata.reviewedCommit} -->`,
 		`**Type:** ${finding.type} | **Severity:** ${finding.severity} | **Confidence:** ${finding.confidence}`,
 		"",
-		`**${finding.title}**`,
+		`**${sanitizeModelAuthoredText(finding.title)}**`,
 		"",
 		`Location: \`${location}\``,
 	];
 
 	if (finding.details.trim().length > 0) {
-		lines.push("", finding.details);
+		lines.push("", sanitizeModelAuthoredText(finding.details));
 	}
 
 	return lines.join("\n");

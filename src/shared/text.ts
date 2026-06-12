@@ -21,3 +21,14 @@ export function truncateText(
 
 	return `${value.slice(0, sliceLength).trimEnd()}${suffix}`;
 }
+
+export function sanitizeModelAuthoredText(value: string): string {
+	return value
+		.replaceAll("<!--", "&lt;!--")
+		.replaceAll("-->", "--&gt;")
+		.replace(
+			/(^|[^A-Za-z0-9_])@(all|channel|everyone|here)\b/gi,
+			(_match, prefix: string, mention: string) =>
+				`${prefix}[at]${mention.toLowerCase()}`,
+		);
+}

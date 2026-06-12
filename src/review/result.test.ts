@@ -406,4 +406,71 @@ describe("buildReviewRunOutput", () => {
 			skipped: false,
 		});
 	});
+
+	it("sanitizes model-authored review text in the final run output", () => {
+		const context = createReviewContext();
+		const review: ReviewOutcome = {
+			summary: "Found issue <!-- injected-summary --> and ping @here.",
+			assistantMessage:
+				"Assistant message includes <!-- injected-assistant --> and @channel.",
+			prSummary: "Changed behavior <!-- injected-pr-summary -->.",
+			fileSummaries: [
+				{
+					path: "src/service.ts",
+					summary: "Service summary <!-- injected-file-summary -->.",
+				},
+			],
+			findings: [
+				{
+					externalId: "finding-1",
+					threadKey: "thread-1",
+					path: "src/service.ts",
+					line: 42,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Finding title <!-- injected-title -->",
+					details: "Finding details mention @everyone.",
+					category: "security @all",
+				},
+			],
+			stale: false,
+		};
+		const artifacts: ReviewArtifacts = {
+			report: {
+				title: baseConfig.report.title,
+				result: "FAIL",
+				reporter: baseConfig.report.reporter,
+			},
+			commentBody: "comment body",
+		};
+
+		const output = buildReviewRunOutput(context, review, artifacts, false);
+
+		assert.equal(
+			output.review.summary,
+			"Found issue &lt;!-- injected-summary --&gt; and ping [at]here.",
+		);
+		assert.equal(
+			output.review.assistantMessage,
+			"Assistant message includes &lt;!-- injected-assistant --&gt; and [at]channel.",
+		);
+		assert.equal(
+			output.review.prSummary,
+			"Changed behavior &lt;!-- injected-pr-summary --&gt;.",
+		);
+		assert.equal(
+			output.review.fileSummaries?.[0]?.summary,
+			"Service summary &lt;!-- injected-file-summary --&gt;.",
+		);
+		assert.equal(
+			output.review.findings[0]?.title,
+			"Finding title &lt;!-- injected-title --&gt;",
+		);
+		assert.equal(
+			output.review.findings[0]?.details,
+			"Finding details mention [at]everyone.",
+		);
+		assert.equal(output.review.findings[0]?.category, "security [at]all");
+	});
 });
