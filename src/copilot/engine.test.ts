@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type {
 	PermissionRequest,
+	PermissionRequestMcp,
+	PermissionRequestRead,
 	SessionConfig,
 	SessionEventHandler,
 } from "@github/copilot-sdk";
@@ -443,7 +445,7 @@ describe("runCopilotReview", () => {
 		assert.equal(stopCalls, 0);
 	});
 
-	it("passes system prompt customization and readonly shell session config into session creation", async () => {
+	it("passes system prompt customization and readonly permission config into session creation", async () => {
 		const context = createReviewContext();
 		const createdSessionConfigs: SessionConfig[] = [];
 		const sessionEventHandlers: SessionEventHandler[] = [];
@@ -501,6 +503,101 @@ describe("runCopilotReview", () => {
 		);
 		assert.deepEqual(allowed, { kind: "approve-once" });
 
+		const allowedSed = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "sed", readOnly: true }],
+				fullCommandText: "sed -n '1,80p' src/file.ts",
+				intention: "Inspect source",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/tmp/repo/src/file.ts"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(allowedSed, { kind: "approve-once" });
+
+		const allowedGitShow = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git show HEAD:src/file.ts",
+				intention: "Inspect source at commit",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/tmp/repo/src/file.ts"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(allowedGitShow, { kind: "approve-once" });
+
+		const deniedRead = await permissionHandler(
+			{
+				kind: "read",
+				intention: "Inspect source",
+				path: "/tmp/repo/src/file.ts",
+			} satisfies PermissionRequestRead,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedRead, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode does not allow read permissions. Use approved git or shell inspection commands instead.",
+		});
+
+		const deniedReadOutsideRepo = await permissionHandler(
+			{
+				kind: "read",
+				intention: "Inspect outside source",
+				path: "/tmp/outside/file.ts",
+			} satisfies PermissionRequestRead,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedReadOutsideRepo, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode does not allow read permissions. Use approved git or shell inspection commands instead.",
+		});
+
+		const deniedMcp = await permissionHandler(
+			{
+				kind: "mcp",
+				serverName: "github",
+				toolName: "github/search_code",
+				toolTitle: "Search code",
+				args: { query: "repo:test test" },
+				readOnly: true,
+			} satisfies PermissionRequestMcp,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedMcp, {
+			kind: "reject",
+			feedback: "Readonly review mode does not allow mcp permissions.",
+		});
+
+		for (const commandIdentifier of ["env", "xargs"]) {
+			const deniedCommand = await permissionHandler(
+				{
+					canOfferSessionApproval: false,
+					kind: "shell",
+					commands: [{ identifier: commandIdentifier, readOnly: true }],
+					fullCommandText: commandIdentifier,
+					intention: "Inspect command behavior",
+					hasWriteFileRedirection: false,
+					possiblePaths: [],
+					possibleUrls: [],
+				} as PermissionRequest,
+				{ sessionId: "session-1" },
+			);
+			assert.deepEqual(deniedCommand, {
+				kind: "reject",
+				feedback:
+					"Readonly review mode allows only approved readonly inspection commands.",
+			});
+		}
+
 		const denied = await permissionHandler(
 			{
 				canOfferSessionApproval: false,
@@ -535,8 +632,30 @@ describe("runCopilotReview", () => {
 		);
 		assert.deepEqual(deniedGitFetch, {
 			kind: "reject",
-			feedback: "Readonly review mode blocks remote-capable git commands.",
+			feedback:
+				"Readonly review mode allows only approved git inspection subcommands.",
 		});
+
+		for (const gitSubcommand of ["checkout", "gc"]) {
+			const deniedGitMutation = await permissionHandler(
+				{
+					canOfferSessionApproval: false,
+					kind: "shell",
+					commands: [{ identifier: "git", readOnly: true }],
+					fullCommandText: `git ${gitSubcommand}`,
+					intention: "Run git mutation",
+					hasWriteFileRedirection: false,
+					possiblePaths: [],
+					possibleUrls: [],
+				} as PermissionRequest,
+				{ sessionId: "session-1" },
+			);
+			assert.deepEqual(deniedGitMutation, {
+				kind: "reject",
+				feedback:
+					"Readonly review mode allows only approved git inspection subcommands.",
+			});
+		}
 
 		const deniedUrl = await permissionHandler(
 			{

@@ -1,11 +1,15 @@
 import { execFile } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 
 import type {
 	CopilotClientOptions,
 	CopilotSession,
 	PermissionRequest,
+	PermissionRequestMcp,
+	PermissionRequestRead,
 	PermissionRequestResult,
+	PermissionRequestShell,
 	SessionConfig,
 	SessionEvent,
 	ToolResultObject,
@@ -577,6 +581,7 @@ const SAFE_READONLY_SHELL_COMMAND_IDENTIFIERS = new Set([
 	"git",
 	"rg",
 	"grep",
+	"sed",
 	"ls",
 	"pwd",
 	"file",
@@ -590,33 +595,57 @@ const SAFE_READONLY_SHELL_COMMAND_IDENTIFIERS = new Set([
 	"cut",
 	"tr",
 	"wc",
-	"xargs",
-	"env",
 	"true",
 	"false",
 ]);
 
-const BLOCKED_GIT_SHELL_SUBCOMMANDS = new Set([
-	"fetch",
-	"pull",
-	"push",
-	"clone",
-	"remote",
-	"submodule",
-	"credential",
-	"send-pack",
-	"receive-pack",
-	"ls-remote",
-	"archive",
+const SAFE_GIT_INSPECTION_SUBCOMMANDS = new Set([
+	"annotate",
+	"blame",
+	"cat-file",
+	"check-attr",
+	"check-ignore",
+	"check-mailmap",
+	"cherry",
+	"describe",
+	"diff",
+	"diff-files",
+	"diff-index",
+	"diff-tree",
+	"for-each-ref",
+	"grep",
+	"log",
+	"ls-files",
+	"ls-tree",
+	"merge-base",
+	"name-rev",
+	"range-diff",
+	"rev-list",
+	"rev-parse",
+	"shortlog",
+	"show",
+	"show-branch",
+	"show-ref",
+	"status",
+	"whatchanged",
 ]);
 
 function isPathWithinRepoRoot(
 	repoRoot: string,
 	candidatePath: string,
 ): boolean {
-	const normalizedRepoRoot = repoRoot.endsWith("/") ? repoRoot : `${repoRoot}/`;
+	const normalizedRepoRoot = path.resolve(repoRoot);
+	const normalizedCandidatePath = path.resolve(
+		normalizedRepoRoot,
+		candidatePath,
+	);
+	const relativePath = path.relative(
+		normalizedRepoRoot,
+		normalizedCandidatePath,
+	);
 	return (
-		candidatePath === repoRoot || candidatePath.startsWith(normalizedRepoRoot)
+		relativePath === "" ||
+		(!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
 	);
 }
 
@@ -663,26 +692,18 @@ function hasPresentationOnlyShellWrapper(
 	);
 }
 
-function buildReadonlyShellDecision(
-	request: PermissionRequest,
+function rejectReadonlyPermission(kind: string): PermissionRequestResult {
+	return {
+		kind: "reject",
+		feedback: `Readonly review mode does not allow ${kind} permissions.`,
+	};
+}
+
+function decideReadonlyShell(
+	request: PermissionRequestShell,
 	config: ReviewerConfig,
 ): PermissionRequestResult {
-	if (request.kind !== "shell") {
-		return {
-			kind: "reject",
-			feedback: `Readonly review mode does not allow ${request.kind} permissions.`,
-		};
-	}
-
-	const shellRequest = request as PermissionRequest & {
-		commands?: Array<{ identifier?: string; readOnly?: boolean }>;
-		fullCommandText?: string;
-		possiblePaths?: string[];
-		possibleUrls?: Array<{ url?: string }>;
-		hasWriteFileRedirection?: boolean;
-	};
-
-	if (shellRequest.hasWriteFileRedirection === true) {
+	if (request.hasWriteFileRedirection === true) {
 		return {
 			kind: "reject",
 			feedback:
@@ -690,7 +711,7 @@ function buildReadonlyShellDecision(
 		};
 	}
 
-	if (hasPresentationOnlyShellWrapper(shellRequest.fullCommandText)) {
+	if (hasPresentationOnlyShellWrapper(request.fullCommandText)) {
 		return {
 			kind: "reject",
 			feedback:
@@ -698,7 +719,7 @@ function buildReadonlyShellDecision(
 		};
 	}
 
-	if ((shellRequest.commands?.length ?? 0) === 0) {
+	if (request.commands.length === 0) {
 		return {
 			kind: "reject",
 			feedback:
@@ -706,7 +727,7 @@ function buildReadonlyShellDecision(
 		};
 	}
 
-	for (const command of shellRequest.commands ?? []) {
+	for (const command of request.commands) {
 		if (command.readOnly !== true) {
 			return {
 				kind: "reject",
@@ -728,20 +749,22 @@ function buildReadonlyShellDecision(
 	}
 
 	const gitSubcommand = extractGitSubcommand(
-		shellRequest.fullCommandText,
-		shellRequest.commands,
+		request.fullCommandText,
+		request.commands,
 	);
 	if (
-		gitSubcommand !== undefined &&
-		BLOCKED_GIT_SHELL_SUBCOMMANDS.has(gitSubcommand)
+		request.commands.some((command) => command.identifier === "git") &&
+		(gitSubcommand === undefined ||
+			!SAFE_GIT_INSPECTION_SUBCOMMANDS.has(gitSubcommand))
 	) {
 		return {
 			kind: "reject",
-			feedback: "Readonly review mode blocks remote-capable git commands.",
+			feedback:
+				"Readonly review mode allows only approved git inspection subcommands.",
 		};
 	}
 
-	if ((shellRequest.possibleUrls?.length ?? 0) > 0) {
+	if (request.possibleUrls.length > 0) {
 		return {
 			kind: "reject",
 			feedback:
@@ -749,7 +772,7 @@ function buildReadonlyShellDecision(
 		};
 	}
 
-	for (const possiblePath of shellRequest.possiblePaths ?? []) {
+	for (const possiblePath of request.possiblePaths) {
 		if (!isPathWithinRepoRoot(config.repoRoot, possiblePath)) {
 			return {
 				kind: "reject",
@@ -760,6 +783,39 @@ function buildReadonlyShellDecision(
 	}
 
 	return { kind: "approve-once" };
+}
+
+function decideRepoReadonlyPath(
+	request: PermissionRequestRead,
+): PermissionRequestResult {
+	void request;
+	return {
+		kind: "reject",
+		feedback:
+			"Readonly review mode does not allow read permissions. Use approved git or shell inspection commands instead.",
+	};
+}
+
+function decideReadonlyAllowlistedMcp(
+	request: PermissionRequestMcp,
+): PermissionRequestResult {
+	return rejectReadonlyPermission(request.kind);
+}
+
+function buildReadonlyPermissionDecision(
+	request: PermissionRequest,
+	config: ReviewerConfig,
+): PermissionRequestResult {
+	switch (request.kind) {
+		case "shell":
+			return decideReadonlyShell(request, config);
+		case "read":
+			return decideRepoReadonlyPath(request);
+		case "mcp":
+			return decideReadonlyAllowlistedMcp(request);
+		default:
+			return rejectReadonlyPermission(request.kind);
+	}
 }
 
 function getToolResultDurationMs(
@@ -1087,7 +1143,7 @@ export async function runCopilotReview(
 		streaming: true,
 		tools: createReviewTools(config, context, git, drafts, summaryDrafts),
 		onPermissionRequest: (request: PermissionRequest) =>
-			buildReadonlyShellDecision(request, config),
+			buildReadonlyPermissionDecision(request, config),
 		hooks: createReviewSessionHooks(config, logger, drafts, progressState),
 		workingDirectory: config.repoRoot,
 		includeSubAgentStreamingEvents: true,
