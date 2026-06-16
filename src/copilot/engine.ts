@@ -774,7 +774,9 @@ function hasBlockedShellExpansionOrPipeline(
 		return false;
 	}
 
-	return /(?:\$\(|<\(|`|\||&&|\|\||;)/.test(fullCommandText);
+	return /(?:\$\(|<\(|`|\||&&|\|\||;|\$\{?[$!#*@?\w-]|\*|\?|\[[^\]\r\n]*\]|\{[^}\r\n]*,[^}\r\n]*\})/.test(
+		fullCommandText,
+	);
 }
 
 function rejectReadonlyPermission(kind: string): PermissionRequestResult {

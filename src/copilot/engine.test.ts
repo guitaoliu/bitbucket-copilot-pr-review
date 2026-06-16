@@ -779,6 +779,36 @@ describe("runCopilotReview", () => {
 				"Readonly review mode blocks shell commands with expansion or pipeline syntax.",
 		});
 
+		for (const { commandIdentifier, fullCommandText } of [
+			{
+				commandIdentifier: "grep",
+				fullCommandText: "grep -n . config/.env*",
+			},
+			{
+				commandIdentifier: "sed",
+				fullCommandText: "sed -n $LINEp src/file.ts",
+			},
+		]) {
+			const deniedUnsafeShellExpansion = await permissionHandler(
+				{
+					canOfferSessionApproval: false,
+					kind: "shell",
+					commands: [{ identifier: commandIdentifier, readOnly: true }],
+					fullCommandText,
+					intention: "Inspect source with shell expansion",
+					hasWriteFileRedirection: false,
+					possiblePaths: ["/tmp/repo/src/file.ts"],
+					possibleUrls: [],
+				} as PermissionRequest,
+				{ sessionId: "session-1" },
+			);
+			assert.deepEqual(deniedUnsafeShellExpansion, {
+				kind: "reject",
+				feedback:
+					"Readonly review mode blocks shell commands with expansion or pipeline syntax.",
+			});
+		}
+
 		const deniedEchoWrapper = await permissionHandler(
 			{
 				canOfferSessionApproval: false,

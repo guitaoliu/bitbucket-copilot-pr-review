@@ -168,6 +168,7 @@ function createTaggedComment(
 		reviewedCommit?: string;
 		publishedCommit?: string;
 		storedFindings?: StoredReviewFinding[];
+		body?: string;
 	} = {},
 ): { text: string; id: number; version: number } {
 	const tag = options.tag ?? baseConfig.report.commentTag;
@@ -185,7 +186,7 @@ function createTaggedComment(
 					? { findingsJson: JSON.stringify(options.storedFindings) }
 					: {}),
 			}),
-			"## Copilot PR Review",
+			options.body ?? "## Copilot PR Review",
 		].join("\n"),
 	};
 }
@@ -331,6 +332,43 @@ describe("buildReviewReusePlan", () => {
 		assert.match(
 			plan.reusedArtifacts?.commentBody ?? "",
 			/<!-- copilot-pr-review:published-commit:head-123 -->/,
+		);
+	});
+
+	it("sanitizes reused tagged comment body while preserving rewritten metadata", () => {
+		const context = createContext();
+		const plan = buildReviewReusePlan(baseConfig, context, {
+			existingReport: createReport(context),
+			existingComment: createTaggedComment({
+				reviewedCommit: context.headCommit,
+				publishedCommit: context.headCommit,
+				storedFindings: createStoredFindings(),
+				body: "## Copilot PR Review\n\nRaw <!-- old-marker --> mentions @here.",
+			}),
+			commentStoredFindings: createStoredFindings(),
+			existingPublicationComplete: false,
+			reportCommit: context.headCommit,
+			reportRevision: context.reviewRevision,
+			reportReviewedCommit: context.headCommit,
+			reportSchema: "2",
+			commentRevision: context.reviewRevision,
+			commentPublishedCommit: context.headCommit,
+			commentReviewedCommit: context.headCommit,
+			unusableReasons: [],
+		});
+
+		assert.equal(plan.action, "republish");
+		assert.match(
+			plan.reusedArtifacts?.commentBody ?? "",
+			/<!-- copilot-pr-review:reviewed-commit:head-123 -->/,
+		);
+		assert.match(
+			plan.reusedArtifacts?.commentBody ?? "",
+			/Raw &lt;!-- old-marker --&gt; mentions \[at\]here\./,
+		);
+		assert.doesNotMatch(
+			plan.reusedArtifacts?.commentBody ?? "",
+			/Raw <!-- old-marker --> mentions @here\./,
 		);
 	});
 
