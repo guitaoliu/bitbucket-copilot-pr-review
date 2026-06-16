@@ -482,7 +482,12 @@ describe("runCopilotReview", () => {
 			createdSessionConfigs[0]?.systemMessage,
 			buildSystemMessage(config),
 		);
-		assert.equal(createdSessionConfigs[0]?.availableTools, undefined);
+		assert.deepEqual(createdSessionConfigs[0]?.availableTools, [
+			"builtin:bash",
+			"custom:get_pr_overview",
+			"custom:record_pr_summary",
+			"custom:emit_finding",
+		]);
 		const permissionHandler = createdSessionConfigs[0]?.onPermissionRequest;
 		assert.equal(typeof permissionHandler, "function");
 		assert(permissionHandler);
@@ -532,6 +537,66 @@ describe("runCopilotReview", () => {
 			{ sessionId: "session-1" },
 		);
 		assert.deepEqual(allowedGitShow, { kind: "approve-once" });
+
+		const deniedGitShowSecretPath = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git show HEAD:config/.env",
+				intention: "Inspect source at commit",
+				hasWriteFileRedirection: false,
+				possiblePaths: [],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedGitShowSecretPath, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode blocks shell access to potential secret-bearing path config/.env.",
+		});
+
+		for (const fullCommandText of [
+			"git show HEAD:'config/.env'",
+			"git show :config/.env",
+		]) {
+			const deniedQuotedGitShowSecretPath = await permissionHandler(
+				{
+					canOfferSessionApproval: false,
+					kind: "shell",
+					commands: [{ identifier: "git", readOnly: true }],
+					fullCommandText,
+					intention: "Inspect source at commit",
+					hasWriteFileRedirection: false,
+					possiblePaths: [],
+					possibleUrls: [],
+				} as PermissionRequest,
+				{ sessionId: "session-1" },
+			);
+			assert.deepEqual(deniedQuotedGitShowSecretPath, {
+				kind: "reject",
+				feedback:
+					"Readonly review mode blocks shell access to potential secret-bearing path config/.env.",
+			});
+		}
+
+		for (const possibleRootPath of ["/tmp/repo", "."]) {
+			const allowedRepoRootInspection = await permissionHandler(
+				{
+					canOfferSessionApproval: false,
+					kind: "shell",
+					commands: [{ identifier: "ls", readOnly: true }],
+					fullCommandText: "ls .",
+					intention: "Inspect repo root",
+					hasWriteFileRedirection: false,
+					possiblePaths: [possibleRootPath],
+					possibleUrls: [],
+				} as PermissionRequest,
+				{ sessionId: "session-1" },
+			);
+			assert.deepEqual(allowedRepoRootInspection, { kind: "approve-once" });
+		}
 
 		const deniedRead = await permissionHandler(
 			{
@@ -675,6 +740,74 @@ describe("runCopilotReview", () => {
 			feedback:
 				"Readonly review mode blocks shell commands that may access network URLs.",
 		});
+
+		const deniedSecretPossiblePath = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "sed", readOnly: true }],
+				fullCommandText: "sed -n '1,80p' config/.env",
+				intention: "Inspect source",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/tmp/repo/config/.env"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedSecretPossiblePath, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode blocks shell access to potential secret-bearing path config/.env.",
+		});
+
+		const deniedShellExpansion = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git diff $(git rev-parse HEAD)",
+				intention: "Inspect diff with shell expansion",
+				hasWriteFileRedirection: false,
+				possiblePaths: [],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedShellExpansion, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode blocks shell commands with expansion or pipeline syntax.",
+		});
+
+		for (const { commandIdentifier, fullCommandText } of [
+			{
+				commandIdentifier: "grep",
+				fullCommandText: "grep -n . config/.env*",
+			},
+			{
+				commandIdentifier: "sed",
+				fullCommandText: "sed -n $LINEp src/file.ts",
+			},
+		]) {
+			const deniedUnsafeShellExpansion = await permissionHandler(
+				{
+					canOfferSessionApproval: false,
+					kind: "shell",
+					commands: [{ identifier: commandIdentifier, readOnly: true }],
+					fullCommandText,
+					intention: "Inspect source with shell expansion",
+					hasWriteFileRedirection: false,
+					possiblePaths: ["/tmp/repo/src/file.ts"],
+					possibleUrls: [],
+				} as PermissionRequest,
+				{ sessionId: "session-1" },
+			);
+			assert.deepEqual(deniedUnsafeShellExpansion, {
+				kind: "reject",
+				feedback:
+					"Readonly review mode blocks shell commands with expansion or pipeline syntax.",
+			});
+		}
 
 		const deniedEchoWrapper = await permissionHandler(
 			{

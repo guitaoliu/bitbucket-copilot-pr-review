@@ -1,5 +1,5 @@
 import type { ChangedFile, SkippedFile } from "../git/types.ts";
-import { truncateText } from "../shared/text.ts";
+import { sanitizeModelAuthoredText, truncateText } from "../shared/text.ts";
 import type {
 	FileChangeSummary,
 	ReviewContext,
@@ -28,7 +28,7 @@ function normalizeInlineSummaryText(
 		return undefined;
 	}
 
-	const collapsed = collapseWhitespace(value);
+	const collapsed = sanitizeModelAuthoredText(collapseWhitespace(value));
 	if (collapsed.length === 0) {
 		return undefined;
 	}
@@ -48,6 +48,7 @@ function normalizeMultilineSummaryText(
 		.replace(/\r\n?/g, "\n")
 		.split("\n")
 		.map((line) => collapseWhitespace(line))
+		.map((line) => sanitizeModelAuthoredText(line))
 		.filter((line) => line.length > 0)
 		.join("\n");
 	if (normalized.length === 0) {

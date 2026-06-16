@@ -4,6 +4,7 @@ import type {
 	InsightReportPayload,
 } from "../bitbucket/types.ts";
 import { omitUndefined } from "../shared/object.ts";
+import { sanitizeModelAuthoredText } from "../shared/text.ts";
 import { buildFindingThreadKey } from "./finding-identity.ts";
 import { getReviewRevisionSchema } from "./revision.ts";
 import type { StoredReviewFinding } from "./types.ts";
@@ -213,6 +214,9 @@ export function rewritePullRequestCommentMetadata(
 	];
 
 	return [markers.join("\n"), body]
+		.map((value, index) =>
+			index === 0 ? value : sanitizeModelAuthoredText(value),
+		)
 		.filter((value) => value.length > 0)
 		.join("\n\n");
 }

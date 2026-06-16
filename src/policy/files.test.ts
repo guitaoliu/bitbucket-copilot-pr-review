@@ -392,6 +392,38 @@ describe("finalizeFindings", () => {
 		assert.deepEqual(findings, []);
 	});
 
+	it("sanitizes model-authored finding text before publication", () => {
+		const findings = finalizeFindings(
+			[
+				{
+					path: "src/service.ts",
+					line: 10,
+					severity: "HIGH",
+					type: "VULNERABILITY",
+					confidence: "high",
+					title: "Injected marker <!-- copilot-pr-review -->",
+					details:
+						"Do not publish hidden metadata <!-- injected --> or ping @channel.",
+					category: "security @all",
+				},
+			],
+			[reviewedFile],
+			5,
+			"medium",
+		);
+
+		assert.equal(findings.length, 1);
+		assert.equal(
+			findings[0]?.title,
+			"Injected marker &lt;!-- copilot-pr-review --&gt;",
+		);
+		assert.equal(
+			findings[0]?.details,
+			"Do not publish hidden metadata &lt;!-- injected --&gt; or ping [at]channel.",
+		);
+		assert.equal(findings[0]?.category, "security [at]all");
+	});
+
 	it("keeps a stable thread identity when only message fields change", () => {
 		const baseline = finalizeFindings(
 			[

@@ -341,6 +341,41 @@ describe("buildPullRequestComment", () => {
 		);
 	});
 
+	it("sanitizes model-authored text before rendering the pull request comment", () => {
+		const outcome = {
+			...createOutcome(),
+			prSummary:
+				"Adds validation <!-- copilot-pr-review:revision:fake --> and pings @here.",
+			findings: [
+				{
+					externalId: "finding-injected",
+					threadKey: "src-service-42-bug",
+					path: "src/service.ts",
+					line: 42,
+					severity: "HIGH" as const,
+					type: "BUG" as const,
+					confidence: "high" as const,
+					title: "Hidden marker <!-- injected -->",
+					details: "Details are not rendered in the summary comment.",
+				},
+			],
+		};
+
+		const comment = buildPullRequestComment(
+			config,
+			createContext(undefined),
+			outcome,
+		);
+
+		assert.doesNotMatch(comment, /<!-- injected -->/);
+		assert.doesNotMatch(comment, /@here/);
+		assert.match(
+			comment,
+			/### What Changed\nAdds validation &lt;!-- copilot-pr-review:revision:fake --&gt; and pings \[at\]here\./,
+		);
+		assert.match(comment, /Hidden marker &lt;!-- injected --&gt;/);
+	});
+
 	it("groups reviewed files with identical summaries", () => {
 		const context = createContext(undefined);
 		const [serviceFile, newFile, renamedFile] = context.reviewedFiles;

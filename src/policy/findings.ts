@@ -13,6 +13,7 @@ import type {
 	ReviewFinding,
 } from "../review/types.ts";
 import { omitUndefined } from "../shared/object.ts";
+import { sanitizeModelAuthoredText } from "../shared/text.ts";
 
 const CONFIDENCE_RANK: Record<Confidence, number> = {
 	low: 1,
@@ -73,10 +74,10 @@ export const findingDraftSchema = z
 				severity: draft.severity,
 				type: draft.type,
 				confidence: draft.confidence,
-				title: collapseWhitespace(draft.title),
-				details: collapseWhitespace(draft.details),
+				title: sanitizeModelAuthoredText(collapseWhitespace(draft.title)),
+				details: sanitizeModelAuthoredText(collapseWhitespace(draft.details)),
 				category: draft.category
-					? collapseWhitespace(draft.category)
+					? sanitizeModelAuthoredText(collapseWhitespace(draft.category))
 					: undefined,
 			}) satisfies FindingDraft,
 	);
