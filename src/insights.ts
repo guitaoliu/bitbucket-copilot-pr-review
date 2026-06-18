@@ -14,6 +14,7 @@ import {
 	buildSkippedFileSummary,
 } from "./review/summary.ts";
 import type {
+	ChangeAreaSummary,
 	ReviewContext,
 	ReviewFinding,
 	ReviewOutcome,
@@ -185,6 +186,51 @@ function buildPrIntentSection(
 	].join("\n");
 }
 
+function getDirectoryName(path: string): string {
+	const lastSeparatorIndex = path.lastIndexOf("/");
+	return lastSeparatorIndex >= 0 ? path.slice(0, lastSeparatorIndex) : "";
+}
+
+function getBaseName(path: string): string {
+	const lastSeparatorIndex = path.lastIndexOf("/");
+	return lastSeparatorIndex >= 0 ? path.slice(lastSeparatorIndex + 1) : path;
+}
+
+function formatGroupedPathLabel(paths: string[]): string {
+	const firstDirectory = getDirectoryName(paths[0] ?? "");
+	const hasSameDirectory = paths.every(
+		(path) => getDirectoryName(path) === firstDirectory,
+	);
+	if (hasSameDirectory) {
+		const names = paths.map((path) => getBaseName(path)).join(",");
+		return firstDirectory ? `${firstDirectory}/{${names}}` : `{${names}}`;
+	}
+
+	return `{${paths.join(",")}}`;
+}
+
+function formatChangeAreaPathReference(
+	area: ChangeAreaSummary,
+	prLink: string | undefined,
+): string {
+	if (area.paths.length === 1) {
+		const path = area.paths[0] ?? "";
+		return formatCommentReference(path, buildPullRequestDiffLink(prLink, path));
+	}
+
+	return formatCommentReference(formatGroupedPathLabel(area.paths), undefined);
+}
+
+function buildChangeAreaSummaryLines(
+	context: ReviewContext,
+	outcome: ReviewOutcome,
+): string[] {
+	return (outcome.changeAreas ?? []).map(
+		(area) =>
+			`- ${area.title} (${formatChangeAreaPathReference(area, context.pr.link)}): ${area.summary}`,
+	);
+}
+
 function buildSkippedFilesLines(context: ReviewContext): string[] {
 	return context.skippedFiles.map((file) => {
 		const label = formatCommentReference(
@@ -343,6 +389,11 @@ export function buildPullRequestComment(
 				sanitizedOutcome.findings,
 			),
 			pluralize(sanitizedOutcome.findings.length, "finding"),
+		],
+		[
+			"### Change Areas",
+			buildChangeAreaSummaryLines(context, sanitizedOutcome),
+			pluralize(sanitizedOutcome.changeAreas?.length ?? 0, "change area"),
 		],
 	] as const) {
 		const section = fitCommentSection({

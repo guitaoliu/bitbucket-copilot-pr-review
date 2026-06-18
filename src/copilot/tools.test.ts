@@ -13,6 +13,7 @@ import { createReviewToolContext } from "./tools/context.ts";
 import { createEmitFindingTool } from "./tools/emit-finding.ts";
 import { createGetPrOverviewTool } from "./tools/get-pr-overview.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
+import { createRecordChangeAreaSummaryTool } from "./tools/record-change-area-summary.ts";
 import { createRecordPrSummaryTool } from "./tools/record-pr-summary.ts";
 
 const config: ReviewerConfig = {
@@ -184,11 +185,17 @@ describe("Copilot tools", () => {
 
 		assert.deepEqual(
 			tools.map((tool) => tool.name),
-			["get_pr_overview", "record_pr_summary", "emit_finding"],
+			[
+				"get_pr_overview",
+				"record_pr_summary",
+				"record_change_area_summary",
+				"emit_finding",
+			],
 		);
 		assert.deepEqual(REVIEW_TOOL_NAMES, [
 			"get_pr_overview",
 			"record_pr_summary",
+			"record_change_area_summary",
 			"emit_finding",
 		]);
 	});
@@ -514,5 +521,83 @@ describe("Copilot tools", () => {
 			JSON.stringify(tool.parameters),
 			/Use short bullet points when that is clearer than one sentence/,
 		);
+	});
+
+	it("records change areas with reviewed canonical paths", async () => {
+		const summaryDrafts = createSummaryDrafts();
+		const tool = createRecordChangeAreaSummaryTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				[],
+				summaryDrafts,
+			),
+		);
+		const handler = getHandler<
+			{ title: string; paths: string[]; summary: string },
+			string
+		>(tool);
+
+		const result = await handler(
+			{
+				title: "Validation flow",
+				paths: ["src/old-name.ts", "src/multi-hunk.ts", "src/multi-hunk.ts"],
+				summary: "Tightens validation across renamed service paths.",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "record_change_area_summary",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result, "Recorded the change area summary.");
+		assert.deepEqual(summaryDrafts.changeAreas, [
+			{
+				title: "Validation flow",
+				paths: ["src/new-name.ts", "src/multi-hunk.ts"],
+				summary: "Tightens validation across renamed service paths.",
+			},
+		]);
+	});
+
+	it("rejects change areas that reference files outside the reviewed scope", async () => {
+		const summaryDrafts = createSummaryDrafts();
+		const tool = createRecordChangeAreaSummaryTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				[],
+				summaryDrafts,
+			),
+		);
+		const handler = getHandler<
+			{ title: string; paths: string[]; summary: string },
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
+
+		const result = await handler(
+			{
+				title: "Generated files",
+				paths: ["dist/generated.js"],
+				summary: "Updates generated output.",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "record_change_area_summary",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(result, {
+			resultType: "rejected",
+			textResultForLlm:
+				"The file dist/generated.js is not one of the reviewed files.",
+		});
+		assert.equal(summaryDrafts.changeAreas, undefined);
 	});
 });

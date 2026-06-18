@@ -1,6 +1,7 @@
 import type { SkippedFile } from "../git/types.ts";
 import { sanitizeModelAuthoredText, truncateText } from "../shared/text.ts";
 import type {
+	ChangeAreaSummary,
 	FileChangeSummary,
 	ReviewContext,
 	ReviewSummaryDrafts,
@@ -113,13 +114,18 @@ export function buildSkippedFileSummary(file: SkippedFile): string {
 export function finalizeReviewSummary(
 	context: ReviewContext,
 	drafts: ReviewSummaryDrafts,
-): { prSummary: string; fileSummaries: FileChangeSummary[] } {
+): {
+	prSummary: string;
+	changeAreas: ChangeAreaSummary[];
+	fileSummaries: FileChangeSummary[];
+} {
 	const prSummary =
 		normalizeMultilineSummaryText(drafts.prSummary, MAX_PR_SUMMARY_LENGTH) ??
 		buildDefaultPullRequestSummary(context);
 
 	return {
 		prSummary,
+		changeAreas: drafts.changeAreas ?? [],
 		fileSummaries: [],
 	};
 }

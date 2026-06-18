@@ -299,6 +299,8 @@ function buildPreToolHint(
 			return "Use the overview once to load canonical reviewed/skipped file scope, then inspect risky reviewed files with builtin readonly shell tools.";
 		case "record_pr_summary":
 			return "Capture the PR's intended behavior change in one concise, evidence-backed summary. Use short bullet points when the PR has a few distinct changes.";
+		case "record_change_area_summary":
+			return "Capture a clear logical change area only when reviewed files belong together. Use reviewed file paths only.";
 		case "emit_finding":
 			return `Only emit a finding after inspecting enough code to support the claim from code evidence. ${FINDING_TAXONOMY_HINT} ${QUESTION_SHAPED_FINDING_HINT} Use one finding per root cause, anchor cross-file issues to the changed reviewed file that introduced the risk, prefer a changed head-side line, and keep looking for additional distinct issues after recording one.`;
 		default:
@@ -529,6 +531,14 @@ function buildToolLogFields(toolName: string, toolArgs: unknown): string[] {
 					typeof record.summary === "string"
 						? record.summary.length
 						: undefined,
+				),
+			].filter((entry): entry is string => entry !== undefined);
+		case "record_change_area_summary":
+			return [
+				field("title", record.title),
+				field(
+					"paths",
+					Array.isArray(record.paths) ? record.paths.length : undefined,
 				),
 			].filter((entry): entry is string => entry !== undefined);
 		case "emit_finding":
@@ -1332,6 +1342,7 @@ export async function runCopilotReview(
 			findings,
 			assistantMessage,
 			prSummary: reviewSummary.prSummary,
+			changeAreas: reviewSummary.changeAreas,
 			fileSummaries: reviewSummary.fileSummaries,
 			toolTelemetry,
 			stale: false,

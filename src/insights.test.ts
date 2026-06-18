@@ -408,6 +408,35 @@ describe("buildPullRequestComment", () => {
 		assert.doesNotMatch(comment, /Persists session metadata/);
 	});
 
+	it("renders explicit change area summaries", () => {
+		const comment = buildPullRequestComment(config, createContext(undefined), {
+			...createOutcome(),
+			changeAreas: [
+				{
+					title: "Authentication flow",
+					paths: ["src/service.ts", "src/new-file.ts"],
+					summary: "Threads stricter validation through the request path.",
+				},
+				{
+					title: "Rename cleanup",
+					paths: ["src/new-name.ts"],
+					summary: "Moves the renamed module wiring to the new path.",
+				},
+			],
+		});
+
+		assert.match(comment, /### Change Areas/);
+		assert.match(
+			comment,
+			/- Authentication flow \(`src\/{service\.ts,new-file\.ts}`\): Threads stricter validation through the request path\./,
+		);
+		assert.match(
+			comment,
+			/- Rename cleanup \(`src\/new-name\.ts`\): Moves the renamed module wiring to the new path\./,
+		);
+		assert.doesNotMatch(comment, /### File Changes/);
+	});
+
 	it("adds taxonomy detail to the insight report summary", () => {
 		const report = buildInsightReport(
 			config,

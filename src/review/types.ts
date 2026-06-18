@@ -98,6 +98,12 @@ export interface FileChangeSummary {
 	summary: string;
 }
 
+export interface ChangeAreaSummary {
+	title: string;
+	paths: string[];
+	summary: string;
+}
+
 export interface StoredReviewFinding {
 	path: string;
 	line?: number;
@@ -119,6 +125,7 @@ interface PreviousReviewReference {
 
 export interface ReviewSummaryDrafts {
 	prSummary?: string;
+	changeAreas?: ChangeAreaSummary[];
 }
 
 export interface ReviewOutcome {
@@ -126,6 +133,7 @@ export interface ReviewOutcome {
 	findings: ReviewFinding[];
 	assistantMessage?: string;
 	prSummary?: string;
+	changeAreas?: ChangeAreaSummary[];
 	fileSummaries?: FileChangeSummary[];
 	gitTelemetry?: ReviewGitTelemetry;
 	toolTelemetry?: ReviewToolTelemetry;

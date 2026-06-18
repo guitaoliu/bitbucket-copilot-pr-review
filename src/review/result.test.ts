@@ -412,6 +412,13 @@ describe("buildReviewRunOutput", () => {
 			assistantMessage:
 				"Assistant message includes <!-- injected-assistant --> and @channel.",
 			prSummary: "Changed behavior <!-- injected-pr-summary -->.",
+			changeAreas: [
+				{
+					title: "Area <!-- injected-area-title -->",
+					paths: ["src/service.ts"],
+					summary: "Area summary <!-- injected-area-summary -->.",
+				},
+			],
 			fileSummaries: [
 				{
 					path: "src/service.ts",
@@ -456,6 +463,14 @@ describe("buildReviewRunOutput", () => {
 		assert.equal(
 			output.review.prSummary,
 			"Changed behavior &lt;!-- injected-pr-summary --&gt;.",
+		);
+		assert.equal(
+			output.review.changeAreas?.[0]?.title,
+			"Area &lt;!-- injected-area-title --&gt;",
+		);
+		assert.equal(
+			output.review.changeAreas?.[0]?.summary,
+			"Area summary &lt;!-- injected-area-summary --&gt;.",
 		);
 		assert.equal(
 			output.review.fileSummaries?.[0]?.summary,

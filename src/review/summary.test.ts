@@ -67,11 +67,19 @@ describe("finalizeReviewSummary", () => {
 		const context = createContext(2);
 		const drafts: ReviewSummaryDrafts = {
 			prSummary: "Tightens request validation before merge.",
+			changeAreas: [
+				{
+					title: "Validation flow",
+					paths: ["src/file-0.ts", "src/file-1.ts"],
+					summary: "Updates validation callers together.",
+				},
+			],
 		};
 
 		const result = finalizeReviewSummary(context, drafts);
 
 		assert.equal(result.prSummary, "Tightens request validation before merge.");
+		assert.deepEqual(result.changeAreas, drafts.changeAreas);
 		assert.deepEqual(result.fileSummaries, []);
 	});
 

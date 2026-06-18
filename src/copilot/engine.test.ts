@@ -486,6 +486,7 @@ describe("runCopilotReview", () => {
 			"builtin:bash",
 			"custom:get_pr_overview",
 			"custom:record_pr_summary",
+			"custom:record_change_area_summary",
 			"custom:emit_finding",
 		]);
 		const permissionHandler = createdSessionConfigs[0]?.onPermissionRequest;

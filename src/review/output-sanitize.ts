@@ -28,6 +28,15 @@ export function sanitizeReviewOutcomeForOutput(
 		...(outcome.prSummary
 			? { prSummary: sanitizeModelAuthoredText(outcome.prSummary) }
 			: {}),
+		...(outcome.changeAreas
+			? {
+					changeAreas: outcome.changeAreas.map((entry) => ({
+						...entry,
+						title: sanitizeModelAuthoredText(entry.title),
+						summary: sanitizeModelAuthoredText(entry.summary),
+					})),
+				}
+			: {}),
 		...(outcome.fileSummaries
 			? {
 					fileSummaries: outcome.fileSummaries.map((entry) => ({
