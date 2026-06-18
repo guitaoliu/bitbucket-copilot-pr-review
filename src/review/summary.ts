@@ -1,4 +1,4 @@
-import type { ChangedFile, SkippedFile } from "../git/types.ts";
+import type { SkippedFile } from "../git/types.ts";
 import { sanitizeModelAuthoredText, truncateText } from "../shared/text.ts";
 import type {
 	FileChangeSummary,
@@ -6,15 +6,7 @@ import type {
 	ReviewSummaryDrafts,
 } from "./types.ts";
 
-const MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES = 25;
-
-const MAX_PR_SUMMARY_LENGTH = 500;
-
-export function shouldCreatePerFileSummaries(
-	reviewedFileCount: number,
-): boolean {
-	return reviewedFileCount <= MAX_REVIEWED_FILES_WITH_PER_FILE_SUMMARIES;
-}
+const MAX_PR_SUMMARY_LENGTH = 1200;
 
 function collapseWhitespace(value: string): string {
 	return value.trim().replace(/\s+/g, " ");
@@ -56,18 +48,6 @@ function normalizeMultilineSummaryText(
 	}
 
 	return truncateText(normalized, maxChars, { preserveMaxLength: true });
-}
-
-function pluralize(
-	count: number,
-	singular: string,
-	plural = `${singular}s`,
-): string {
-	return count === 1 ? singular : plural;
-}
-
-function buildDiffSizeSummary(additions: number, deletions: number): string {
-	return `+${additions}/-${deletions}`;
 }
 
 function summarizeSkippedReason(reason: string): string {
@@ -113,24 +93,6 @@ export function buildDefaultPullRequestSummary(context: ReviewContext): string {
 	return `Prepares ${context.pr.source.displayId} for merge into ${context.pr.target.displayId}.`;
 }
 
-function buildDefaultReviewedFileSummary(file: ChangedFile): string {
-	const diffSize = buildDiffSizeSummary(file.additions, file.deletions);
-	const changedLineSummary = `${file.changedLines.length} changed ${pluralize(file.changedLines.length, "line")}`;
-
-	switch (file.status) {
-		case "added":
-			return `Adds this file (${diffSize}, ${changedLineSummary}).`;
-		case "deleted":
-			return `Deletes this file (${diffSize}, ${changedLineSummary}).`;
-		case "renamed":
-			return `${file.oldPath ? `Renamed from ${file.oldPath}` : "Renamed"}; updates ${changedLineSummary} (${diffSize}).`;
-		case "copied":
-			return `${file.oldPath ? `Copied from ${file.oldPath}` : "Copied"}; updates ${changedLineSummary} (${diffSize}).`;
-		default:
-			return `Updates ${changedLineSummary} (${diffSize}).`;
-	}
-}
-
 export function buildSkippedFileSummary(file: SkippedFile): string {
 	const reason = summarizeSkippedReason(file.reason);
 
@@ -156,22 +118,8 @@ export function finalizeReviewSummary(
 		normalizeMultilineSummaryText(drafts.prSummary, MAX_PR_SUMMARY_LENGTH) ??
 		buildDefaultPullRequestSummary(context);
 
-	if (!shouldCreatePerFileSummaries(context.reviewedFiles.length)) {
-		return {
-			prSummary,
-			fileSummaries: [],
-		};
-	}
-
-	const fileSummaries: FileChangeSummary[] = context.reviewedFiles.map(
-		(file) => ({
-			path: file.path,
-			summary: buildDefaultReviewedFileSummary(file),
-		}),
-	);
-
 	return {
 		prSummary,
-		fileSummaries,
+		fileSummaries: [],
 	};
 }

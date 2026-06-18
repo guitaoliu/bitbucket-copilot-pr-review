@@ -1,13 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-	finalizeReviewSummary,
-	shouldCreatePerFileSummaries,
-} from "./summary.ts";
+import { finalizeReviewSummary } from "./summary.ts";
 import type { ReviewContext, ReviewSummaryDrafts } from "./types.ts";
-
-const PER_FILE_SUMMARY_LIMIT = 25;
 
 function createContext(reviewedFileCount = 2): ReviewContext {
 	return {
@@ -67,21 +62,8 @@ function createContext(reviewedFileCount = 2): ReviewContext {
 	};
 }
 
-describe("shouldCreatePerFileSummaries", () => {
-	it("keeps per-file summaries enabled at the cutoff", () => {
-		assert.equal(shouldCreatePerFileSummaries(PER_FILE_SUMMARY_LIMIT), true);
-	});
-
-	it("disables per-file summaries above the cutoff", () => {
-		assert.equal(
-			shouldCreatePerFileSummaries(PER_FILE_SUMMARY_LIMIT + 1),
-			false,
-		);
-	});
-});
-
 describe("finalizeReviewSummary", () => {
-	it("builds deterministic per-file summaries for smaller reviews", () => {
+	it("keeps the PR summary without building generic file summaries", () => {
 		const context = createContext(2);
 		const drafts: ReviewSummaryDrafts = {
 			prSummary: "Tightens request validation before merge.",
@@ -90,15 +72,7 @@ describe("finalizeReviewSummary", () => {
 		const result = finalizeReviewSummary(context, drafts);
 
 		assert.equal(result.prSummary, "Tightens request validation before merge.");
-		assert.equal(result.fileSummaries.length, 2);
-		assert.match(
-			result.fileSummaries[0]?.summary ?? "",
-			/Updates 1 changed line/,
-		);
-		assert.match(
-			result.fileSummaries[1]?.summary ?? "",
-			/Updates 1 changed line/,
-		);
+		assert.deepEqual(result.fileSummaries, []);
 	});
 
 	it("preserves multiline bullet formatting for the PR summary", () => {
@@ -116,6 +90,21 @@ describe("finalizeReviewSummary", () => {
 		);
 	});
 
+	it("keeps longer PR summaries without a visible truncation marker", () => {
+		const context = createContext(2);
+		const prSummary = [
+			"- Adds explicit forwarded-host policy controls so callers can choose whether to trust or ignore X-Forwarded-Host.",
+			"- Updates router account-resolution paths to ignore external X-Forwarded-Host and pass explicit host and vanity values into account lookup.",
+			"- Refactors router filter factory entry points so host handling stays explicit across account lookup, rate limiting, circuit breaking, and bulkheads.",
+			"- Extends hostname, account context, account lookup cache, and X-Forwarded-For tests to cover the safer forwarded-host behavior.",
+		].join("\n");
+
+		const result = finalizeReviewSummary(context, { prSummary });
+
+		assert.equal(result.prSummary, prSummary);
+		assert.doesNotMatch(result.prSummary, /truncated/i);
+	});
+
 	it("sanitizes model-authored PR summary control markup and mass mentions", () => {
 		const context = createContext(2);
 		const drafts: ReviewSummaryDrafts = {
@@ -131,8 +120,8 @@ describe("finalizeReviewSummary", () => {
 		);
 	});
 
-	it("omits per-file summaries for larger reviews while keeping the PR summary", () => {
-		const context = createContext(PER_FILE_SUMMARY_LIMIT + 1);
+	it("omits file summaries for larger reviews while keeping the PR summary", () => {
+		const context = createContext(26);
 		const drafts: ReviewSummaryDrafts = {
 			prSummary: "Expands validation across many modules.",
 		};

@@ -12,7 +12,6 @@ import {
 import {
 	buildDefaultPullRequestSummary,
 	buildSkippedFileSummary,
-	shouldCreatePerFileSummaries,
 } from "./review/summary.ts";
 import type {
 	ReviewContext,
@@ -186,76 +185,6 @@ function buildPrIntentSection(
 	].join("\n");
 }
 
-function buildFileChangeSummaryLines(
-	context: ReviewContext,
-	outcome: ReviewOutcome,
-): string[] {
-	if (!shouldCreatePerFileSummaries(context.reviewedFiles.length)) {
-		return [];
-	}
-
-	const reviewedSummaryMap = new Map(
-		(outcome.fileSummaries ?? []).map((entry) => [entry.path, entry.summary]),
-	);
-
-	const groups = new Map<string, string[]>();
-	for (const file of context.reviewedFiles) {
-		const summary = reviewedSummaryMap.get(file.path) ?? "Reviewed change.";
-		const paths = groups.get(summary);
-		if (paths) {
-			paths.push(file.path);
-		} else {
-			groups.set(summary, [file.path]);
-		}
-	}
-
-	const reviewedLines = [...groups].map(([summary, paths]) => {
-		const label = formatFileSummaryReference(paths, context.pr.link);
-		return `- ${label}: ${summary}`;
-	});
-
-	if (reviewedLines.length === 0) {
-		return ["- No changed files captured from the diff."];
-	}
-
-	return reviewedLines;
-}
-
-function formatFileSummaryReference(
-	paths: string[],
-	prLink: string | undefined,
-): string {
-	if (paths.length === 1) {
-		const path = paths[0] ?? "";
-		return formatCommentReference(path, buildPullRequestDiffLink(prLink, path));
-	}
-
-	return formatCommentReference(formatGroupedPathLabel(paths), undefined);
-}
-
-function getDirectoryName(path: string): string {
-	const lastSeparatorIndex = path.lastIndexOf("/");
-	return lastSeparatorIndex >= 0 ? path.slice(0, lastSeparatorIndex) : "";
-}
-
-function getBaseName(path: string): string {
-	const lastSeparatorIndex = path.lastIndexOf("/");
-	return lastSeparatorIndex >= 0 ? path.slice(lastSeparatorIndex + 1) : path;
-}
-
-function formatGroupedPathLabel(paths: string[]): string {
-	const firstDirectory = getDirectoryName(paths[0] ?? "");
-	const hasSameDirectory = paths.every(
-		(path) => getDirectoryName(path) === firstDirectory,
-	);
-	if (hasSameDirectory) {
-		const names = paths.map((path) => getBaseName(path)).join(",");
-		return firstDirectory ? `${firstDirectory}/{${names}}` : `{${names}}`;
-	}
-
-	return `{${paths.join(",")}}`;
-}
-
 function buildSkippedFilesLines(context: ReviewContext): string[] {
 	return context.skippedFiles.map((file) => {
 		const label = formatCommentReference(
@@ -414,11 +343,6 @@ export function buildPullRequestComment(
 				sanitizedOutcome.findings,
 			),
 			pluralize(sanitizedOutcome.findings.length, "finding"),
-		],
-		[
-			"### File Changes",
-			buildFileChangeSummaryLines(context, sanitizedOutcome),
-			pluralize(context.reviewedFiles.length, "file summary", "file summaries"),
 		],
 	] as const) {
 		const section = fitCommentSection({

@@ -253,18 +253,12 @@ describe("buildPullRequestComment", () => {
 		assert.doesNotMatch(comment, /- Outside-scope reasons:/);
 		assert.doesNotMatch(comment, /Changed files:/);
 		assert.doesNotMatch(comment, /### Main Concerns/);
-		assert.match(comment, /### File Changes/);
+		assert.doesNotMatch(comment, /### Change Areas/);
+		assert.doesNotMatch(comment, /### File Changes/);
+		assert.doesNotMatch(comment, /Adds stricter null handling/);
 		assert.match(
 			comment,
-			/- \[src\/service\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fservice\.ts\): Adds stricter null handling and updates the main service branch behavior\./,
-		);
-		assert.match(
-			comment,
-			/- \[src\/new-file\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fnew-file\.ts\): Introduces a new helper used by the updated validation flow\./,
-		);
-		assert.match(
-			comment,
-			/- \[src\/new-name\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fnew-name\.ts\): Renames the module and adjusts its imports to match the new location\./,
+			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\] \[src\/service\.ts:42\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fservice\.ts\?t=42\) - Null handling is broken/,
 		);
 		assert.match(comment, /### Outside Review Scope/);
 		assert.match(
@@ -282,10 +276,6 @@ describe("buildPullRequestComment", () => {
 		assert.match(
 			comment,
 			/- \[src\/removed\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fremoved\.ts\): deleted file/,
-		);
-		assert.match(
-			comment,
-			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\] \[src\/service\.ts:42\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fservice\.ts\?t=42\) - Null handling is broken/,
 		);
 		assert.match(
 			comment,
@@ -310,10 +300,11 @@ describe("buildPullRequestComment", () => {
 		assert.doesNotMatch(comment, /- Outside-scope reasons:/);
 		assert.doesNotMatch(comment, /- `src\/service\.ts` - modified/);
 		assert.doesNotMatch(comment, /### Main Concerns/);
-		assert.match(comment, /### File Changes/);
+		assert.doesNotMatch(comment, /### Change Areas/);
+		assert.doesNotMatch(comment, /### File Changes/);
 		assert.match(
 			comment,
-			/- `src\/service\.ts`: Adds stricter null handling and updates the main service branch behavior\./,
+			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\] `src\/service\.ts:42` - Null handling is broken/,
 		);
 		assert.match(comment, /### Outside Review Scope/);
 		assert.match(
@@ -321,10 +312,6 @@ describe("buildPullRequestComment", () => {
 			/- `dist\/generated\.js`: generated or vendored path/,
 		);
 		assert.match(comment, /- `i18n\/locales\/en\.json`: ignored path pattern/);
-		assert.match(
-			comment,
-			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\] `src\/service\.ts:42` - Null handling is broken/,
-		);
 		assert.doesNotMatch(comment, /\[src\/service\.ts:42\]\(/);
 	});
 
@@ -415,14 +402,10 @@ describe("buildPullRequestComment", () => {
 			],
 		});
 
-		assert.match(
-			comment,
-			/- `src\/auth\/{login\.ts,logout\.ts}`: Threads password-state metadata through auth flows\./,
-		);
-		assert.match(
-			comment,
-			/- `src\/session\.ts`: Persists session metadata for changed users\./,
-		);
+		assert.doesNotMatch(comment, /### Change Areas/);
+		assert.doesNotMatch(comment, /### File Changes/);
+		assert.doesNotMatch(comment, /Threads password-state metadata/);
+		assert.doesNotMatch(comment, /Persists session metadata/);
 	});
 
 	it("adds taxonomy detail to the insight report summary", () => {
@@ -571,6 +554,7 @@ describe("buildPullRequestComment", () => {
 
 		assert.match(comment, /### What Changed/);
 		assert.match(comment, /### Review Scope/);
+		assert.doesNotMatch(comment, /### Change Areas/);
 		assert.doesNotMatch(comment, /### File Changes/);
 	});
 });

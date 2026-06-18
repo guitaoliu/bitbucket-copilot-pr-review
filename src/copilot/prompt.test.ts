@@ -318,6 +318,10 @@ describe("buildSystemMessage", () => {
 			content,
 			/Record exactly one PR-purpose summary with record_pr_summary/i,
 		);
+		assert.doesNotMatch(
+			content,
+			/Group file summaries by logical change area/i,
+		);
 		assert.match(
 			content,
 			/Call get_pr_overview once to load canonical review scope, including reviewed files you may target and skipped files you must ignore/,
