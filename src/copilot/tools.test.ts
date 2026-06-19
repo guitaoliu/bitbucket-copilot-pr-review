@@ -563,6 +563,46 @@ describe("Copilot tools", () => {
 		]);
 	});
 
+	it("keeps reviewed path globs compact in change areas", async () => {
+		const summaryDrafts = createSummaryDrafts();
+		const tool = createRecordChangeAreaSummaryTool(
+			createReviewToolContext(
+				config,
+				reviewContext,
+				createGitStub(),
+				[],
+				summaryDrafts,
+			),
+		);
+		const handler = getHandler<
+			{ title: string; paths: string[]; summary: string },
+			string
+		>(tool);
+
+		const result = await handler(
+			{
+				title: "Validation flow",
+				paths: ["src/*.ts"],
+				summary: "Tightens validation across renamed service paths.",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "record_change_area_summary",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result, "Recorded the change area summary.");
+		assert.deepEqual(summaryDrafts.changeAreas, [
+			{
+				title: "Validation flow",
+				paths: ["src/*.ts"],
+				summary: "Tightens validation across renamed service paths.",
+			},
+		]);
+	});
+
 	it("rejects change areas that reference files outside the reviewed scope", async () => {
 		const summaryDrafts = createSummaryDrafts();
 		const tool = createRecordChangeAreaSummaryTool(

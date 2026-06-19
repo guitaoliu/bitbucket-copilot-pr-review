@@ -1,5 +1,7 @@
+import { matchesGlob } from "node:path";
 import { defineTool } from "@github/copilot-sdk";
 import { z } from "zod";
+import type { ChangedFile } from "../../git/types.ts";
 import { toRejectedResult } from "./common.ts";
 import type { ReviewToolContext } from "./context.ts";
 
@@ -9,10 +11,52 @@ const recordChangeAreaSummarySchema = z.object({
 	summary: z.string().min(1).max(500),
 });
 
+function hasPathGlob(value: string): boolean {
+	return /[*?[\]{}()!+@]/.test(value);
+}
+
+function matchesReviewedPath(
+	file: ChangedFile,
+	pathExpression: string,
+	reviewedFileMap: Map<string, ChangedFile>,
+): boolean {
+	return (
+		matchesGlob(file.path, pathExpression) ||
+		(file.oldPath !== undefined &&
+			reviewedFileMap.get(file.oldPath) === file &&
+			matchesGlob(file.oldPath, pathExpression))
+	);
+}
+
+function resolveReviewedPathReference(
+	pathExpression: string,
+	toolContext: ReviewToolContext,
+): { reference: string } | { error: string } {
+	const file = toolContext.reviewedFileMap.get(pathExpression);
+	if (file) {
+		return { reference: file.path };
+	}
+
+	if (!hasPathGlob(pathExpression)) {
+		return {
+			error: `The file ${pathExpression} is not one of the reviewed files.`,
+		};
+	}
+
+	const files = toolContext.context.reviewedFiles.filter((file) =>
+		matchesReviewedPath(file, pathExpression, toolContext.reviewedFileMap),
+	);
+	return files.length > 0
+		? { reference: pathExpression }
+		: {
+				error: `The path pattern ${pathExpression} did not match any reviewed files.`,
+			};
+}
+
 export function createRecordChangeAreaSummaryTool(
 	toolContext: ReviewToolContext,
 ) {
-	const { reviewedFileMap, summaryDrafts } = toolContext;
+	const { summaryDrafts } = toolContext;
 
 	return defineTool("record_change_area_summary", {
 		description:
@@ -30,7 +74,7 @@ export function createRecordChangeAreaSummaryTool(
 					type: "array",
 					items: { type: "string" },
 					description:
-						"Reviewed file paths that belong to this area. Use only paths from the reviewed scope.",
+						"Exact reviewed file paths or path globs that belong to this area. Patterns are validated only within the reviewed scope.",
 				},
 				summary: {
 					type: "string",
@@ -54,17 +98,18 @@ export function createRecordChangeAreaSummaryTool(
 
 			const paths: string[] = [];
 			const seenPaths = new Set<string>();
-			for (const path of parsed.data.paths) {
-				const file = reviewedFileMap.get(path);
-				if (!file) {
-					return toRejectedResult(
-						`The file ${path} is not one of the reviewed files.`,
-					);
+			for (const pathExpression of parsed.data.paths) {
+				const resolved = resolveReviewedPathReference(
+					pathExpression,
+					toolContext,
+				);
+				if ("error" in resolved) {
+					return toRejectedResult(resolved.error);
 				}
 
-				if (!seenPaths.has(file.path)) {
-					seenPaths.add(file.path);
-					paths.push(file.path);
+				if (!seenPaths.has(resolved.reference)) {
+					seenPaths.add(resolved.reference);
+					paths.push(resolved.reference);
 				}
 			}
 

@@ -130,7 +130,7 @@ function buildCodeChangeRulesSection(config: ReviewerConfig): string {
 	return [
 		"Finding rules:",
 		"- Record exactly one PR-purpose summary with record_pr_summary. Use bullets if clearer.",
-		"- record_change_area_summary: clear areas only; reviewed paths only.",
+		"- record_change_area_summary: clear areas only; use exact reviewed paths or reviewed path globs.",
 		"- Use emit_finding only for validated issues; investigate high-signal concerns before dropping them.",
 		"- Emit one finding per root cause. Target reviewed paths only; skipped paths are invalid.",
 		"- For cross-file issues validated with unchanged code, anchor to the changed reviewed file that created or increased the risk.",

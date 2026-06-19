@@ -409,7 +409,29 @@ describe("buildPullRequestComment", () => {
 	});
 
 	it("renders explicit change area summaries", () => {
-		const comment = buildPullRequestComment(config, createContext(undefined), {
+		const context = createContext(
+			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
+		);
+		context.reviewedFiles.push({
+			path: "pages/[id].tsx",
+			status: "modified",
+			patch: "diff --git a/pages/[id].tsx b/pages/[id].tsx",
+			changedLines: [7],
+			hunks: [
+				{
+					oldStart: 7,
+					oldLines: 1,
+					newStart: 7,
+					newLines: 1,
+					header: "",
+					changedLines: [7],
+				},
+			],
+			additions: 1,
+			deletions: 0,
+			isBinary: false,
+		});
+		const comment = buildPullRequestComment(config, context, {
 			...createOutcome(),
 			changeAreas: [
 				{
@@ -422,6 +444,21 @@ describe("buildPullRequestComment", () => {
 					paths: ["src/new-name.ts"],
 					summary: "Moves the renamed module wiring to the new path.",
 				},
+				{
+					title: "Dynamic route",
+					paths: ["pages/[id].tsx"],
+					summary: "Updates the dynamic route loader.",
+				},
+				{
+					title: "Package updates",
+					paths: ["packages/*/src/**/*.ts"],
+					summary: "Applies the same package-level wiring update.",
+				},
+				{
+					title: "Unsafe glob",
+					paths: ["{src/*.ts,`@here`}"],
+					summary: "Keeps malicious glob inert.",
+				},
 			],
 		});
 
@@ -432,7 +469,19 @@ describe("buildPullRequestComment", () => {
 		);
 		assert.match(
 			comment,
-			/- Rename cleanup \(`src\/new-name\.ts`\): Moves the renamed module wiring to the new path\./,
+			/- Rename cleanup \(\[src\/new-name\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fnew-name\.ts\)\): Moves the renamed module wiring to the new path\./,
+		);
+		assert.match(
+			comment,
+			/- Dynamic route \(\[pages\/\\\[id\\\]\.tsx\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#pages%2F%5Bid%5D\.tsx\)\): Updates the dynamic route loader\./,
+		);
+		assert.match(
+			comment,
+			/- Package updates \(`packages\/\*\/src\/\*\*\/\*\.ts`\): Applies the same package-level wiring update\./,
+		);
+		assert.match(
+			comment,
+			/- Unsafe glob \(`` \{src\/\*\.ts,`@here`\} ``\): Keeps malicious glob inert\./,
 		);
 		assert.doesNotMatch(comment, /### File Changes/);
 	});

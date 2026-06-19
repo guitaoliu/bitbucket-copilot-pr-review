@@ -300,7 +300,7 @@ function buildPreToolHint(
 		case "record_pr_summary":
 			return "Capture the PR's intended behavior change in one concise, evidence-backed summary. Use short bullet points when the PR has a few distinct changes.";
 		case "record_change_area_summary":
-			return "Capture a clear logical change area only when reviewed files belong together. Use reviewed file paths only.";
+			return "Capture a clear logical change area only when reviewed files belong together. Use exact reviewed paths or reviewed path globs.";
 		case "emit_finding":
 			return `Only emit a finding after inspecting enough code to support the claim from code evidence. ${FINDING_TAXONOMY_HINT} ${QUESTION_SHAPED_FINDING_HINT} Use one finding per root cause, anchor cross-file issues to the changed reviewed file that introduced the risk, prefer a changed head-side line, and keep looking for additional distinct issues after recording one.`;
 		default:

@@ -53,13 +53,25 @@ function buildPullRequestDiffLink(
 	return `${normalizedLink}/diff#${anchor}${line && line > 0 ? `?t=${line}` : ""}`;
 }
 
+function formatCodeSpan(label: string): string {
+	const normalizedLabel = label.replace(/[\r\n]+/g, " ");
+	const backtickRuns = normalizedLabel.match(/`+/g) ?? [];
+	if (backtickRuns.length === 0) {
+		return `\`${normalizedLabel}\``;
+	}
+
+	const fenceLength = Math.max(0, ...backtickRuns.map((run) => run.length)) + 1;
+	const fence = "`".repeat(fenceLength);
+	return `${fence} ${normalizedLabel} ${fence}`;
+}
+
 function formatCommentReference(
 	label: string,
 	link: string | undefined,
 	fallbackAsCode = true,
 ): string {
 	if (!link) {
-		return fallbackAsCode ? `\`${label}\`` : label;
+		return fallbackAsCode ? formatCodeSpan(label) : label;
 	}
 
 	const safeLabel = label
@@ -211,11 +223,19 @@ function formatGroupedPathLabel(paths: string[]): string {
 
 function formatChangeAreaPathReference(
 	area: ChangeAreaSummary,
-	prLink: string | undefined,
+	context: ReviewContext,
 ): string {
 	if (area.paths.length === 1) {
 		const path = area.paths[0] ?? "";
-		return formatCommentReference(path, buildPullRequestDiffLink(prLink, path));
+		const reviewedFile = context.reviewedFiles.some(
+			(file) => file.path === path,
+		);
+		return formatCommentReference(
+			path,
+			reviewedFile
+				? buildPullRequestDiffLink(context.pr.link, path)
+				: undefined,
+		);
 	}
 
 	return formatCommentReference(formatGroupedPathLabel(area.paths), undefined);
@@ -227,7 +247,7 @@ function buildChangeAreaSummaryLines(
 ): string[] {
 	return (outcome.changeAreas ?? []).map(
 		(area) =>
-			`- ${area.title} (${formatChangeAreaPathReference(area, context.pr.link)}): ${area.summary}`,
+			`- ${area.title} (${formatChangeAreaPathReference(area, context)}): ${area.summary}`,
 	);
 }
 
