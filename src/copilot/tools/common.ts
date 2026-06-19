@@ -1,5 +1,6 @@
 import type { ChangedFile, FileStatus, SkippedFile } from "../../git/types.ts";
 import { formatLineRanges } from "../../policy/line-ranges.ts";
+import type { ChangedLineResolver } from "../../review/changed-lines.ts";
 import { normalizeFindingDraftLocation } from "../../review/file.ts";
 import type { FindingDraft } from "../../review/types.ts";
 import { type OmitUndefined, omitUndefined } from "../../shared/object.ts";
@@ -43,10 +44,11 @@ export function summarizeSkippedFileScope(file: SkippedFile): SkippedFileScope {
 	});
 }
 
-export function validateFindingDraftLocation(
+export async function validateFindingDraftLocation(
 	draft: FindingDraft,
 	reviewedFileMap: Map<string, ChangedFile>,
-): { normalizedDraft?: FindingDraft; note?: string; error?: string } {
+	resolveChangedLines: ChangedLineResolver,
+): Promise<{ normalizedDraft?: FindingDraft; note?: string; error?: string }> {
 	const result = normalizeFindingDraftLocation(draft, reviewedFileMap);
 	if (result.error) {
 		return result;
@@ -66,13 +68,23 @@ export function validateFindingDraftLocation(
 		};
 	}
 
-	if (
-		normalizedDraft.line > 0 &&
-		!file.changedLines.includes(normalizedDraft.line)
-	) {
-		return {
-			error: `Line ${normalizedDraft.line} is not a changed line in ${normalizedDraft.path}. Valid changed line ranges: ${formatLineRanges(file.changedLines)}`,
-		};
+	if (normalizedDraft.line > 0 && file.changedLines === undefined) {
+		const { changedLines } = await resolveChangedLines(file);
+		const remapped = normalizeFindingDraftLocation(
+			normalizedDraft,
+			reviewedFileMap,
+		);
+		if (remapped.error) {
+			return {
+				error: `Line ${normalizedDraft.line} is not a changed line in ${normalizedDraft.path}. Valid changed line ranges: ${formatLineRanges(changedLines)}`,
+			};
+		}
+
+		const note = [result.note, remapped.note].filter(Boolean).join(" ");
+		return omitUndefined({
+			normalizedDraft: remapped.normalizedDraft ?? normalizedDraft,
+			note: note.length > 0 ? note : undefined,
+		});
 	}
 
 	return result;

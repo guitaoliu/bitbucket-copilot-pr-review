@@ -289,6 +289,116 @@ describe("Copilot tools", () => {
 		]);
 	});
 
+	it("loads changed lines lazily for line-level findings", async () => {
+		const drafts: FindingDraft[] = [];
+		let patchLoads = 0;
+		const lazyContext: ReviewContext = {
+			...reviewContext,
+			reviewedFiles: [
+				{
+					path: "src/service.ts",
+					status: "modified",
+					additions: 1,
+					deletions: 0,
+					isBinary: false,
+				},
+			],
+		};
+		const tool = createEmitFindingTool(
+			createReviewToolContext(
+				config,
+				lazyContext,
+				createGitStub({
+					diffFilePatch: async () => {
+						patchLoads += 1;
+						return [
+							"diff --git a/src/service.ts b/src/service.ts",
+							"@@ -9,0 +10 @@",
+							"+const value = 1;",
+						].join("\n");
+					},
+				}),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<FindingDraft, string>(tool);
+
+		const result = await handler(
+			{
+				path: "src/service.ts",
+				line: 10,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Lazy line issue",
+				details: "The changed line is validated on demand.",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "emit_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result, "Recorded finding 1 for src/service.ts:10.");
+		assert.equal(patchLoads, 1);
+	});
+
+	it("does not load changed lines for file-level findings", async () => {
+		const drafts: FindingDraft[] = [];
+		let patchLoads = 0;
+		const lazyContext: ReviewContext = {
+			...reviewContext,
+			reviewedFiles: [
+				{
+					path: "src/service.ts",
+					status: "modified",
+					additions: 1,
+					deletions: 0,
+					isBinary: false,
+				},
+			],
+		};
+		const tool = createEmitFindingTool(
+			createReviewToolContext(
+				config,
+				lazyContext,
+				createGitStub({
+					diffFilePatch: async () => {
+						patchLoads += 1;
+						return "";
+					},
+				}),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<FindingDraft, string>(tool);
+
+		const result = await handler(
+			{
+				path: "src/service.ts",
+				line: 0,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "File-level issue",
+				details: "The file-level finding does not need changed lines.",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "emit_finding",
+				arguments: {},
+			},
+		);
+
+		assert.equal(result, "Recorded finding 1 for src/service.ts:file.");
+		assert.equal(patchLoads, 0);
+	});
+
 	it("rejects copied-file findings addressed by the source path", async () => {
 		const drafts: FindingDraft[] = [];
 		const copiedReviewContext: ReviewContext = {

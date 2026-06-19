@@ -4,6 +4,8 @@ import { promisify } from "node:util";
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewGitTelemetry } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
+import { parseNameStatusDiff } from "./diff.ts";
+import type { ChangedFile } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
 const GIT_BASE_ARGS = ["-c", "core.quotePath=false"];
@@ -268,6 +270,54 @@ export class GitRepository {
 			baseCommit,
 			headCommit,
 			"--",
+		]);
+	}
+
+	async diffNameStatus(
+		baseCommit: string,
+		headCommit: string,
+	): Promise<ChangedFile[]> {
+		const output = await this.runGit([
+			"diff",
+			"--name-status",
+			"-z",
+			"--find-renames",
+			"--find-copies",
+			baseCommit,
+			headCommit,
+			"--",
+		]);
+		return parseNameStatusDiff(output);
+	}
+
+	async diffNumstat(baseCommit: string, headCommit: string): Promise<string> {
+		return this.runGit([
+			"diff",
+			"--numstat",
+			"-z",
+			"--find-renames",
+			"--find-copies",
+			baseCommit,
+			headCommit,
+			"--",
+		]);
+	}
+
+	async diffFilePatch(
+		baseCommit: string,
+		headCommit: string,
+		filePath: string,
+	): Promise<string> {
+		return this.runGit([
+			"diff",
+			"--no-color",
+			"--find-renames",
+			"--find-copies",
+			"--unified=0",
+			baseCommit,
+			headCommit,
+			"--",
+			filePath,
 		]);
 	}
 

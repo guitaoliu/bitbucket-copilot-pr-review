@@ -9,8 +9,8 @@ export function getReviewRevisionSchema(): string {
 
 export function buildReviewRevision(input: {
 	baseCommit: string;
+	headCommit: string;
 	mergeBaseCommit: string;
-	rawDiff: string;
 	ciSummary?: string;
 	promptVersion?: string;
 	copilot?: {
@@ -32,8 +32,8 @@ export function buildReviewRevision(input: {
 		schema: REVIEW_REVISION_SCHEMA,
 		inputVersion: REVIEW_INPUT_VERSION,
 		baseCommit: input.baseCommit,
+		headCommit: input.headCommit,
 		mergeBaseCommit: input.mergeBaseCommit,
-		rawDiff: input.rawDiff,
 		...(input.ciSummary !== undefined ? { ciSummary: input.ciSummary } : {}),
 		...(input.promptVersion !== undefined
 			? { promptVersion: input.promptVersion }

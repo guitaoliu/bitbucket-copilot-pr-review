@@ -1,8 +1,8 @@
-import type { ChangedFile } from "../git/types.ts";
+import type { ChangedFile, HunkSummary } from "../git/types.ts";
 import type { FindingDraft } from "./types.ts";
 
 function getHunkNewEnd(
-	hunk: Pick<ChangedFile["hunks"][number], "newStart" | "newLines">,
+	hunk: Pick<HunkSummary, "newStart" | "newLines">,
 ): number {
 	return Math.max(
 		hunk.newStart,
@@ -12,12 +12,12 @@ function getHunkNewEnd(
 
 function findNearestChangedLineInContainingHunk(
 	line: number,
-	file: Pick<ChangedFile, "hunks">,
+	file: { hunks?: HunkSummary[] },
 ): number | undefined {
 	let nearestLine: number | undefined;
 	let nearestDistance = Number.POSITIVE_INFINITY;
 
-	for (const hunk of file.hunks) {
+	for (const hunk of file.hunks ?? []) {
 		const hunkEnd = getHunkNewEnd(hunk);
 		if (line < hunk.newStart || line > hunkEnd) {
 			continue;
@@ -93,11 +93,12 @@ export function normalizeFindingDraftLocation(
 
 	if (
 		normalizedDraft.line > 0 &&
+		file.changedLines !== undefined &&
 		!file.changedLines.includes(normalizedDraft.line)
 	) {
 		const remappedLine = findNearestChangedLineInContainingHunk(
 			normalizedDraft.line,
-			file,
+			{ hunks: file.hunks ?? [] },
 		);
 		if (remappedLine !== undefined) {
 			normalizedDraft = {

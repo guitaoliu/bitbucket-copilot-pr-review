@@ -6,7 +6,7 @@ import { toRejectedResult, validateFindingDraftLocation } from "./common.ts";
 import type { ReviewToolContext } from "./context.ts";
 
 export function createEmitFindingTool(toolContext: ReviewToolContext) {
-	const { drafts, reviewedFileMap } = toolContext;
+	const { drafts, reviewedFileMap, resolveChangedLines } = toolContext;
 
 	return defineTool("emit_finding", {
 		description:
@@ -58,7 +58,11 @@ export function createEmitFindingTool(toolContext: ReviewToolContext) {
 			}
 
 			const draft = parsed.data;
-			const location = validateFindingDraftLocation(draft, reviewedFileMap);
+			const location = await validateFindingDraftLocation(
+				draft,
+				reviewedFileMap,
+				resolveChangedLines,
+			);
 			if (location.error) {
 				return toRejectedResult(location.error);
 			}

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
-import { parseUnifiedDiff } from "../git/diff.ts";
+import { applyNumstatDiff } from "../git/diff.ts";
 import { GitRepository } from "../git/repo.ts";
 import { filterChangedFiles } from "../policy/files.ts";
 import type { Logger } from "../shared/logger.ts";
@@ -71,14 +71,20 @@ export async function buildReviewContext(
 	pr: PullRequestInfo,
 ): Promise<ReviewContext> {
 	const { config, git, mergeBaseCommit } = prepared;
-	const rawDiff = await git.diff(mergeBaseCommit, pr.source.latestCommit);
-	const parsedDiff = parseUnifiedDiff(rawDiff);
+	const changedFiles = await git.diffNameStatus(
+		mergeBaseCommit,
+		pr.source.latestCommit,
+	);
+	const diffStats = applyNumstatDiff(
+		changedFiles,
+		await git.diffNumstat(mergeBaseCommit, pr.source.latestCommit),
+	);
 	const ciSummary = await loadCiSummary(config.ciSummaryPath, logger);
 	const reviewRevision = buildReviewRevision(
 		omitUndefined({
 			baseCommit: pr.target.latestCommit,
+			headCommit: pr.source.latestCommit,
 			mergeBaseCommit,
-			rawDiff,
 			ciSummary,
 			promptVersion: "2026-05-accuracy-stability-1",
 			copilot: {
@@ -98,7 +104,7 @@ export async function buildReviewContext(
 		}),
 	);
 	const filtered = filterChangedFiles(
-		parsedDiff.files,
+		changedFiles,
 		config.review.maxFiles,
 		config.review.ignorePaths,
 	);
@@ -109,8 +115,8 @@ export async function buildReviewContext(
 		baseCommit: pr.target.latestCommit,
 		mergeBaseCommit,
 		reviewRevision,
-		rawDiff,
-		diffStats: parsedDiff.stats,
+		rawDiff: "",
+		diffStats,
 		reviewedFiles: filtered.reviewedFiles,
 		skippedFiles: filtered.skippedFiles,
 		ciSummary,

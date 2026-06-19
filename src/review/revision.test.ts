@@ -7,8 +7,8 @@ describe("buildReviewRevision", () => {
 	it("changes when CI summary changes", () => {
 		const baseInput = {
 			baseCommit: "base-123",
+			headCommit: "head-123",
 			mergeBaseCommit: "merge-123",
-			rawDiff: "diff --git a/src/file.ts b/src/file.ts",
 			promptVersion: "2026-05-accuracy-stability-1",
 			copilot: {
 				model: "gpt-5.3-codex",
@@ -41,8 +41,8 @@ describe("buildReviewRevision", () => {
 	it("changes when effective review config changes", () => {
 		const first = buildReviewRevision({
 			baseCommit: "base-123",
+			headCommit: "head-123",
 			mergeBaseCommit: "merge-123",
-			rawDiff: "diff --git a/src/file.ts b/src/file.ts",
 			promptVersion: "2026-05-accuracy-stability-1",
 			copilot: {
 				model: "gpt-5.3-codex",
@@ -61,8 +61,8 @@ describe("buildReviewRevision", () => {
 		});
 		const second = buildReviewRevision({
 			baseCommit: "base-123",
+			headCommit: "head-123",
 			mergeBaseCommit: "merge-123",
-			rawDiff: "diff --git a/src/file.ts b/src/file.ts",
 			promptVersion: "2026-05-accuracy-stability-1",
 			copilot: {
 				model: "gpt-5.3-codex",
@@ -78,6 +78,21 @@ describe("buildReviewRevision", () => {
 				ignorePaths: [],
 				skipBranchPrefixes: ["renovate/"],
 			},
+		});
+
+		assert.notEqual(first, second);
+	});
+
+	it("changes when head commit changes", () => {
+		const first = buildReviewRevision({
+			baseCommit: "base-123",
+			headCommit: "head-123",
+			mergeBaseCommit: "merge-123",
+		});
+		const second = buildReviewRevision({
+			baseCommit: "base-123",
+			headCommit: "head-456",
+			mergeBaseCommit: "merge-123",
 		});
 
 		assert.notEqual(first, second);

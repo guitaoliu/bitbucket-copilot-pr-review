@@ -34,6 +34,106 @@ function normalizePath(value: string): string {
 	return value.replace(/^"|"$/g, "").replace(/\\/g, "/");
 }
 
+function splitNulRecords(value: string): string[] {
+	const records = value.split("\0");
+	if (records.at(-1) === "") {
+		records.pop();
+	}
+	return records;
+}
+
+function mapNameStatusCode(code: string): FileStatus | undefined {
+	switch (code[0]) {
+		case "A":
+			return "added";
+		case "M":
+			return "modified";
+		case "D":
+			return "deleted";
+		case "R":
+			return "renamed";
+		case "C":
+			return "copied";
+		default:
+			return undefined;
+	}
+}
+
+export function parseNameStatusDiff(diffText: string): ChangedFile[] {
+	const records = splitNulRecords(diffText);
+	const files: ChangedFile[] = [];
+	for (let index = 0; index < records.length; ) {
+		const statusCode = records[index++] ?? "";
+		const status = mapNameStatusCode(statusCode);
+		if (!status) {
+			continue;
+		}
+
+		if (status === "renamed" || status === "copied") {
+			const oldPath = records[index++];
+			const newPath = records[index++];
+			if (oldPath && newPath) {
+				files.push({
+					path: normalizePath(newPath),
+					oldPath: normalizePath(oldPath),
+					status,
+					additions: 0,
+					deletions: 0,
+					isBinary: false,
+				});
+			}
+			continue;
+		}
+
+		const filePath = records[index++];
+		if (filePath) {
+			files.push({
+				path: normalizePath(filePath),
+				status,
+				additions: 0,
+				deletions: 0,
+				isBinary: false,
+			});
+		}
+	}
+	return files;
+}
+
+export function applyNumstatDiff(
+	files: ChangedFile[],
+	diffText: string,
+): DiffStats {
+	const records = splitNulRecords(diffText);
+	let recordIndex = 0;
+	let additions = 0;
+	let deletions = 0;
+
+	for (const file of files) {
+		const statRecord = records[recordIndex++] ?? "";
+		const [rawAdditions, rawDeletions, embeddedPath] = statRecord.split("\t");
+		const isBinary = rawAdditions === "-" || rawDeletions === "-";
+		file.isBinary = isBinary;
+		file.additions = isBinary ? 0 : Number.parseInt(rawAdditions ?? "0", 10);
+		file.deletions = isBinary ? 0 : Number.parseInt(rawDeletions ?? "0", 10);
+
+		if (
+			embeddedPath === "" &&
+			(file.status === "renamed" || file.status === "copied")
+		) {
+			recordIndex += 2;
+		}
+
+		additions += file.additions;
+		deletions += file.deletions;
+	}
+
+	return {
+		fileCount: files.length,
+		additions,
+		deletions,
+	};
+}
+
 function parseDiffHeader(
 	line: string,
 ): { oldPath: string; newPath: string } | undefined {

@@ -1,7 +1,108 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { parseUnifiedDiff } from "./diff.ts";
+import {
+	applyNumstatDiff,
+	parseNameStatusDiff,
+	parseUnifiedDiff,
+} from "./diff.ts";
+
+describe("parseNameStatusDiff", () => {
+	it("parses NUL-delimited changed path metadata", () => {
+		const files = parseNameStatusDiff(
+			[
+				"M",
+				"src/service.ts",
+				"A",
+				"pages/[id].tsx",
+				"R100",
+				"old name.ts",
+				"new name.ts",
+				"C075",
+				"src/source.ts",
+				"src/copy.ts",
+				"D",
+				"unicodé/removed.ts",
+				"",
+			].join("\0"),
+		);
+
+		assert.deepEqual(files, [
+			{
+				path: "src/service.ts",
+				status: "modified",
+				additions: 0,
+				deletions: 0,
+				isBinary: false,
+			},
+			{
+				path: "pages/[id].tsx",
+				status: "added",
+				additions: 0,
+				deletions: 0,
+				isBinary: false,
+			},
+			{
+				path: "new name.ts",
+				oldPath: "old name.ts",
+				status: "renamed",
+				additions: 0,
+				deletions: 0,
+				isBinary: false,
+			},
+			{
+				path: "src/copy.ts",
+				oldPath: "src/source.ts",
+				status: "copied",
+				additions: 0,
+				deletions: 0,
+				isBinary: false,
+			},
+			{
+				path: "unicodé/removed.ts",
+				status: "deleted",
+				additions: 0,
+				deletions: 0,
+				isBinary: false,
+			},
+		]);
+	});
+});
+
+describe("applyNumstatDiff", () => {
+	it("adds stats and binary flags to changed path metadata", () => {
+		const files = parseNameStatusDiff(
+			[
+				"M",
+				"src/service.ts",
+				"R050",
+				"old name.ts",
+				"new name.ts",
+				"A",
+				"image.png",
+				"",
+			].join("\0"),
+		);
+
+		const stats = applyNumstatDiff(
+			files,
+			[
+				"2\t1\tsrc/service.ts",
+				"1\t0\t",
+				"old name.ts",
+				"new name.ts",
+				"-\t-\timage.png",
+				"",
+			].join("\0"),
+		);
+
+		assert.deepEqual(stats, { fileCount: 3, additions: 3, deletions: 1 });
+		assert.equal(files[0]?.additions, 2);
+		assert.equal(files[1]?.path, "new name.ts");
+		assert.equal(files[1]?.additions, 1);
+		assert.equal(files[2]?.isBinary, true);
+	});
+});
 
 describe("parseUnifiedDiff", () => {
 	it("captures modified and added file line ranges", () => {

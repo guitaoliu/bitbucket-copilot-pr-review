@@ -1,6 +1,10 @@
 import type { ReviewerConfig } from "../../config/types.ts";
 import type { GitRepository } from "../../git/repo.ts";
 import type { ChangedFile } from "../../git/types.ts";
+import {
+	type ChangedLineResolver,
+	createChangedLineResolver,
+} from "../../review/changed-lines.ts";
 import { createReviewedFileLookup } from "../../review/file.ts";
 import type {
 	FindingDraft,
@@ -15,6 +19,7 @@ export interface ReviewToolContext {
 	drafts: FindingDraft[];
 	summaryDrafts: ReviewSummaryDrafts;
 	reviewedFileMap: Map<string, ChangedFile>;
+	resolveChangedLines: ChangedLineResolver;
 }
 
 export function createReviewToolContext(
@@ -31,5 +36,6 @@ export function createReviewToolContext(
 		drafts,
 		summaryDrafts,
 		reviewedFileMap: createReviewedFileLookup(context.reviewedFiles),
+		resolveChangedLines: createChangedLineResolver(context, git),
 	};
 }

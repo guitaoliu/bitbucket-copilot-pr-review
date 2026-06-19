@@ -18,9 +18,9 @@ export interface ChangedFile {
 	path: string;
 	oldPath?: string;
 	status: FileStatus;
-	patch: string;
-	changedLines: number[];
-	hunks: HunkSummary[];
+	patch?: string;
+	changedLines?: number[];
+	hunks?: HunkSummary[];
 	additions: number;
 	deletions: number;
 	isBinary: boolean;

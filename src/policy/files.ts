@@ -69,10 +69,6 @@ function shouldReviewFile(
 		}
 	}
 
-	if (file.patch.trim().length === 0) {
-		return { include: false, reason: "empty textual diff" };
-	}
-
 	return { include: true };
 }
 

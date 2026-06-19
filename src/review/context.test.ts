@@ -20,16 +20,16 @@ const logger: Logger = {
 
 function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 	return {
-		diff: async () =>
-			[
-				"diff --git a/src/example.ts b/src/example.ts",
-				"index 1111111..2222222 100644",
-				"--- a/src/example.ts",
-				"+++ b/src/example.ts",
-				"@@ -1,1 +1,1 @@",
-				"-export const value = 1;",
-				"+export const value = 2;",
-			].join("\n"),
+		diffNameStatus: async () => [
+			{
+				path: "src/example.ts",
+				status: "modified" as const,
+				additions: 0,
+				deletions: 0,
+				isBinary: false,
+			},
+		],
+		diffNumstat: async () => "1\t1\tsrc/example.ts\0",
 		readTextFileAtCommit: async () =>
 			({
 				status: "not_found",
