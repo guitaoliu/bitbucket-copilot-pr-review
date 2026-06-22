@@ -33,8 +33,12 @@ export function createChangedLineResolver(
 			return cached;
 		}
 
+		const pathspec =
+			file.status === "renamed" && file.oldPath !== undefined
+				? [file.oldPath, file.path]
+				: file.path;
 		const promise = git
-			.diffFilePatch(context.mergeBaseCommit, context.headCommit, file.path)
+			.diffFilePatch(context.mergeBaseCommit, context.headCommit, pathspec)
 			.then((patch) => {
 				const parsedFile = findParsedFile(file, parseUnifiedDiff(patch).files);
 				const changedLines = parsedFile?.changedLines ?? [];

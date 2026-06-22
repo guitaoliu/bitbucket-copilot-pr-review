@@ -47,6 +47,7 @@ function mapNameStatusCode(code: string): FileStatus | undefined {
 		case "A":
 			return "added";
 		case "M":
+		case "T":
 			return "modified";
 		case "D":
 			return "deleted";

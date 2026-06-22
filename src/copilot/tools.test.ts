@@ -346,6 +346,90 @@ describe("Copilot tools", () => {
 		assert.equal(patchLoads, 1);
 	});
 
+	it("loads renamed file changed lines with old and new pathspecs", async () => {
+		const drafts: FindingDraft[] = [];
+		let patchPathspec: string | readonly string[] | undefined;
+		const lazyContext: ReviewContext = {
+			...reviewContext,
+			reviewedFiles: [
+				{
+					path: "src/new-name.ts",
+					oldPath: "src/old-name.ts",
+					status: "renamed",
+					additions: 1,
+					deletions: 1,
+					isBinary: false,
+				},
+			],
+		};
+		const tool = createEmitFindingTool(
+			createReviewToolContext(
+				config,
+				lazyContext,
+				createGitStub({
+					diffFilePatch: async (_base, _head, filePath) => {
+						patchPathspec = filePath;
+						if (Array.isArray(filePath)) {
+							return [
+								"diff --git a/src/old-name.ts b/src/new-name.ts",
+								"similarity index 55%",
+								"rename from src/old-name.ts",
+								"rename to src/new-name.ts",
+								"--- a/src/old-name.ts",
+								"+++ b/src/new-name.ts",
+								"@@ -2 +2 @@ keep",
+								"-old",
+								"+new",
+							].join("\n");
+						}
+
+						return [
+							"diff --git a/src/new-name.ts b/src/new-name.ts",
+							"new file mode 100644",
+							"--- /dev/null",
+							"+++ b/src/new-name.ts",
+							"@@ -0,0 +1,2 @@",
+							"+keep",
+							"+new",
+						].join("\n");
+					},
+				}),
+				drafts,
+				createSummaryDrafts(),
+			),
+		);
+		const handler = getHandler<
+			FindingDraft,
+			{ resultType: string; textResultForLlm: string }
+		>(tool);
+
+		const result = await handler(
+			{
+				path: "src/new-name.ts",
+				line: 1,
+				severity: "HIGH",
+				type: "BUG",
+				confidence: "high",
+				title: "Rename line issue",
+				details: "Line 1 is unchanged after the rename.",
+			},
+			{
+				sessionId: "session",
+				toolCallId: "tool",
+				toolName: "emit_finding",
+				arguments: {},
+			},
+		);
+
+		assert.deepEqual(patchPathspec, ["src/old-name.ts", "src/new-name.ts"]);
+		assert.deepEqual(result, {
+			resultType: "rejected",
+			textResultForLlm:
+				"Line 1 is not a changed line in src/new-name.ts. Valid changed line ranges: 2",
+		});
+		assert.deepEqual(drafts, []);
+	});
+
 	it("does not load changed lines for file-level findings", async () => {
 		const drafts: FindingDraft[] = [];
 		let patchLoads = 0;

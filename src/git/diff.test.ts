@@ -102,6 +102,32 @@ describe("applyNumstatDiff", () => {
 		assert.equal(files[1]?.additions, 1);
 		assert.equal(files[2]?.isBinary, true);
 	});
+
+	it("keeps type-change records aligned with numstat records", () => {
+		const files = parseNameStatusDiff(
+			["M", "src/service.ts", "T", "script/run", "M", "src/next.ts", ""].join(
+				"\0",
+			),
+		);
+
+		const stats = applyNumstatDiff(
+			files,
+			[
+				"2\t1\tsrc/service.ts",
+				"1\t3\tscript/run",
+				"5\t6\tsrc/next.ts",
+				"",
+			].join("\0"),
+		);
+
+		assert.deepEqual(stats, { fileCount: 3, additions: 8, deletions: 10 });
+		assert.equal(files[1]?.path, "script/run");
+		assert.equal(files[1]?.status, "modified");
+		assert.equal(files[1]?.additions, 1);
+		assert.equal(files[2]?.path, "src/next.ts");
+		assert.equal(files[2]?.additions, 5);
+		assert.equal(files[2]?.deletions, 6);
+	});
 });
 
 describe("parseUnifiedDiff", () => {

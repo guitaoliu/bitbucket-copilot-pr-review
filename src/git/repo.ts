@@ -306,8 +306,9 @@ export class GitRepository {
 	async diffFilePatch(
 		baseCommit: string,
 		headCommit: string,
-		filePath: string,
+		filePath: string | readonly string[],
 	): Promise<string> {
+		const pathspecs = Array.isArray(filePath) ? filePath : [filePath];
 		return this.runGit([
 			"diff",
 			"--no-color",
@@ -317,7 +318,7 @@ export class GitRepository {
 			baseCommit,
 			headCommit,
 			"--",
-			filePath,
+			...pathspecs,
 		]);
 	}
 
