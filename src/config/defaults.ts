@@ -14,7 +14,7 @@ export const REVIEWER_CONFIG_DEFAULTS = {
 		},
 	},
 	copilot: {
-		model: "gpt-5.3-codex",
+		model: "gpt-5.4",
 		reasoningEffort: "xhigh" as ReasoningEffort,
 		timeoutMs: 1_800_000,
 	},
