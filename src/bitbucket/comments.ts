@@ -97,6 +97,17 @@ function isCommentDeletionBlockedByResolvedThread(
 	return /cannot be deleted from resolved thread/i.test(detail);
 }
 
+function isCommentUpdateBlockedByResolvedThread(
+	error: unknown,
+): error is BitbucketApiError {
+	if (!(error instanceof BitbucketApiError) || error.statusCode !== 400) {
+		return false;
+	}
+
+	const detail = `${error.responseBody}\n${error.message}`;
+	return /changes cannot be made to resolved thread/i.test(detail);
+}
+
 function escapeRegexLiteral(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -495,15 +506,25 @@ export class PullRequestCommentsApi {
 				commentsByThreadKey.get(finding.threadKey) ??
 				legacyCommentsByExternalId.get(finding.externalId);
 			if (existing) {
-				await this.updatePullRequestComment(
-					existing.id,
-					existing.version,
-					text,
-				);
-				if (!commentsByThreadKey.has(finding.threadKey)) {
-					matchedLegacyExternalIds.add(finding.externalId);
+				try {
+					await this.updatePullRequestComment(
+						existing.id,
+						existing.version,
+						text,
+					);
+					if (!commentsByThreadKey.has(finding.threadKey)) {
+						matchedLegacyExternalIds.add(finding.externalId);
+					}
+					continue;
+				} catch (error) {
+					if (!isCommentUpdateBlockedByResolvedThread(error)) {
+						throw error;
+					}
+
+					this.logger.debug(
+						`Pull request finding comment ${existing.id} tagged ${tag} is in a resolved thread and cannot be updated; creating a replacement comment.`,
+					);
 				}
-				continue;
 			}
 
 			const anchor = buildFindingCommentAnchor(finding);

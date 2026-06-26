@@ -748,6 +748,138 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 		]);
 	});
 
+	it("recreates active finding comments when update is blocked by a resolved thread", async () => {
+		const requestCalls: Array<{
+			pathname: string;
+			method: string | undefined;
+			body: unknown;
+		}> = [];
+		const commentsApi = new PullRequestCommentsApi(
+			"PROJ",
+			"repo",
+			123,
+			logger,
+			async (pathname, init) => {
+				requestCalls.push({
+					pathname,
+					method: init?.method,
+					body:
+						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+				});
+
+				if (init?.method === "PUT") {
+					throw new BitbucketApiError(
+						400,
+						"",
+						"PUT",
+						"https://bitbucket.example.com/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
+						JSON.stringify({
+							errors: [
+								{
+									message: "Changes cannot be made to resolved thread.",
+									exceptionName:
+										"com.atlassian.bitbucket.validation.ArgumentValidationException",
+								},
+							],
+						}),
+					);
+				}
+
+				return "";
+			},
+			async () =>
+				({
+					values: [
+						{
+							action: "COMMENTED",
+							createdDate: 100,
+							comment: {
+								id: 10,
+								text: [
+									"<!-- copilot-pr-review:finding:finding-keep -->",
+									"<!-- copilot-pr-review:finding-thread:thread-keep -->",
+									"old finding",
+								].join("\n"),
+								version: 2,
+								createdDate: 100,
+								updatedDate: 100,
+							},
+						},
+					],
+					isLastPage: true,
+				}) as never,
+		);
+
+		await commentsApi.reconcilePullRequestFindingComments(
+			"copilot-pr-review",
+			[
+				{
+					externalId: "finding-keep",
+					threadKey: "thread-keep",
+					path: "src/example.ts",
+					line: 10,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Updated title",
+					details: "Updated details.",
+				},
+			],
+			{ revision: "review-rev-123", reviewedCommit: "head-123" },
+		);
+
+		assert.deepEqual(requestCalls, [
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
+				method: "PUT",
+				body: {
+					version: 2,
+					text: [
+						"<!-- copilot-pr-review:finding:finding-keep -->",
+						"<!-- copilot-pr-review:finding-thread:thread-keep -->",
+						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
+						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
+						"**Type:** BUG | **Severity:** HIGH | **Confidence:** high",
+						"",
+						"**Updated title**",
+						"",
+						"Location: `src/example.ts:10`",
+						"",
+						"Updated details.",
+					].join("\n"),
+				},
+			},
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments",
+				method: "POST",
+				body: {
+					text: [
+						"<!-- copilot-pr-review:finding:finding-keep -->",
+						"<!-- copilot-pr-review:finding-thread:thread-keep -->",
+						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
+						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
+						"**Type:** BUG | **Severity:** HIGH | **Confidence:** high",
+						"",
+						"**Updated title**",
+						"",
+						"Location: `src/example.ts:10`",
+						"",
+						"Updated details.",
+					].join("\n"),
+					anchor: {
+						diffType: "EFFECTIVE",
+						path: "src/example.ts",
+						line: 10,
+						lineType: "ADDED",
+						fileType: "TO",
+					},
+				},
+			},
+		]);
+	});
+
 	it("archives stale finding comments when delete is blocked by replies", async () => {
 		const requestCalls: Array<{
 			pathname: string;
