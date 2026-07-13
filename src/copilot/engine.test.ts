@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type {
 	PermissionRequest,
-	PermissionRequestMcp,
-	PermissionRequestRead,
 	SessionConfig,
 	SessionEventHandler,
 } from "@github/copilot-sdk";
@@ -180,16 +178,18 @@ async function invokeSessionTool(
 }
 
 describe("runCopilotReview", () => {
-	it("passes the explicit bundled cli path into the created Copilot client", async () => {
+	it("uses the SDK default bundled CLI resolution", async () => {
 		const context = createReviewContext();
 		const createdOptions: Array<Record<string, unknown>> = [];
+		let createdSessionConfig: SessionConfig | undefined;
+		const logSpy = createLoggerSpy();
 
 		const session = {
 			on() {
 				return () => {};
 			},
 			async sendAndWait() {
-				return { data: { content: "Looks good." } };
+				return { data: { content: "Found one issue that was not recorded." } };
 			},
 			async disconnect() {},
 		};
@@ -198,38 +198,59 @@ describe("runCopilotReview", () => {
 			config,
 			context,
 			{} as never,
-			createLoggerSpy().logger,
+			logSpy.logger,
 			{
-				resolveCliPath: () => "/tmp/node_modules/@github/copilot/index.js",
 				createCopilotClient(options) {
 					createdOptions.push(options as Record<string, unknown>);
 
 					return {
 						async start() {},
-						async createSession() {
-							throw new Error("createSession should not be called directly");
+						async createSession(sessionConfig: SessionConfig) {
+							createdSessionConfig = sessionConfig;
+							return session as never;
 						},
 						async stop() {
 							return [];
 						},
 					};
 				},
-				async createReviewSession() {
-					return session;
-				},
 			},
 		);
 
 		assert.equal(createdOptions.length, 1);
-		assert.deepEqual(createdOptions[0]?.connection, {
-			args: undefined,
-			kind: "stdio",
-			path: "/tmp/node_modules/@github/copilot/index.js",
-		});
+		assert.equal(createdOptions[0]?.connection, undefined);
 		assert.equal(createdOptions[0]?.workingDirectory, config.repoRoot);
 		assert.equal(createdOptions[0]?.mode, "copilot-cli");
 		assert.equal(outcome.findings.length, 0);
-		assert.equal(outcome.assistantMessage, "Looks good.");
+		assert.equal(
+			outcome.summary,
+			"No validated reportable issues were published from the reviewed pull request changes.",
+		);
+		assert.equal(
+			outcome.assistantMessage,
+			"Found one issue that was not recorded.",
+		);
+		assert.ok(
+			logSpy.infoEntries.some(
+				(entry) => entry.message === "Copilot did not emit reasoning events.",
+			),
+		);
+		assert.ok(createdSessionConfig);
+		assert.equal(createdSessionConfig.reasoningSummary, "concise");
+
+		const infoEntriesBeforePreTool = logSpy.infoEntries.length;
+		const preToolOutput = await createdSessionConfig.hooks?.onPreToolUse?.(
+			{
+				sessionId: "session-1",
+				timestamp: new Date(),
+				workingDirectory: config.repoRoot,
+				toolName: "bash",
+				toolArgs: { command: "git diff" },
+			},
+			{ sessionId: "session-1" },
+		);
+		assert.equal(preToolOutput?.permissionDecision, undefined);
+		assert.equal(logSpy.infoEntries.length, infoEntriesBeforePreTool);
 	});
 
 	it("passes a resolved GitHub token into the created Copilot client", async () => {
@@ -255,7 +276,6 @@ describe("runCopilotReview", () => {
 			{} as never,
 			createLoggerSpy().logger,
 			{
-				resolveCliPath: () => "/tmp/node_modules/@github/copilot/index.js",
 				resolveGitHubToken: async () => "gho_test-token",
 				createCopilotClient(options) {
 					createdOptions.push(options as Record<string, unknown>);
@@ -263,15 +283,12 @@ describe("runCopilotReview", () => {
 					return {
 						async start() {},
 						async createSession() {
-							throw new Error("createSession should not be called directly");
+							return session as never;
 						},
 						async stop() {
 							return [];
 						},
 					};
-				},
-				async createReviewSession() {
-					return session;
 				},
 			},
 		);
@@ -287,7 +304,6 @@ describe("runCopilotReview", () => {
 		let sendCount = 0;
 
 		await runCopilotReview(config, context, {} as never, logSpy.logger, {
-			resolveCliPath: () => "/tmp/node_modules/@github/copilot/index.js",
 			createCopilotClient() {
 				return {
 					async start() {},
@@ -363,7 +379,6 @@ describe("runCopilotReview", () => {
 		let sendCount = 0;
 
 		await runCopilotReview(config, context, {} as never, logSpy.logger, {
-			resolveCliPath: () => "/tmp/node_modules/@github/copilot/index.js",
 			createCopilotClient() {
 				return {
 					async start() {},
@@ -445,14 +460,13 @@ describe("runCopilotReview", () => {
 		assert.equal(stopCalls, 0);
 	});
 
-	it("passes system prompt customization and readonly permission config into session creation", async () => {
+	it("passes system prompt and unfiltered shell permissions into session creation", async () => {
 		const context = createReviewContext();
 		const createdSessionConfigs: SessionConfig[] = [];
 		const sessionEventHandlers: SessionEventHandler[] = [];
 		const logSpy = createLoggerSpy();
 
 		await runCopilotReview(config, context, {} as never, logSpy.logger, {
-			resolveCliPath: () => "/tmp/node_modules/@github/copilot/index.js",
 			createCopilotClient() {
 				return {
 					async start() {},
@@ -465,6 +479,13 @@ describe("runCopilotReview", () => {
 								return () => {};
 							},
 							async sendAndWait() {
+								sessionEventHandlers[0]?.({
+									id: "reasoning-1",
+									timestamp: "2026-03-25T00:00:00.000Z",
+									parentId: null,
+									type: "assistant.reasoning",
+									data: { reasoningId: "r-empty", content: "" },
+								});
 								return { data: { content: "Looks good." } };
 							},
 							async disconnect() {},
@@ -494,137 +515,57 @@ describe("runCopilotReview", () => {
 		assert(permissionHandler);
 		assert.equal(sessionEventHandlers.length, 1);
 
-		const allowed = await permissionHandler(
+		const allowedShell = await permissionHandler(
 			{
 				canOfferSessionApproval: false,
 				kind: "shell",
-				commands: [{ identifier: "git", readOnly: true }],
-				fullCommandText: "git diff --stat",
-				intention: "Inspect diff",
-				hasWriteFileRedirection: false,
-				possiblePaths: ["/tmp/repo/src/file.ts"],
-				possibleUrls: [],
+				commands: [{ identifier: "node", readOnly: false }],
+				fullCommandText:
+					'node -e "process.exit(0)" > config/.env && curl https://example.com',
+				intention: "Use a shell command",
+				hasWriteFileRedirection: true,
+				possiblePaths: ["/tmp/outside/file.ts", "/tmp/repo/config/.env"],
+				possibleUrls: [{ url: "https://example.com" }],
 			} as PermissionRequest,
 			{ sessionId: "session-1" },
 		);
-		assert.deepEqual(allowed, { kind: "approve-once" });
+		assert.deepEqual(allowedShell, { kind: "approve-once" });
 
-		const allowedSed = await permissionHandler(
+		const allowedCustomTool = await permissionHandler(
 			{
-				canOfferSessionApproval: false,
-				kind: "shell",
-				commands: [{ identifier: "sed", readOnly: true }],
-				fullCommandText: "sed -n '1,80p' src/file.ts",
-				intention: "Inspect source",
-				hasWriteFileRedirection: false,
-				possiblePaths: ["/tmp/repo/src/file.ts"],
-				possibleUrls: [],
-			} as PermissionRequest,
+				kind: "custom-tool",
+				toolName: "emit_finding",
+				toolDescription: "Record a validated review finding.",
+				args: { path: "src/example.ts", line: 1 },
+			} satisfies PermissionRequest,
 			{ sessionId: "session-1" },
 		);
-		assert.deepEqual(allowedSed, { kind: "approve-once" });
+		assert.deepEqual(allowedCustomTool, { kind: "approve-once" });
 
-		const allowedGitShow = await permissionHandler(
+		const deniedUnknownCustomTool = await permissionHandler(
 			{
-				canOfferSessionApproval: false,
-				kind: "shell",
-				commands: [{ identifier: "git", readOnly: true }],
-				fullCommandText: "git show HEAD:src/file.ts",
-				intention: "Inspect source at commit",
-				hasWriteFileRedirection: false,
-				possiblePaths: ["/tmp/repo/src/file.ts"],
-				possibleUrls: [],
-			} as PermissionRequest,
+				kind: "custom-tool",
+				toolName: "unexpected_tool",
+				toolDescription: "An unregistered custom tool.",
+			} satisfies PermissionRequest,
 			{ sessionId: "session-1" },
 		);
-		assert.deepEqual(allowedGitShow, { kind: "approve-once" });
-
-		const deniedGitShowSecretPath = await permissionHandler(
-			{
-				canOfferSessionApproval: false,
-				kind: "shell",
-				commands: [{ identifier: "git", readOnly: true }],
-				fullCommandText: "git show HEAD:config/.env",
-				intention: "Inspect source at commit",
-				hasWriteFileRedirection: false,
-				possiblePaths: [],
-				possibleUrls: [],
-			} as PermissionRequest,
-			{ sessionId: "session-1" },
-		);
-		assert.deepEqual(deniedGitShowSecretPath, {
+		assert.deepEqual(deniedUnknownCustomTool, {
 			kind: "reject",
-			feedback:
-				"Readonly review mode blocks shell access to potential secret-bearing path config/.env.",
+			feedback: "Readonly review mode does not allow custom-tool permissions.",
 		});
-
-		for (const fullCommandText of [
-			"git show HEAD:'config/.env'",
-			"git show :config/.env",
-		]) {
-			const deniedQuotedGitShowSecretPath = await permissionHandler(
-				{
-					canOfferSessionApproval: false,
-					kind: "shell",
-					commands: [{ identifier: "git", readOnly: true }],
-					fullCommandText,
-					intention: "Inspect source at commit",
-					hasWriteFileRedirection: false,
-					possiblePaths: [],
-					possibleUrls: [],
-				} as PermissionRequest,
-				{ sessionId: "session-1" },
-			);
-			assert.deepEqual(deniedQuotedGitShowSecretPath, {
-				kind: "reject",
-				feedback:
-					"Readonly review mode blocks shell access to potential secret-bearing path config/.env.",
-			});
-		}
-
-		for (const possibleRootPath of ["/tmp/repo", "."]) {
-			const allowedRepoRootInspection = await permissionHandler(
-				{
-					canOfferSessionApproval: false,
-					kind: "shell",
-					commands: [{ identifier: "ls", readOnly: true }],
-					fullCommandText: "ls .",
-					intention: "Inspect repo root",
-					hasWriteFileRedirection: false,
-					possiblePaths: [possibleRootPath],
-					possibleUrls: [],
-				} as PermissionRequest,
-				{ sessionId: "session-1" },
-			);
-			assert.deepEqual(allowedRepoRootInspection, { kind: "approve-once" });
-		}
 
 		const deniedRead = await permissionHandler(
 			{
 				kind: "read",
 				intention: "Inspect source",
 				path: "/tmp/repo/src/file.ts",
-			} satisfies PermissionRequestRead,
+			} satisfies PermissionRequest,
 			{ sessionId: "session-1" },
 		);
 		assert.deepEqual(deniedRead, {
 			kind: "reject",
-			feedback:
-				"Readonly review mode does not allow read permissions. Use approved git or shell inspection commands instead.",
-		});
-
-		const deniedReadOutsideRepo = await permissionHandler(
-			{
-				kind: "read",
-				intention: "Inspect outside source",
-				path: "/tmp/outside/file.ts",
-			} satisfies PermissionRequestRead,
-			{ sessionId: "session-1" },
-		);
-		assert.deepEqual(deniedReadOutsideRepo, {
-			kind: "reject",
-			feedback:
-				"Readonly review mode does not allow read permissions. Use approved git or shell inspection commands instead.",
+			feedback: "Readonly review mode does not allow read permissions.",
 		});
 
 		const deniedMcp = await permissionHandler(
@@ -635,218 +576,45 @@ describe("runCopilotReview", () => {
 				toolTitle: "Search code",
 				args: { query: "repo:test test" },
 				readOnly: true,
-			} satisfies PermissionRequestMcp,
+			} satisfies PermissionRequest,
 			{ sessionId: "session-1" },
 		);
 		assert.deepEqual(deniedMcp, {
 			kind: "reject",
 			feedback: "Readonly review mode does not allow mcp permissions.",
 		});
-
-		for (const commandIdentifier of ["env", "xargs"]) {
-			const deniedCommand = await permissionHandler(
-				{
-					canOfferSessionApproval: false,
-					kind: "shell",
-					commands: [{ identifier: commandIdentifier, readOnly: true }],
-					fullCommandText: commandIdentifier,
-					intention: "Inspect command behavior",
-					hasWriteFileRedirection: false,
-					possiblePaths: [],
-					possibleUrls: [],
-				} as PermissionRequest,
-				{ sessionId: "session-1" },
-			);
-			assert.deepEqual(deniedCommand, {
-				kind: "reject",
-				feedback:
-					"Readonly review mode allows only approved readonly inspection commands.",
-			});
-		}
-
-		const denied = await permissionHandler(
+		assert.deepEqual(logSpy.warnEntries, [
 			{
-				canOfferSessionApproval: false,
-				kind: "shell",
-				commands: [{ identifier: "node", readOnly: true }],
-				fullCommandText: 'node -e "process.exit(0)"',
-				intention: "Run an interpreter",
-				hasWriteFileRedirection: false,
-				possiblePaths: ["/tmp/repo/src/file.ts"],
-				possibleUrls: [],
-			} as PermissionRequest,
-			{ sessionId: "session-1" },
-		);
-		assert.deepEqual(denied, {
-			kind: "reject",
-			feedback:
-				"Readonly review mode allows only approved readonly inspection commands.",
-		});
-
-		const deniedGitFetch = await permissionHandler(
-			{
-				canOfferSessionApproval: false,
-				kind: "shell",
-				commands: [{ identifier: "git", readOnly: true }],
-				fullCommandText: "git fetch origin main",
-				intention: "Fetch refs",
-				hasWriteFileRedirection: false,
-				possiblePaths: [],
-				possibleUrls: [],
-			} as PermissionRequest,
-			{ sessionId: "session-1" },
-		);
-		assert.deepEqual(deniedGitFetch, {
-			kind: "reject",
-			feedback:
-				"Readonly review mode allows only approved git inspection subcommands.",
-		});
-
-		for (const gitSubcommand of ["checkout", "gc"]) {
-			const deniedGitMutation = await permissionHandler(
-				{
-					canOfferSessionApproval: false,
-					kind: "shell",
-					commands: [{ identifier: "git", readOnly: true }],
-					fullCommandText: `git ${gitSubcommand}`,
-					intention: "Run git mutation",
-					hasWriteFileRedirection: false,
-					possiblePaths: [],
-					possibleUrls: [],
-				} as PermissionRequest,
-				{ sessionId: "session-1" },
-			);
-			assert.deepEqual(deniedGitMutation, {
-				kind: "reject",
-				feedback:
-					"Readonly review mode allows only approved git inspection subcommands.",
-			});
-		}
-
-		const deniedUrl = await permissionHandler(
-			{
-				canOfferSessionApproval: false,
-				kind: "shell",
-				commands: [{ identifier: "git", readOnly: true }],
-				fullCommandText: "git diff https://example.com",
-				intention: "Inspect a URL-like input",
-				hasWriteFileRedirection: false,
-				possiblePaths: [],
-				possibleUrls: [{ url: "https://example.com" }],
-			} as PermissionRequest,
-			{ sessionId: "session-1" },
-		);
-		assert.deepEqual(deniedUrl, {
-			kind: "reject",
-			feedback:
-				"Readonly review mode blocks shell commands that may access network URLs.",
-		});
-
-		const deniedSecretPossiblePath = await permissionHandler(
-			{
-				canOfferSessionApproval: false,
-				kind: "shell",
-				commands: [{ identifier: "sed", readOnly: true }],
-				fullCommandText: "sed -n '1,80p' config/.env",
-				intention: "Inspect source",
-				hasWriteFileRedirection: false,
-				possiblePaths: ["/tmp/repo/config/.env"],
-				possibleUrls: [],
-			} as PermissionRequest,
-			{ sessionId: "session-1" },
-		);
-		assert.deepEqual(deniedSecretPossiblePath, {
-			kind: "reject",
-			feedback:
-				"Readonly review mode blocks shell access to potential secret-bearing path config/.env.",
-		});
-
-		const deniedShellExpansion = await permissionHandler(
-			{
-				canOfferSessionApproval: false,
-				kind: "shell",
-				commands: [{ identifier: "git", readOnly: true }],
-				fullCommandText: "git diff $(git rev-parse HEAD)",
-				intention: "Inspect diff with shell expansion",
-				hasWriteFileRedirection: false,
-				possiblePaths: [],
-				possibleUrls: [],
-			} as PermissionRequest,
-			{ sessionId: "session-1" },
-		);
-		assert.deepEqual(deniedShellExpansion, {
-			kind: "reject",
-			feedback:
-				"Readonly review mode blocks shell commands with expansion or pipeline syntax.",
-		});
-
-		for (const { commandIdentifier, fullCommandText } of [
-			{
-				commandIdentifier: "grep",
-				fullCommandText: "grep -n . config/.env*",
+				message: "Copilot permission rejected",
+				details: [
+					{
+						kind: "custom-tool",
+						toolName: "unexpected_tool",
+						toolCallId: undefined,
+						feedback:
+							"Readonly review mode does not allow custom-tool permissions.",
+					},
+				],
 			},
 			{
-				commandIdentifier: "sed",
-				fullCommandText: "sed -n $LINEp src/file.ts",
+				message: "Copilot permission rejected",
+				details: [
+					{
+						kind: "read",
+						feedback: "Readonly review mode does not allow read permissions.",
+					},
+				],
 			},
-		]) {
-			const deniedUnsafeShellExpansion = await permissionHandler(
-				{
-					canOfferSessionApproval: false,
-					kind: "shell",
-					commands: [{ identifier: commandIdentifier, readOnly: true }],
-					fullCommandText,
-					intention: "Inspect source with shell expansion",
-					hasWriteFileRedirection: false,
-					possiblePaths: ["/tmp/repo/src/file.ts"],
-					possibleUrls: [],
-				} as PermissionRequest,
-				{ sessionId: "session-1" },
-			);
-			assert.deepEqual(deniedUnsafeShellExpansion, {
-				kind: "reject",
-				feedback:
-					"Readonly review mode blocks shell commands with expansion or pipeline syntax.",
-			});
-		}
-
-		const deniedEchoWrapper = await permissionHandler(
 			{
-				canOfferSessionApproval: false,
-				kind: "shell",
-				commands: [{ identifier: "git", readOnly: true }],
-				fullCommandText: "echo 'diff' && git diff --stat",
-				intention: "Inspect diff with label",
-				hasWriteFileRedirection: false,
-				possiblePaths: ["/tmp/repo/src/file.ts"],
-				possibleUrls: [],
-			} as PermissionRequest,
-			{ sessionId: "session-1" },
-		);
-		assert.deepEqual(deniedEchoWrapper, {
-			kind: "reject",
-			feedback:
-				"Readonly review mode blocks presentation-only shell wrappers. Run the underlying inspection command directly.",
-		});
-
-		const deniedPrintfWrapper = await permissionHandler(
-			{
-				canOfferSessionApproval: false,
-				kind: "shell",
-				commands: [{ identifier: "git", readOnly: true }],
-				fullCommandText: "git diff --stat && printf '\\n'",
-				intention: "Inspect diff with footer",
-				hasWriteFileRedirection: false,
-				possiblePaths: ["/tmp/repo/src/file.ts"],
-				possibleUrls: [],
-			} as PermissionRequest,
-			{ sessionId: "session-1" },
-		);
-		assert.deepEqual(deniedPrintfWrapper, {
-			kind: "reject",
-			feedback:
-				"Readonly review mode blocks presentation-only shell wrappers. Run the underlying inspection command directly.",
-		});
+				message: "Copilot permission rejected",
+				details: [
+					{
+						kind: "mcp",
+						feedback: "Readonly review mode does not allow mcp permissions.",
+					},
+				],
+			},
+		]);
 
 		sessionEventHandlers[0]?.({
 			id: "1",
@@ -861,6 +629,10 @@ describe("runCopilotReview", () => {
 
 		assert.deepEqual(logSpy.infoEntries, [
 			{
+				message: "Copilot emitted reasoning events without content.",
+				details: [],
+			},
+			{
 				message: "Copilot intent",
 				details: [
 					{
@@ -870,6 +642,5 @@ describe("runCopilotReview", () => {
 				],
 			},
 		]);
-		assert.deepEqual(logSpy.warnEntries, []);
 	});
 });

@@ -173,7 +173,7 @@ function buildCommentFindingSummaryLines(
 
 function buildCommentFindingHeaderLines(findings: ReviewFinding[]): string[] {
 	if (findings.length === 0) {
-		return ["- No reportable issues found."];
+		return ["- No validated reportable issues were published."];
 	}
 
 	const typeSummary = buildFindingTypeSummary(findings);
@@ -273,7 +273,7 @@ function fitCommentSection(options: {
 	omittedLabel: string;
 	maxChars: number;
 }): string | undefined {
-	if (options.lines.length === 0) {
+	if (options.lines.length === 0 && (options.pinnedLines?.length ?? 0) === 0) {
 		return undefined;
 	}
 

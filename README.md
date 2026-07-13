@@ -111,7 +111,7 @@ Expanded example:
 {
   "$schema": "./schemas/copilot-code-review.schema.json",
   "copilot": {
-    "model": "gpt-5.4",
+    "model": "gpt-5.6-terra",
     "reasoningEffort": "xhigh"
   },
   "report": {
