@@ -1,24 +1,19 @@
 import { execFile } from "node:child_process";
-import path from "node:path";
 import { promisify } from "node:util";
 
 import type {
 	CopilotClientOptions,
 	CopilotSession,
 	PermissionRequest,
-	PermissionRequestMcp,
-	PermissionRequestRead,
 	PermissionRequestResult,
-	PermissionRequestShell,
 	SessionConfig,
 	SessionEvent,
 	ToolResultObject,
 } from "@github/copilot-sdk";
-import { CopilotClient, RuntimeConnection, ToolSet } from "@github/copilot-sdk";
+import { CopilotClient, ToolSet } from "@github/copilot-sdk";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import { finalizeFindings } from "../policy/findings.ts";
-import { getRepoFileAccessDecision } from "../policy/path-access.ts";
 import { finalizeReviewSummary } from "../review/summary.ts";
 import type {
 	FindingDraft,
@@ -30,8 +25,7 @@ import type {
 } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
-import { sanitizeModelAuthoredText, truncateText } from "../shared/text.ts";
-import { resolveBundledCopilotCliPath } from "./cli-path.ts";
+import { truncateText } from "../shared/text.ts";
 import { buildPrompt, buildSystemMessage } from "./prompt.ts";
 import {
 	FINDING_TAXONOMY_HINT,
@@ -91,21 +85,11 @@ type ReviewProgressState = {
 };
 
 export interface RunCopilotReviewDependencies {
-	resolveCliPath?: () => string;
 	createCopilotClient?: (options: CopilotClientOptions) => CopilotClientLike;
 	resolveGitHubToken?: (
 		config: ReviewerConfig,
 		logger: Logger,
 	) => Promise<string | undefined>;
-	createReviewSession?: (input: {
-		client: CopilotClientLike;
-		config: ReviewerConfig;
-		context: ReviewContext;
-		git: GitRepository;
-		logger: Logger;
-		drafts: FindingDraft[];
-		summaryDrafts: ReviewSummaryDrafts;
-	}) => Promise<CopilotSessionLike>;
 }
 
 function isReviewToolName(toolName: string): toolName is ReviewToolName {
@@ -339,7 +323,6 @@ function buildPostToolHint(
 
 function buildCopilotClientOptions(
 	config: ReviewerConfig,
-	resolveCliPath: () => string = resolveBundledCopilotCliPath,
 	gitHubToken?: string,
 ): CopilotClientOptions {
 	const clientLogLevel: CopilotClientOptions["logLevel"] =
@@ -354,7 +337,6 @@ function buildCopilotClientOptions(
 			: undefined;
 
 	return omitUndefined({
-		connection: RuntimeConnection.forStdio({ path: resolveCliPath() }),
 		workingDirectory: config.repoRoot,
 		mode: "copilot-cli",
 		logLevel: clientLogLevel,
@@ -597,359 +579,16 @@ function buildProgressFields(
 	];
 }
 
-const SAFE_READONLY_SHELL_COMMAND_IDENTIFIERS = new Set([
-	"git",
-	"rg",
-	"grep",
-	"sed",
-	"ls",
-	"pwd",
-	"file",
-	"stat",
-	"test",
-	"which",
-	"dirname",
-	"basename",
-	"sort",
-	"uniq",
-	"cut",
-	"tr",
-	"wc",
-	"true",
-	"false",
-]);
-
-const SAFE_GIT_INSPECTION_SUBCOMMANDS = new Set([
-	"annotate",
-	"blame",
-	"cat-file",
-	"check-attr",
-	"check-ignore",
-	"check-mailmap",
-	"cherry",
-	"describe",
-	"diff",
-	"diff-files",
-	"diff-index",
-	"diff-tree",
-	"for-each-ref",
-	"grep",
-	"log",
-	"ls-files",
-	"ls-tree",
-	"merge-base",
-	"name-rev",
-	"range-diff",
-	"rev-list",
-	"rev-parse",
-	"shortlog",
-	"show",
-	"show-branch",
-	"show-ref",
-	"status",
-	"whatchanged",
-]);
-
-function isPathWithinRepoRoot(
-	repoRoot: string,
-	candidatePath: string,
-): boolean {
-	const normalizedRepoRoot = path.resolve(repoRoot);
-	const normalizedCandidatePath = path.resolve(
-		normalizedRepoRoot,
-		candidatePath,
-	);
-	const relativePath = path.relative(
-		normalizedRepoRoot,
-		normalizedCandidatePath,
-	);
-	return (
-		relativePath === "" ||
-		(!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
-	);
-}
-
-function toRepoRelativePermissionPath(
-	repoRoot: string,
-	candidatePath: string,
-): string {
-	if (!path.isAbsolute(candidatePath)) {
-		return candidatePath.replace(/\\/g, "/");
-	}
-
-	return path
-		.relative(path.resolve(repoRoot), candidatePath)
-		.replace(/\\/g, "/");
-}
-
-function extractGitSubcommand(
-	fullCommandText: string | undefined,
-	commands: Array<{ identifier?: string }> | undefined,
-): string | undefined {
-	if (typeof fullCommandText !== "string") {
-		return undefined;
-	}
-
-	if (commands?.[0]?.identifier !== "git") {
-		return undefined;
-	}
-
-	const tokens = fullCommandText.trim().split(/\s+/);
-	if ((tokens[0] ?? "") !== "git") {
-		return undefined;
-	}
-
-	for (let index = 1; index < tokens.length; index += 1) {
-		const token = tokens[index];
-		if (!token || token.startsWith("-")) {
-			continue;
-		}
-
-		return token;
-	}
-
-	return undefined;
-}
-
-function unquoteShellToken(token: string): string {
-	if (
-		(token.startsWith("'") && token.endsWith("'")) ||
-		(token.startsWith('"') && token.endsWith('"'))
-	) {
-		return token.slice(1, -1);
-	}
-
-	return token;
-}
-
-function extractGitObjectPathFromToken(token: string): string | undefined {
-	if (!token || token.startsWith("-") || token.includes("://")) {
-		return undefined;
-	}
-
-	if (token.startsWith(":")) {
-		const indexPath = token.slice(1);
-		const stageMatch = /^(?:0|1|2|3):(.+)$/.exec(indexPath);
-		return unquoteShellToken(stageMatch?.[1] ?? indexPath);
-	}
-
-	const separatorIndex = token.indexOf(":");
-	if (separatorIndex <= 0 || separatorIndex === token.length - 1) {
-		return undefined;
-	}
-
-	return unquoteShellToken(token.slice(separatorIndex + 1));
-}
-
-function extractGitObjectPaths(
-	fullCommandText: string | undefined,
-	commands: Array<{ identifier?: string }> | undefined,
-): string[] {
-	if (
-		typeof fullCommandText !== "string" ||
-		commands?.[0]?.identifier !== "git"
-	) {
-		return [];
-	}
-
-	const tokens = fullCommandText.trim().split(/\s+/).map(unquoteShellToken);
-	if ((tokens[0] ?? "") !== "git") {
-		return [];
-	}
-
-	return tokens.flatMap((token) => {
-		const objectPath = extractGitObjectPathFromToken(token);
-		return objectPath ? [objectPath] : [];
-	});
-}
-
-function hasPresentationOnlyShellWrapper(
-	fullCommandText: string | undefined,
-): boolean {
-	if (typeof fullCommandText !== "string") {
-		return false;
-	}
-
-	const normalized = fullCommandText.trim();
-	return (
-		/^(?:echo|printf)\b[\s\S]*&&/.test(normalized) ||
-		/&&\s*(?:echo|printf)\b/.test(normalized)
-	);
-}
-
-function hasBlockedShellExpansionOrPipeline(
-	fullCommandText: string | undefined,
-): boolean {
-	if (typeof fullCommandText !== "string") {
-		return false;
-	}
-
-	return /(?:\$\(|<\(|`|\||&&|\|\||;|\$\{?[$!#*@?\w-]|\*|\?|\[[^\]\r\n]*\]|\{[^}\r\n]*,[^}\r\n]*\})/.test(
-		fullCommandText,
-	);
-}
-
-function rejectReadonlyPermission(kind: string): PermissionRequestResult {
-	return {
-		kind: "reject",
-		feedback: `Readonly review mode does not allow ${kind} permissions.`,
-	};
-}
-
-function decideReadonlyShell(
-	request: PermissionRequestShell,
-	config: ReviewerConfig,
-): PermissionRequestResult {
-	if (request.hasWriteFileRedirection === true) {
-		return {
-			kind: "reject",
-			feedback:
-				"Readonly review mode blocks shell commands that write files via redirection.",
-		};
-	}
-
-	if (hasPresentationOnlyShellWrapper(request.fullCommandText)) {
-		return {
-			kind: "reject",
-			feedback:
-				"Readonly review mode blocks presentation-only shell wrappers. Run the underlying inspection command directly.",
-		};
-	}
-
-	if (hasBlockedShellExpansionOrPipeline(request.fullCommandText)) {
-		return {
-			kind: "reject",
-			feedback:
-				"Readonly review mode blocks shell commands with expansion or pipeline syntax.",
-		};
-	}
-
-	if (request.commands.length === 0) {
-		return {
-			kind: "reject",
-			feedback:
-				"Readonly review mode allows only recognized readonly inspection commands.",
-		};
-	}
-
-	for (const command of request.commands) {
-		if (command.readOnly !== true) {
-			return {
-				kind: "reject",
-				feedback:
-					"Readonly review mode blocks shell commands with side effects or filesystem writes.",
-			};
-		}
-
-		if (
-			typeof command.identifier !== "string" ||
-			!SAFE_READONLY_SHELL_COMMAND_IDENTIFIERS.has(command.identifier)
-		) {
-			return {
-				kind: "reject",
-				feedback:
-					"Readonly review mode allows only approved readonly inspection commands.",
-			};
-		}
-	}
-
-	const gitSubcommand = extractGitSubcommand(
-		request.fullCommandText,
-		request.commands,
-	);
-	if (
-		request.commands.some((command) => command.identifier === "git") &&
-		(gitSubcommand === undefined ||
-			!SAFE_GIT_INSPECTION_SUBCOMMANDS.has(gitSubcommand))
-	) {
-		return {
-			kind: "reject",
-			feedback:
-				"Readonly review mode allows only approved git inspection subcommands.",
-		};
-	}
-
-	if (request.possibleUrls.length > 0) {
-		return {
-			kind: "reject",
-			feedback:
-				"Readonly review mode blocks shell commands that may access network URLs.",
-		};
-	}
-
-	for (const gitObjectPath of extractGitObjectPaths(
-		request.fullCommandText,
-		request.commands,
-	)) {
-		const pathDecision = getRepoFileAccessDecision(gitObjectPath);
-		if (!pathDecision.include) {
-			return {
-				kind: "reject",
-				feedback: `Readonly review mode blocks shell access to ${pathDecision.reason} ${gitObjectPath}.`,
-			};
-		}
-	}
-
-	for (const possiblePath of request.possiblePaths) {
-		if (!isPathWithinRepoRoot(config.repoRoot, possiblePath)) {
-			return {
-				kind: "reject",
-				feedback:
-					"Readonly review mode limits shell access to paths inside the repository root.",
-			};
-		}
-
-		const repoRelativePath = toRepoRelativePermissionPath(
-			config.repoRoot,
-			possiblePath,
-		);
-		if (repoRelativePath === "" || repoRelativePath === ".") {
-			continue;
-		}
-
-		const pathDecision = getRepoFileAccessDecision(repoRelativePath);
-		if (!pathDecision.include) {
-			return {
-				kind: "reject",
-				feedback: `Readonly review mode blocks shell access to ${pathDecision.reason} ${repoRelativePath}.`,
-			};
-		}
-	}
-
-	return { kind: "approve-once" };
-}
-
-function decideRepoReadonlyPath(
-	request: PermissionRequestRead,
-): PermissionRequestResult {
-	void request;
-	return {
-		kind: "reject",
-		feedback:
-			"Readonly review mode does not allow read permissions. Use approved git or shell inspection commands instead.",
-	};
-}
-
-function decideReadonlyAllowlistedMcp(
-	request: PermissionRequestMcp,
-): PermissionRequestResult {
-	return rejectReadonlyPermission(request.kind);
-}
-
 function buildReadonlyPermissionDecision(
 	request: PermissionRequest,
-	config: ReviewerConfig,
 ): PermissionRequestResult {
-	switch (request.kind) {
-		case "shell":
-			return decideReadonlyShell(request, config);
-		case "read":
-			return decideRepoReadonlyPath(request);
-		case "mcp":
-			return decideReadonlyAllowlistedMcp(request);
-		default:
-			return rejectReadonlyPermission(request.kind);
-	}
+	return request.kind === "shell" ||
+		(request.kind === "custom-tool" && isReviewToolName(request.toolName))
+		? { kind: "approve-once" }
+		: {
+				kind: "reject",
+				feedback: `Readonly review mode does not allow ${request.kind} permissions.`,
+			};
 }
 
 function getToolResultDurationMs(
@@ -1107,7 +746,9 @@ function createReviewSessionHooks(
 			toolTelemetry.totalRequested += 1;
 			getToolTelemetryCounter(toolTelemetry, input.toolName).requested += 1;
 
-			logger.info(buildPreToolLogMessage(input));
+			if (input.toolName !== "bash") {
+				logger.info(buildPreToolLogMessage(input));
+			}
 			if (!isAllowedReviewToolName(input.toolName)) {
 				return {
 					additionalContext:
@@ -1127,7 +768,6 @@ function createReviewSessionHooks(
 			]);
 
 			return {
-				permissionDecision: "allow" as const,
 				additionalContext: isReviewToolName(input.toolName)
 					? buildPreToolHint(input.toolName, progressState.reviewedFileCount)
 					: "Use readonly repo-scoped shell commands to inspect git diff, history, tests, and relevant code paths. The working tree is the trusted base checkout; use explicit commits with git diff/show for PR-head content. Prefer targeted reads over repeated rereads, avoid presentation-only wrappers, and do not use shell commands that write files, mutate git state, or access the network.",
@@ -1153,9 +793,11 @@ function createReviewSessionHooks(
 				(counter.resultCounts[resultType] ?? 0) + 1;
 			updateRejectedFindingProgress(input, progressState);
 
-			logger.info(
-				buildPostToolLogMessage(input, config, drafts, progressState),
-			);
+			if (input.toolName !== "bash") {
+				logger.info(
+					buildPostToolLogMessage(input, config, drafts, progressState),
+				);
+			}
 			if (!isReviewToolName(input.toolName)) {
 				if (input.toolName === "bash") {
 					return {
@@ -1185,7 +827,9 @@ function createReviewSessionHooks(
 			};
 		},
 		onPostToolUseFailure: async (input: PostToolUseFailureInput) => {
-			logger.info(buildPostToolFailureLogMessage(input));
+			if (input.toolName !== "bash") {
+				logger.info(buildPostToolFailureLogMessage(input));
+			}
 			return {
 				additionalContext: `Tool ${input.toolName} failed: ${input.error}. Use the failure to adjust inputs and continue the readonly review.`,
 			};
@@ -1209,7 +853,6 @@ function createReviewSessionHooks(
 
 function summarizeOutcome(
 	context: ReviewContext,
-	assistantMessage: string | undefined,
 	findingsCount: number,
 ): string {
 	if (context.reviewedFiles.length === 0) {
@@ -1217,14 +860,7 @@ function summarizeOutcome(
 	}
 
 	if (findingsCount === 0) {
-		const normalized = assistantMessage?.trim();
-		if (normalized && normalized.length > 0) {
-			return truncateText(sanitizeModelAuthoredText(normalized), 1200, {
-				suffix: "\n... truncated ...",
-			});
-		}
-
-		return `No ${context.reviewedFiles.length > 0 ? "reportable" : "reviewable"} issues found in the reviewed pull request changes at the ${"configured confidence threshold"}.`;
+		return "No validated reportable issues were published from the reviewed pull request changes.";
 	}
 
 	return `Copilot identified ${findingsCount} reportable issue${findingsCount === 1 ? "" : "s"} in the reviewed pull request changes.`;
@@ -1239,7 +875,7 @@ export async function runCopilotReview(
 ): Promise<ReviewOutcome> {
 	if (context.reviewedFiles.length === 0) {
 		return {
-			summary: summarizeOutcome(context, undefined, 0),
+			summary: summarizeOutcome(context, 0),
 			findings: [],
 			stale: false,
 		};
@@ -1258,11 +894,7 @@ export async function runCopilotReview(
 		config,
 		logger,
 	) ?? resolveCopilotGitHubToken(config, logger));
-	const clientOptions = buildCopilotClientOptions(
-		config,
-		dependencies.resolveCliPath,
-		gitHubToken,
-	);
+	const clientOptions = buildCopilotClientOptions(config, gitHubToken);
 	const sessionEventTracer = createSessionEventTracer(logger);
 
 	const client =
@@ -1275,12 +907,27 @@ export async function runCopilotReview(
 		clientName: "bitbucket-copilot-pr-review",
 		model: config.copilot.model,
 		reasoningEffort: config.copilot.reasoningEffort,
+		reasoningSummary: "concise",
 		systemMessage: buildSystemMessage(config),
 		streaming: true,
 		tools: createReviewTools(config, context, git, drafts, summaryDrafts),
 		availableTools: buildReviewAvailableTools(),
-		onPermissionRequest: (request: PermissionRequest) =>
-			buildReadonlyPermissionDecision(request, config),
+		onPermissionRequest: (request: PermissionRequest) => {
+			const decision = buildReadonlyPermissionDecision(request);
+			if (decision.kind === "reject") {
+				logger.warn("Copilot permission rejected", {
+					kind: request.kind,
+					...(request.kind === "custom-tool"
+						? {
+								toolName: request.toolName,
+								toolCallId: request.toolCallId,
+							}
+						: {}),
+					feedback: decision.feedback,
+				});
+			}
+			return decision;
+		},
 		hooks: createReviewSessionHooks(config, logger, drafts, progressState),
 		workingDirectory: config.repoRoot,
 		includeSubAgentStreamingEvents: true,
@@ -1296,20 +943,7 @@ export async function runCopilotReview(
 		}
 
 		try {
-			const createdSession = await dependencies.createReviewSession?.({
-				client,
-				config,
-				context,
-				git,
-				logger,
-				drafts,
-				summaryDrafts,
-			});
-			if (createdSession) {
-				session = createdSession;
-			} else {
-				session = await client.createSession(sessionConfig);
-			}
+			session = await client.createSession(sessionConfig);
 		} catch (error) {
 			throw wrapCopilotSessionStageError(error, config, "session creation");
 		}
@@ -1327,6 +961,14 @@ export async function runCopilotReview(
 		} catch (error) {
 			throw wrapCopilotSessionStageError(error, config, "review request");
 		}
+		const reasoningStatus = sessionEventTracer.getReasoningStatus();
+		if (reasoningStatus !== "content") {
+			logger.info(
+				reasoningStatus === "empty"
+					? "Copilot emitted reasoning events without content."
+					: "Copilot did not emit reasoning events.",
+			);
+		}
 		const findings = finalizeFindings(
 			drafts,
 			context.reviewedFiles,
@@ -1338,7 +980,7 @@ export async function runCopilotReview(
 		toolTelemetry.sessionDurationMs = Date.now() - reviewStartedAt;
 
 		return omitUndefined({
-			summary: summarizeOutcome(context, assistantMessage, findings.length),
+			summary: summarizeOutcome(context, findings.length),
 			findings,
 			assistantMessage,
 			prSummary: reviewSummary.prSummary,

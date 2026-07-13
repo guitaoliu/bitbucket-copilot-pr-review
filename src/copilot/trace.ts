@@ -1,10 +1,14 @@
 import type { SessionEvent } from "@github/copilot-sdk";
 
 import type { Logger } from "../shared/logger.ts";
+import { REVIEW_TOOL_NAMES } from "./tools/index.ts";
 
 export type CopilotSessionEventTracer = {
 	handleEvent(event: SessionEvent): void;
+	getReasoningStatus(): "content" | "empty" | "missing";
 };
+
+const REVIEW_TOOL_NAME_SET: ReadonlySet<string> = new Set(REVIEW_TOOL_NAMES);
 
 type SessionEventWithData = SessionEvent & { data?: Record<string, unknown> };
 
@@ -16,6 +20,12 @@ export function createSessionEventTracer(
 	logger: Logger,
 ): CopilotSessionEventTracer {
 	const reasoningContentById = new Map<string, string>();
+	const startedToolsById = new Map<
+		string,
+		{ toolName: string; startedAtMs: number }
+	>();
+	let reasoningContentObserved = false;
+	let reasoningEventObserved = false;
 
 	const appendContent = (reasoningId: string, content: string): void => {
 		if (!content) {
@@ -45,6 +55,56 @@ export function createSessionEventTracer(
 
 	return {
 		handleEvent(event) {
+			if (event.type === "tool.execution_start") {
+				const { arguments: toolArguments, toolCallId, toolName } = event.data;
+				startedToolsById.set(toolCallId, {
+					toolName,
+					startedAtMs: new Date(event.timestamp).getTime(),
+				});
+				if (toolName === "bash") {
+					logger.info("Copilot bash call", {
+						toolCallId,
+						arguments: toolArguments,
+					});
+				}
+				return;
+			}
+
+			if (event.type === "tool.execution_complete") {
+				const { error, result, success, toolCallId } = event.data;
+				const startedTool = startedToolsById.get(toolCallId);
+				startedToolsById.delete(toolCallId);
+				if (!startedTool) {
+					return;
+				}
+				const durationMs = Math.max(
+					0,
+					new Date(event.timestamp).getTime() - startedTool.startedAtMs,
+				);
+
+				if (startedTool.toolName === "bash") {
+					logger.info("Copilot completed bash call", {
+						toolCallId,
+						success,
+						durationMs,
+						...(error ? { error: error.message } : {}),
+					});
+					return;
+				}
+
+				if (REVIEW_TOOL_NAME_SET.has(startedTool.toolName)) {
+					logger.info("Copilot completed review tool", {
+						toolCallId,
+						toolName: startedTool.toolName,
+						success,
+						durationMs,
+						...(result?.content ? { result: result.content } : {}),
+						...(error ? { error: error.message } : {}),
+					});
+				}
+				return;
+			}
+
 			if (event.type === "assistant.intent") {
 				const data = getEventData(event);
 				const intent =
@@ -64,8 +124,12 @@ export function createSessionEventTracer(
 					typeof data.reasoningId === "string" ? data.reasoningId : undefined;
 				const deltaContent =
 					typeof data.deltaContent === "string" ? data.deltaContent : undefined;
-				if (reasoningId && deltaContent) {
-					appendContent(reasoningId, deltaContent);
+				if (reasoningId) {
+					reasoningEventObserved = true;
+					if (deltaContent) {
+						reasoningContentObserved = true;
+						appendContent(reasoningId, deltaContent);
+					}
 				}
 				return;
 			}
@@ -77,6 +141,10 @@ export function createSessionEventTracer(
 				const content =
 					typeof data.content === "string" ? data.content : undefined;
 				if (reasoningId) {
+					reasoningEventObserved = true;
+					if (content) {
+						reasoningContentObserved = true;
+					}
 					flushReasoning(reasoningId, content);
 				}
 				return;
@@ -212,6 +280,12 @@ export function createSessionEventTracer(
 					content,
 				});
 			}
+		},
+		getReasoningStatus() {
+			if (reasoningContentObserved) {
+				return "content";
+			}
+			return reasoningEventObserved ? "empty" : "missing";
 		},
 	};
 }

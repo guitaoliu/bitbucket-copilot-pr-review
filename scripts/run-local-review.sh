@@ -30,7 +30,7 @@ Optional environment:
   NODE_USE_SYSTEM_CA=1         Use the Node.js system CA store (default)
   BITBUCKET_CA_CERT_PATH=/path/to/corp-ca.pem
   BITBUCKET_INSECURE_TLS=1     Disable Bitbucket TLS certificate verification (not recommended)
-  COPILOT_MODEL=gpt-5.4
+  COPILOT_MODEL=gpt-5.6-luna
   COPILOT_REASONING_EFFORT=xhigh
   LOG_LEVEL=debug
 EOF
@@ -78,7 +78,7 @@ if [[ ! "$PR_URL" =~ ^https?://.+/projects/[^/]+/repos/[^/]+/pull-requests/[0-9]
 fi
 
 export REPO_ROOT="$TARGET_REPO_ROOT"
-export COPILOT_MODEL="${COPILOT_MODEL:-gpt-5.3-codex}"
+export COPILOT_MODEL="${COPILOT_MODEL:-gpt-5.6-luna}"
 export COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 export LOG_LEVEL="${LOG_LEVEL:-debug}"
 export NODE_USE_SYSTEM_CA="${NODE_USE_SYSTEM_CA:-1}"

@@ -79,6 +79,46 @@ describe("createSessionEventTracer", () => {
 				details: [{ reasoningId: "r1", content: "Hello" }],
 			},
 		]);
+		assert.equal(tracer.getReasoningStatus(), "content");
+	});
+
+	it("reports empty reasoning events without logging content", () => {
+		const { logger, traceCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			type: "assistant.reasoning",
+			data: {
+				reasoningId: "r-empty",
+				content: "",
+			},
+		});
+
+		assert.deepEqual(traceCalls, []);
+		assert.equal(tracer.getReasoningStatus(), "empty");
+	});
+
+	it("reports empty reasoning deltas without logging content", () => {
+		const { logger, traceCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			ephemeral: true,
+			type: "assistant.reasoning_delta",
+			data: {
+				reasoningId: "r-empty",
+				deltaContent: "",
+			},
+		});
+
+		assert.deepEqual(traceCalls, []);
+		assert.equal(tracer.getReasoningStatus(), "empty");
 	});
 
 	it("falls back to full reasoning content when no deltas arrive", () => {
@@ -240,6 +280,84 @@ describe("createSessionEventTracer", () => {
 						toolCount: 2,
 						toolNames: ["get_pr_overview", "bash"],
 						intentionSummaries: ["Load review scope first"],
+					},
+				],
+			},
+		]);
+	});
+
+	it("logs bash commands and review tool outcomes from execution events", () => {
+		const { logger, infoCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			type: "tool.execution_start",
+			data: {
+				toolCallId: "bash-1",
+				toolName: "bash",
+				arguments: { command: "git diff --stat" },
+			},
+		} as unknown as SessionEvent);
+		tracer.handleEvent({
+			id: "2",
+			timestamp: new Date("2026-03-25T00:00:01.350Z"),
+			parentId: "1",
+			type: "tool.execution_complete",
+			data: {
+				toolCallId: "bash-1",
+				success: true,
+				result: { content: "6 files changed" },
+			},
+		} as unknown as SessionEvent);
+		tracer.handleEvent({
+			id: "3",
+			timestamp: "2026-03-25T00:00:02.000Z",
+			parentId: "2",
+			type: "tool.execution_start",
+			data: {
+				toolCallId: "finding-1",
+				toolName: "emit_finding",
+				arguments: { path: "src/service.ts", line: 10 },
+			},
+		} as SessionEvent);
+		tracer.handleEvent({
+			id: "4",
+			timestamp: "2026-03-25T00:00:03.000Z",
+			parentId: "3",
+			type: "tool.execution_complete",
+			data: {
+				toolCallId: "finding-1",
+				success: true,
+				result: { content: "Line 10 is not a changed line in src/service.ts." },
+			},
+		} as SessionEvent);
+
+		assert.deepEqual(infoCalls, [
+			{
+				message: "Copilot bash call",
+				details: [
+					{
+						toolCallId: "bash-1",
+						arguments: { command: "git diff --stat" },
+					},
+				],
+			},
+			{
+				message: "Copilot completed bash call",
+				details: [{ toolCallId: "bash-1", success: true, durationMs: 1350 }],
+			},
+			{
+				message: "Copilot completed review tool",
+				details: [
+					{
+						toolCallId: "finding-1",
+						toolName: "emit_finding",
+						success: true,
+						durationMs: 1000,
+						result: "Line 10 is not a changed line in src/service.ts.",
 					},
 				],
 			},

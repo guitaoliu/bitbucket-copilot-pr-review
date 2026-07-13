@@ -158,6 +158,8 @@ describe("runReview", () => {
 				"Review scope after file filtering: 2 reviewed, 5 skipped out of 7 changed files (REVIEW_MAX_FILES=100).",
 			),
 		);
+		assert.ok(infoMessages.includes("Starting review run"));
+		assert.ok(infoMessages.includes("Completed review run"));
 	});
 
 	it("runs Copilot in a detached trusted base workspace while preserving head review context", async () => {

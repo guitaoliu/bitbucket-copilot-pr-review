@@ -228,6 +228,19 @@ function createOutcome(): ReviewOutcome {
 }
 
 describe("buildPullRequestComment", () => {
+	it("shows when no validated findings were published", () => {
+		const comment = buildPullRequestComment(config, createContext(undefined), {
+			...createOutcome(),
+			findings: [],
+		});
+
+		assert.match(
+			comment,
+			/### Findings\n- No validated reportable issues were published\./,
+		);
+		assert.doesNotMatch(comment, /### Change Areas/);
+	});
+
 	it("includes a PR summary and links changed files back to the pull request diff", () => {
 		const prLink =
 			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123";

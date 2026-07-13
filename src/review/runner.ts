@@ -98,6 +98,13 @@ export async function runReview(
 	}
 	const context = await buildContext(prepared, logger, initialPullRequest);
 	const git = prepared.git;
+	logger.info("Starting review run", {
+		prId: context.pr.id,
+		reviewRevision: context.reviewRevision,
+		headCommit: context.headCommit,
+		model: effectiveConfig.copilot.model,
+		dryRun: effectiveConfig.review.dryRun,
+	});
 	logger.info(
 		`Review scope after file filtering: ${context.reviewedFiles.length} reviewed, ${context.skippedFiles.length} skipped out of ${context.diffStats.fileCount} changed files (REVIEW_MAX_FILES=${effectiveConfig.review.maxFiles}).`,
 	);
@@ -245,6 +252,12 @@ export async function runReview(
 		...publishResult.review,
 		gitTelemetry: git.getTelemetrySnapshot(),
 	};
+	logger.info("Completed review run", {
+		prId: context.pr.id,
+		reviewRevision: context.reviewRevision,
+		findings: publishResult.review.findings.length,
+		publicationStatus: publishResult.publication.status,
+	});
 
 	return buildReviewRunOutput(
 		context,
