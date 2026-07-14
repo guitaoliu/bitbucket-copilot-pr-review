@@ -1,3 +1,4 @@
+import packageJson from "../../package.json" with { type: "json" };
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import { buildInsightReport, buildPullRequestComment } from "../insights.ts";
@@ -20,6 +21,7 @@ export function buildSkippedReviewOutput(
 ): ReviewRunOutput {
 	return {
 		context: {
+			toolVersion: packageJson.version,
 			prId: pullRequest.id,
 			title: pullRequest.title,
 			sourceBranch: pullRequest.source.displayId,
@@ -65,14 +67,19 @@ export function buildReviewRunOutput(
 	publication?: ReviewPublication,
 ): ReviewRunOutput {
 	const sanitizedReview = sanitizeReviewOutcomeForOutput(review);
-	const { gitTelemetry, toolTelemetry, ...reviewWithoutTelemetry } =
-		sanitizedReview;
+	const {
+		gitTelemetry,
+		toolTelemetry,
+		copilotUsage,
+		...reviewWithoutTelemetry
+	} = sanitizedReview;
 	const hasGitTelemetry =
 		gitTelemetry !== undefined &&
 		Object.keys(gitTelemetry.byOperation).length > 0;
 
 	return {
 		context: {
+			toolVersion: packageJson.version,
 			prId: context.pr.id,
 			title: context.pr.title,
 			sourceBranch: context.pr.source.displayId,
@@ -87,10 +94,11 @@ export function buildReviewRunOutput(
 		},
 		...omitUndefined({
 			metrics:
-				hasGitTelemetry || toolTelemetry
+				hasGitTelemetry || toolTelemetry || copilotUsage
 					? {
 							...(hasGitTelemetry && gitTelemetry ? { gitTelemetry } : {}),
 							...(toolTelemetry ? { toolTelemetry } : {}),
+							...(copilotUsage ? { copilotUsage } : {}),
 						}
 					: undefined,
 		}),

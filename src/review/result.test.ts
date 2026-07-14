@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import packageJson from "../../package.json" with { type: "json" };
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
 import {
 	baseReviewerConfig as baseConfig,
@@ -119,6 +120,7 @@ describe("buildSkippedReviewOutput", () => {
 
 		assert.deepEqual(output, {
 			context: {
+				toolVersion: packageJson.version,
 				prId: 123,
 				title: "Test PR",
 				sourceBranch: "feature",
@@ -350,6 +352,11 @@ describe("buildReviewRunOutput", () => {
 					},
 				},
 			},
+			copilotUsage: {
+				aiCredits: 17.99695,
+				usageValueUsd: 0.1799695,
+				modelMetrics: {},
+			},
 		};
 		const artifacts: ReviewArtifacts = {
 			report: {
@@ -369,6 +376,7 @@ describe("buildReviewRunOutput", () => {
 
 		assert.deepEqual(output, {
 			context: {
+				toolVersion: packageJson.version,
 				prId: 123,
 				title: "Test PR",
 				sourceBranch: "feature",
@@ -382,6 +390,7 @@ describe("buildReviewRunOutput", () => {
 			metrics: {
 				gitTelemetry: review.gitTelemetry,
 				toolTelemetry: review.toolTelemetry,
+				copilotUsage: review.copilotUsage,
 			},
 			review: {
 				summary: review.summary,

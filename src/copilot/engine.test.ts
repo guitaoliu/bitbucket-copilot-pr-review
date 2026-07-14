@@ -314,7 +314,7 @@ describe("runCopilotReview", () => {
 			},
 		};
 
-		await runCopilotReview(
+		const outcome = await runCopilotReview(
 			config,
 			createReviewContext(),
 			{} as never,
@@ -338,7 +338,7 @@ describe("runCopilotReview", () => {
 											return {
 												totalPremiumRequestCost: 0,
 												totalUserRequests: 2,
-												totalNanoAiu: 250_000_000_000,
+												totalNanoAiu: 17_996_950_000,
 												totalApiDurationMs: 1_000,
 												sessionStartTime: "2026-07-14T00:00:00.000Z",
 												codeChanges: {
@@ -368,6 +368,11 @@ describe("runCopilotReview", () => {
 		);
 
 		assert.deepEqual(lifecycle, ["usage", "disconnect"]);
+		assert.deepEqual(outcome.copilotUsage, {
+			aiCredits: 17.99695,
+			usageValueUsd: 0.1799695,
+			modelMetrics,
+		});
 		assert.deepEqual(
 			logSpy.infoEntries.find(
 				(entry) => entry.message === "Copilot review usage",
@@ -376,8 +381,8 @@ describe("runCopilotReview", () => {
 				message: "Copilot review usage",
 				details: [
 					{
-						aiCredits: 250,
-						usageValueUsd: 2.5,
+						aiCredits: 17.99695,
+						usageValueUsd: 0.1799695,
 						modelMetrics,
 					},
 				],

@@ -18,6 +18,7 @@ import { finalizeReviewSummary } from "../review/summary.ts";
 import type {
 	FindingDraft,
 	ReviewContext,
+	ReviewCopilotUsage,
 	ReviewOutcome,
 	ReviewSummaryDrafts,
 	ReviewToolTelemetry,
@@ -981,6 +982,26 @@ export async function runCopilotReview(
 		const reviewSummary = finalizeReviewSummary(context, summaryDrafts);
 		const assistantMessage = response?.data.content;
 		toolTelemetry.sessionDurationMs = Date.now() - reviewStartedAt;
+		let copilotUsage: ReviewCopilotUsage | undefined;
+		if (session.rpc?.usage) {
+			try {
+				const usage = await session.rpc.usage.getMetrics();
+				copilotUsage = omitUndefined({
+					aiCredits:
+						usage.totalNanoAiu === undefined
+							? undefined
+							: usage.totalNanoAiu / 1_000_000_000,
+					usageValueUsd:
+						usage.totalNanoAiu === undefined
+							? undefined
+							: usage.totalNanoAiu / 100_000_000_000,
+					modelMetrics: usage.modelMetrics,
+				});
+				logger.info("Copilot review usage", copilotUsage);
+			} catch (error) {
+				logger.warn("Failed to read Copilot review usage", error);
+			}
+		}
 
 		return omitUndefined({
 			summary: summarizeOutcome(context, findings.length),
@@ -990,31 +1011,12 @@ export async function runCopilotReview(
 			changeAreas: reviewSummary.changeAreas,
 			fileSummaries: reviewSummary.fileSummaries,
 			toolTelemetry,
+			copilotUsage,
 			stale: false,
 		}) satisfies ReviewOutcome;
 	} finally {
 		unsubscribeSessionEvents();
 		if (session && typeof session.disconnect === "function") {
-			if (session.rpc?.usage) {
-				try {
-					const usage = await session.rpc.usage.getMetrics();
-					const aiCredits =
-						usage.totalNanoAiu === undefined
-							? undefined
-							: usage.totalNanoAiu / 1_000_000_000;
-					logger.info(
-						"Copilot review usage",
-						omitUndefined({
-							aiCredits,
-							usageValueUsd:
-								aiCredits === undefined ? undefined : aiCredits * 0.01,
-							modelMetrics: usage.modelMetrics,
-						}),
-					);
-				} catch (error) {
-					logger.warn("Failed to read Copilot review usage", error);
-				}
-			}
 			await session.disconnect();
 		}
 		if (clientStarted) {

@@ -7,11 +7,12 @@ import type {
 
 type ReviewRunOutputReview = Omit<
 	ReviewOutcome,
-	"gitTelemetry" | "toolTelemetry"
+	"gitTelemetry" | "toolTelemetry" | "copilotUsage"
 >;
 
 export interface ReviewRunOutput {
 	context: {
+		toolVersion: string;
 		prId: number;
 		title: string;
 		sourceBranch: string;
@@ -25,6 +26,7 @@ export interface ReviewRunOutput {
 	metrics?: {
 		gitTelemetry?: ReviewOutcome["gitTelemetry"];
 		toolTelemetry?: ReviewOutcome["toolTelemetry"];
+		copilotUsage?: ReviewOutcome["copilotUsage"];
 	};
 	review: ReviewRunOutputReview;
 	report: InsightReportPayload;

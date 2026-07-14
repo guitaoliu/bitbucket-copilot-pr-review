@@ -1,5 +1,10 @@
+import type { CopilotSession } from "@github/copilot-sdk";
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ChangedFile, DiffStats, SkippedFile } from "../git/types.ts";
+
+type CopilotModelMetrics = Awaited<
+	ReturnType<CopilotSession["rpc"]["usage"]["getMetrics"]>
+>["modelMetrics"];
 
 type Severity = "LOW" | "MEDIUM" | "HIGH";
 
@@ -34,6 +39,12 @@ interface ReviewGitOperationTelemetry {
 
 export interface ReviewGitTelemetry {
 	byOperation: Record<string, ReviewGitOperationTelemetry>;
+}
+
+export interface ReviewCopilotUsage {
+	aiCredits?: number;
+	usageValueUsd?: number;
+	modelMetrics: CopilotModelMetrics;
 }
 
 export type ReviewPublicationStatus =
@@ -137,5 +148,6 @@ export interface ReviewOutcome {
 	fileSummaries?: FileChangeSummary[];
 	gitTelemetry?: ReviewGitTelemetry;
 	toolTelemetry?: ReviewToolTelemetry;
+	copilotUsage?: ReviewCopilotUsage;
 	stale: boolean;
 }
