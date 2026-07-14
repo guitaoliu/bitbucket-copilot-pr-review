@@ -65,6 +65,9 @@ type CopilotClientLike = Pick<
 >;
 
 interface CopilotSessionLike {
+	rpc?: {
+		usage: Pick<CopilotSession["rpc"]["usage"], "getMetrics">;
+	};
 	sendAndWait(
 		options: Parameters<CopilotSession["sendAndWait"]>[0],
 		timeout?: Parameters<CopilotSession["sendAndWait"]>[1],
@@ -992,6 +995,26 @@ export async function runCopilotReview(
 	} finally {
 		unsubscribeSessionEvents();
 		if (session && typeof session.disconnect === "function") {
+			if (session.rpc?.usage) {
+				try {
+					const usage = await session.rpc.usage.getMetrics();
+					const aiCredits =
+						usage.totalNanoAiu === undefined
+							? undefined
+							: usage.totalNanoAiu / 1_000_000_000;
+					logger.info(
+						"Copilot review usage",
+						omitUndefined({
+							aiCredits,
+							usageValueUsd:
+								aiCredits === undefined ? undefined : aiCredits * 0.01,
+							modelMetrics: usage.modelMetrics,
+						}),
+					);
+				} catch (error) {
+					logger.warn("Failed to read Copilot review usage", error);
+				}
+			}
 			await session.disconnect();
 		}
 		if (clientStarted) {

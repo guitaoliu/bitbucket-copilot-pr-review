@@ -298,6 +298,93 @@ describe("runCopilotReview", () => {
 		assert.equal(createdOptions[0]?.useLoggedInUser, false);
 	});
 
+	it("logs accumulated Copilot usage before disconnecting the session", async () => {
+		const logSpy = createLoggerSpy();
+		const lifecycle: string[] = [];
+		const modelMetrics = {
+			"gpt-5.3-codex": {
+				requests: { count: 2, cost: 0 },
+				usage: {
+					inputTokens: 1_200,
+					outputTokens: 300,
+					cacheReadTokens: 800,
+					cacheWriteTokens: 100,
+					reasoningTokens: 200,
+				},
+			},
+		};
+
+		await runCopilotReview(
+			config,
+			createReviewContext(),
+			{} as never,
+			logSpy.logger,
+			{
+				createCopilotClient() {
+					return {
+						async start() {},
+						async createSession() {
+							return {
+								on() {
+									return () => {};
+								},
+								async sendAndWait() {
+									return { data: { content: "Looks good." } };
+								},
+								rpc: {
+									usage: {
+										async getMetrics() {
+											lifecycle.push("usage");
+											return {
+												totalPremiumRequestCost: 0,
+												totalUserRequests: 2,
+												totalNanoAiu: 250_000_000_000,
+												totalApiDurationMs: 1_000,
+												sessionStartTime: "2026-07-14T00:00:00.000Z",
+												codeChanges: {
+													linesAdded: 0,
+													linesRemoved: 0,
+													filesModifiedCount: 0,
+													filesModified: [],
+												},
+												modelMetrics,
+												lastCallInputTokens: 1_200,
+												lastCallOutputTokens: 300,
+											};
+										},
+									},
+								},
+								async disconnect() {
+									lifecycle.push("disconnect");
+								},
+							} as never;
+						},
+						async stop() {
+							return [];
+						},
+					};
+				},
+			},
+		);
+
+		assert.deepEqual(lifecycle, ["usage", "disconnect"]);
+		assert.deepEqual(
+			logSpy.infoEntries.find(
+				(entry) => entry.message === "Copilot review usage",
+			),
+			{
+				message: "Copilot review usage",
+				details: [
+					{
+						aiCredits: 250,
+						usageValueUsd: 2.5,
+						modelMetrics,
+					},
+				],
+			},
+		);
+	});
+
 	it("sends one review request without managed coverage continuation", async () => {
 		const context = createReviewContext();
 		const logSpy = createLoggerSpy();
