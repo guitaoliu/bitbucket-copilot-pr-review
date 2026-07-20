@@ -97,7 +97,7 @@ function buildGuidelinesSection(): string {
 		"Evidence bar:",
 		"- Start from the diff; read head and base when needed to confirm regressions, removed guards, renamed paths, or contract changes.",
 		"- For risky shared contracts, auth, validation, persistence, serialization, async flow, or public interfaces, inspect relevant callers, callees, or tests before concluding safety.",
-		"- Follow plausible concerns with targeted reads or searches until validated, disproven, or reduced to a weaker alternative.",
+		"- Follow plausible concerns with targeted reads until validated or disproven; before emitting, re-read the target hunk and rule out guards, null or empty checks, early returns, and caller invariants.",
 		"- Do not report an issue that already exists in base unless this PR newly introduces it, exposes it on a changed path, or materially worsens its impact or likelihood.",
 		"- Treat CI as a clue, not proof. Never assume unverified behavior.",
 		"",

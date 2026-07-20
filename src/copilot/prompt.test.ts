@@ -302,7 +302,7 @@ describe("buildSystemMessage", () => {
 		);
 		assert.match(
 			content,
-			/Follow plausible concerns with targeted reads or searches until validated, disproven, or reduced to a weaker alternative/,
+			/Follow plausible concerns with targeted reads until validated or disproven; before emitting, re-read the target hunk and rule out guards, null or empty checks, early returns, and caller invariants/,
 		);
 		assert.match(
 			content,
