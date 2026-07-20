@@ -20,8 +20,7 @@ export interface ReviewRunOutput {
 		headCommit: string;
 		mergeBaseCommit: string;
 		reviewRevision?: string;
-		reviewedFiles: number;
-		skippedFiles: number;
+		reviewableFiles: number;
 	};
 	metrics?: {
 		gitTelemetry?: ReviewOutcome["gitTelemetry"];

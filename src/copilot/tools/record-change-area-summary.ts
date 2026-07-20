@@ -18,12 +18,12 @@ function hasPathGlob(value: string): boolean {
 function matchesReviewedPath(
 	file: ChangedFile,
 	pathExpression: string,
-	reviewedFileMap: Map<string, ChangedFile>,
+	reviewableFileMap: Map<string, ChangedFile>,
 ): boolean {
 	return (
 		matchesGlob(file.path, pathExpression) ||
 		(file.oldPath !== undefined &&
-			reviewedFileMap.get(file.oldPath) === file &&
+			reviewableFileMap.get(file.oldPath) === file &&
 			matchesGlob(file.oldPath, pathExpression))
 	);
 }
@@ -32,7 +32,7 @@ function resolveReviewedPathReference(
 	pathExpression: string,
 	toolContext: ReviewToolContext,
 ): { reference: string } | { error: string } {
-	const file = toolContext.reviewedFileMap.get(pathExpression);
+	const file = toolContext.reviewableFileMap.get(pathExpression);
 	if (file) {
 		return { reference: file.path };
 	}
@@ -43,8 +43,8 @@ function resolveReviewedPathReference(
 		};
 	}
 
-	const files = toolContext.context.reviewedFiles.filter((file) =>
-		matchesReviewedPath(file, pathExpression, toolContext.reviewedFileMap),
+	const files = toolContext.context.reviewableFiles.filter((file) =>
+		matchesReviewedPath(file, pathExpression, toolContext.reviewableFileMap),
 	);
 	return files.length > 0
 		? { reference: pathExpression }

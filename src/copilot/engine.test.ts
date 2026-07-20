@@ -46,7 +46,6 @@ const config: ReviewerConfig = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFiles: 100,
 		maxFindings: 3,
 		minConfidence: "high",
 		maxPatchChars: 12000,
@@ -138,8 +137,7 @@ function createReviewContext(): ReviewContext {
 		reviewRevision: "review-rev-123",
 		rawDiff: "",
 		diffStats: { fileCount: 1, additions: 1, deletions: 0 },
-		reviewedFiles: [createChangedFile()],
-		skippedFiles: [],
+		reviewableFiles: [createChangedFile()],
 	};
 }
 
@@ -249,7 +247,7 @@ describe("runCopilotReview", () => {
 			},
 			{ sessionId: "session-1" },
 		);
-		assert.equal(preToolOutput?.permissionDecision, undefined);
+		assert.equal(preToolOutput, undefined);
 		assert.equal(logSpy.infoEntries.length, infoEntriesBeforePreTool);
 	});
 
@@ -407,17 +405,6 @@ describe("runCopilotReview", () => {
 							async sendAndWait() {
 								sendCount += 1;
 								if (sendCount === 1) {
-									await configArg.hooks?.onPostToolUse?.(
-										{
-											toolName: "get_pr_overview",
-											toolArgs: {},
-											toolResult: createSdkToolResult({
-												reviewedFiles: [{ path: "src/example.ts" }],
-												skippedFiles: [],
-											}),
-										} as never,
-										{ sessionId: "session-1" } as never,
-									);
 									await configArg.hooks?.onPostToolUse?.(
 										{
 											toolName: "bash",
@@ -597,7 +584,6 @@ describe("runCopilotReview", () => {
 		);
 		assert.deepEqual(createdSessionConfigs[0]?.availableTools, [
 			"builtin:bash",
-			"custom:get_pr_overview",
 			"custom:record_pr_summary",
 			"custom:record_change_area_summary",
 			"custom:emit_finding",

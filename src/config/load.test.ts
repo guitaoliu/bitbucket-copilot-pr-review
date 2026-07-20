@@ -139,17 +139,6 @@ describe("parseEnvironment", () => {
 				getEnvRepoOverrides(
 					parseEnvironment({
 						BITBUCKET_TOKEN: "token",
-						REVIEW_MAX_FILES: "999999",
-					}),
-				),
-			/Invalid environment repo overrides:\nreview\.maxFiles: review\.maxFiles must be at most 500\./,
-		);
-
-		assert.throws(
-			() =>
-				getEnvRepoOverrides(
-					parseEnvironment({
-						BITBUCKET_TOKEN: "token",
 						COPILOT_TIMEOUT_MS: "999999999",
 					}),
 				),
@@ -222,7 +211,6 @@ describe("resolveRuntimeConfigGroups", () => {
 			COPILOT_MODEL: "env-model",
 			REPORT_KEY: " team/report ",
 			BUILD_URL: "https://ci.example.com/build/1",
-			REVIEW_MAX_FILES: "300",
 		});
 
 		const resolved = resolveRuntimeConfigGroups(env, {
@@ -242,7 +230,6 @@ describe("resolveRuntimeConfigGroups", () => {
 		assert.equal(resolved.report.key, "team-report");
 		assert.equal(resolved.report.link, "https://ci.example.com/build/1");
 		assert.equal(resolved.review.forceReview, true);
-		assert.equal(resolved.review.maxFiles, 300);
 	});
 
 	it("resolves bitbucket runtime fields from env with default fallback", () => {
@@ -353,7 +340,6 @@ describe("loadConfig feature flags", () => {
 		assert.equal(config.report.key, "copilot-pr-review");
 		assert.equal(config.review.forceReview, false);
 		assert.equal(config.review.confirmRerun, false);
-		assert.equal(config.review.maxFiles, 300);
 	});
 
 	it("loads GH_HOST into the direct review config", () => {
@@ -412,7 +398,6 @@ describe("loadConfig feature flags", () => {
 	it("lets env values win over repo config overrides", () => {
 		const config = loadConfig(["review", pullRequestUrl], {
 			BITBUCKET_TOKEN: "token",
-			REVIEW_MAX_FILES: "300",
 			REVIEW_IGNORE_PATHS: "env-only/**",
 			REVIEW_SKIP_BRANCH_PREFIXES: "env/",
 			COPILOT_MODEL: "env-model",
@@ -422,7 +407,6 @@ describe("loadConfig feature flags", () => {
 			config,
 			parseRepoReviewConfig(`{
 			  "review": {
-			    "maxFiles": 150,
 			    "ignorePaths": ["i18n/locales/**/*.json"],
 			    "skipBranchPrefixes": ["renovate/", "deps/"]
 			  },
@@ -432,7 +416,6 @@ describe("loadConfig feature flags", () => {
 			}`),
 		);
 
-		assert.equal(merged.review.maxFiles, 300);
 		assert.deepEqual(merged.review.ignorePaths, ["env-only/**"]);
 		assert.deepEqual(merged.review.skipBranchPrefixes, ["env/"]);
 		assert.equal(merged.copilot.model, "env-model");

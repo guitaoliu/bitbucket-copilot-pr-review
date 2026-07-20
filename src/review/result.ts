@@ -29,8 +29,7 @@ export function buildSkippedReviewOutput(
 			headCommit: pullRequest.source.latestCommit,
 			mergeBaseCommit: mergeBaseCommit ?? pullRequest.target.latestCommit,
 			...(reviewRevision ? { reviewRevision } : {}),
-			reviewedFiles: 0,
-			skippedFiles: 0,
+			reviewableFiles: 0,
 		},
 		review: {
 			summary: skipReason,
@@ -89,8 +88,7 @@ export function buildReviewRunOutput(
 			...(context.reviewRevision
 				? { reviewRevision: context.reviewRevision }
 				: {}),
-			reviewedFiles: context.reviewedFiles.length,
-			skippedFiles: context.skippedFiles.length,
+			reviewableFiles: context.reviewableFiles.length,
 		},
 		...omitUndefined({
 			metrics:

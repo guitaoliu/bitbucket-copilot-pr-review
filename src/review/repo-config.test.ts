@@ -42,7 +42,6 @@ const baseConfig: ReviewerConfig = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFiles: 300,
 		maxFindings: 25,
 		minConfidence: "medium",
 		maxPatchChars: 12000,
@@ -69,7 +68,7 @@ describe("loadTrustedRepoConfig", () => {
 				return {
 					status: "ok" as const,
 					content:
-						'{"review":{"ignorePaths":["i18n/locales/**/*.json"],"maxFiles":150,"skipBranchPrefixes":["renovate/","deps/"]}}',
+						'{"review":{"ignorePaths":["i18n/locales/**/*.json"],"skipBranchPrefixes":["renovate/","deps/"]}}',
 				};
 			},
 		} as unknown as GitRepository;
@@ -81,7 +80,6 @@ describe("loadTrustedRepoConfig", () => {
 			logger,
 		);
 
-		assert.equal(config.review.maxFiles, 150);
 		assert.deepEqual(config.review.ignorePaths, ["i18n/locales/**/*.json"]);
 		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/", "deps/"]);
 		assert.deepEqual(config.internal?.trustedRepoConfig, {

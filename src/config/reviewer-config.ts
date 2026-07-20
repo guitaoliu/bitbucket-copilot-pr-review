@@ -129,7 +129,6 @@ const reviewerConfigSchema = z
 				dryRun: z.boolean(),
 				forceReview: z.boolean(),
 				confirmRerun: z.boolean(),
-				maxFiles: z.number().int().positive(),
 				maxFindings: z.number().int().positive(),
 				minConfidence: z.enum(CONFIDENCE_VALUES),
 				maxPatchChars: z.number().int().positive(),

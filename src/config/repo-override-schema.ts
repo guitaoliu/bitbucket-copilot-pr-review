@@ -11,7 +11,6 @@ export const REPO_CONFIG_LIMITS = {
 	modelMaxLength: 120,
 	reportTitleMaxLength: 120,
 	timeoutMs: { min: 60_000, max: 3_600_000 },
-	maxFiles: { min: 1, max: 500 },
 	maxFindings: { min: 1, max: 100 },
 	maxPatchChars: { min: 500, max: 50_000 },
 	defaultFileSliceLines: { min: 1, max: 500 },
@@ -111,8 +110,11 @@ export function createReviewOverrideSchema(options?: {
 }) {
 	return z
 		.object({
-			maxFiles: boundedInteger("review.maxFiles", REPO_CONFIG_LIMITS.maxFiles)
-				.describe("Maximum number of changed files to review after filtering.")
+			maxFiles: z
+				.int("review.maxFiles must be an integer.")
+				.positive("review.maxFiles must be positive.")
+				.describe("Deprecated compatibility field; accepted but ignored.")
+				.meta({ deprecated: true })
 				.optional(),
 			maxFindings: boundedInteger(
 				"review.maxFindings",
@@ -153,7 +155,7 @@ export function createReviewOverrideSchema(options?: {
 				entriesLabel: "patterns",
 			})
 				.describe(
-					"Repo-relative glob patterns for changed files that should be skipped during review.",
+					"Repo-relative glob patterns excluded from reportable finding scope.",
 				)
 				.optional(),
 			skipBranchPrefixes: boundedStringArray({

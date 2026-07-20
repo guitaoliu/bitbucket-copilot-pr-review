@@ -18,7 +18,6 @@ export function buildReviewRevision(input: {
 		reasoningEffort: string;
 	};
 	reviewConfig?: {
-		maxFiles: number;
 		maxFindings: number;
 		minConfidence: string;
 		maxPatchChars: number;

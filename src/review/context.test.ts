@@ -59,6 +59,6 @@ describe("buildReviewContext", () => {
 		);
 
 		assert.equal(readTextFileAtCommitCalls, 0);
-		assert.equal(context.reviewedFiles[0]?.path, "src/example.ts");
+		assert.equal(context.reviewableFiles[0]?.path, "src/example.ts");
 	});
 });

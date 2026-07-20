@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { Tool } from "@github/copilot-sdk";
-import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import type {
 	FindingDraft,
@@ -11,49 +10,9 @@ import type {
 } from "../review/types.ts";
 import { createReviewToolContext } from "./tools/context.ts";
 import { createEmitFindingTool } from "./tools/emit-finding.ts";
-import { createGetPrOverviewTool } from "./tools/get-pr-overview.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
 import { createRecordChangeAreaSummaryTool } from "./tools/record-change-area-summary.ts";
 import { createRecordPrSummaryTool } from "./tools/record-pr-summary.ts";
-
-const config: ReviewerConfig = {
-	repoRoot: "/tmp/repo",
-	gitRemoteName: "origin",
-	logLevel: "info",
-	bitbucket: {
-		baseUrl: "https://bitbucket.example.com",
-		projectKey: "PROJ",
-		repoSlug: "repo",
-		prId: 123,
-		auth: { type: "bearer", token: "token" },
-		tls: { insecureSkipVerify: false },
-	},
-	copilot: {
-		model: "gpt-5.3-codex",
-		reasoningEffort: "xhigh",
-		timeoutMs: 1800000,
-	},
-	report: {
-		key: "copilot-review",
-		title: "Copilot PR Review",
-		reporter: "GitHub Copilot",
-		commentTag: "copilot-pr-review",
-		commentStrategy: "recreate",
-	},
-	review: {
-		dryRun: false,
-		forceReview: false,
-		confirmRerun: false,
-		maxFiles: 100,
-		maxFindings: 10,
-		minConfidence: "high",
-		maxPatchChars: 12000,
-		defaultFileSliceLines: 3,
-		maxFileSliceLines: 4,
-		ignorePaths: [],
-		skipBranchPrefixes: ["renovate/"],
-	},
-};
 
 const reviewContext: ReviewContext = {
 	repoRoot: "/tmp/repo",
@@ -85,7 +44,7 @@ const reviewContext: ReviewContext = {
 	reviewRevision: "review-rev-123",
 	rawDiff: "",
 	diffStats: { fileCount: 1, additions: 2, deletions: 1 },
-	reviewedFiles: [
+	reviewableFiles: [
 		{
 			path: "src/new-name.ts",
 			oldPath: "src/old-name.ts",
@@ -147,7 +106,6 @@ const reviewContext: ReviewContext = {
 			isBinary: false,
 		},
 	],
-	skippedFiles: [],
 };
 
 function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
@@ -176,7 +134,6 @@ function getHandler<TArgs, TResult>(tool: Tool<TArgs>) {
 describe("Copilot tools", () => {
 	it("creates only the active review tools in the published order", () => {
 		const tools = createReviewTools(
-			config,
 			reviewContext,
 			createGitStub(),
 			[],
@@ -185,15 +142,9 @@ describe("Copilot tools", () => {
 
 		assert.deepEqual(
 			tools.map((tool) => tool.name),
-			[
-				"get_pr_overview",
-				"record_pr_summary",
-				"record_change_area_summary",
-				"emit_finding",
-			],
+			["record_pr_summary", "record_change_area_summary", "emit_finding"],
 		);
 		assert.deepEqual(REVIEW_TOOL_NAMES, [
-			"get_pr_overview",
 			"record_pr_summary",
 			"record_change_area_summary",
 			"emit_finding",
@@ -204,7 +155,6 @@ describe("Copilot tools", () => {
 		const drafts: FindingDraft[] = [];
 		const tool = createEmitFindingTool(
 			createReviewToolContext(
-				config,
 				reviewContext,
 				createGitStub(),
 				drafts,
@@ -245,7 +195,6 @@ describe("Copilot tools", () => {
 		const drafts: FindingDraft[] = [];
 		const tool = createEmitFindingTool(
 			createReviewToolContext(
-				config,
 				reviewContext,
 				createGitStub(),
 				drafts,
@@ -294,7 +243,7 @@ describe("Copilot tools", () => {
 		let patchLoads = 0;
 		const lazyContext: ReviewContext = {
 			...reviewContext,
-			reviewedFiles: [
+			reviewableFiles: [
 				{
 					path: "src/service.ts",
 					status: "modified",
@@ -306,7 +255,6 @@ describe("Copilot tools", () => {
 		};
 		const tool = createEmitFindingTool(
 			createReviewToolContext(
-				config,
 				lazyContext,
 				createGitStub({
 					diffFilePatch: async () => {
@@ -351,7 +299,7 @@ describe("Copilot tools", () => {
 		let patchPathspec: string | readonly string[] | undefined;
 		const lazyContext: ReviewContext = {
 			...reviewContext,
-			reviewedFiles: [
+			reviewableFiles: [
 				{
 					path: "src/new-name.ts",
 					oldPath: "src/old-name.ts",
@@ -364,7 +312,6 @@ describe("Copilot tools", () => {
 		};
 		const tool = createEmitFindingTool(
 			createReviewToolContext(
-				config,
 				lazyContext,
 				createGitStub({
 					diffFilePatch: async (_base, _head, filePath) => {
@@ -435,7 +382,7 @@ describe("Copilot tools", () => {
 		let patchLoads = 0;
 		const lazyContext: ReviewContext = {
 			...reviewContext,
-			reviewedFiles: [
+			reviewableFiles: [
 				{
 					path: "src/service.ts",
 					status: "modified",
@@ -447,7 +394,6 @@ describe("Copilot tools", () => {
 		};
 		const tool = createEmitFindingTool(
 			createReviewToolContext(
-				config,
 				lazyContext,
 				createGitStub({
 					diffFilePatch: async () => {
@@ -487,7 +433,7 @@ describe("Copilot tools", () => {
 		const drafts: FindingDraft[] = [];
 		const copiedReviewContext: ReviewContext = {
 			...reviewContext,
-			reviewedFiles: [
+			reviewableFiles: [
 				{
 					path: "src/copied.ts",
 					oldPath: "src/original.ts",
@@ -512,7 +458,6 @@ describe("Copilot tools", () => {
 		};
 		const tool = createEmitFindingTool(
 			createReviewToolContext(
-				config,
 				copiedReviewContext,
 				createGitStub(),
 				drafts,
@@ -550,16 +495,14 @@ describe("Copilot tools", () => {
 		assert.deepEqual(drafts, []);
 	});
 
-	it("marks only active read-only tools to skip permission prompts", () => {
+	it("marks active read-only tools to skip permission prompts", () => {
 		const toolContext = createReviewToolContext(
-			config,
 			reviewContext,
 			createGitStub(),
 			[],
 			createSummaryDrafts(),
 		);
 
-		assert.equal(createGetPrOverviewTool(toolContext).skipPermission, true);
 		assert.equal(
 			createRecordPrSummaryTool(toolContext).skipPermission,
 			undefined,
@@ -567,117 +510,28 @@ describe("Copilot tools", () => {
 		assert.equal(createEmitFindingTool(toolContext).skipPermission, undefined);
 	});
 
-	it("describes overview and finding category fields precisely", () => {
+	it("describes finding category fields precisely", () => {
 		const toolContext = createReviewToolContext(
-			config,
 			reviewContext,
 			createGitStub(),
 			[],
 			createSummaryDrafts(),
 		);
-		const overviewTool = createGetPrOverviewTool(toolContext);
 		const emitFindingTool = createEmitFindingTool(toolContext);
 		const emitFindingParameters = emitFindingTool.parameters as {
 			properties?: Record<string, { description?: string }>;
 		};
 
 		assert.equal(
-			overviewTool.description,
-			"Get canonical review scope: reviewed files you may target and skipped files you must ignore. Use builtin bash for diff and code inspection.",
-		);
-		assert.equal(
 			emitFindingParameters.properties?.category?.description,
 			"Optional short category when obvious and helpful, such as security, correctness, data-integrity, concurrency, reliability, performance, or tests.",
 		);
-	});
-
-	it("returns minimal canonical scope for reviewed and skipped files", async () => {
-		const tool = createGetPrOverviewTool(
-			createReviewToolContext(
-				config,
-				{
-					...reviewContext,
-					skippedFiles: [
-						{
-							path: "dist/generated.js",
-							status: "modified",
-							reason: "ignored by policy",
-						},
-					],
-				},
-				createGitStub(),
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<unknown, unknown>(tool);
-
-		const result = await handler(
-			{},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_pr_overview",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			reviewedFiles: [
-				{
-					path: "src/new-name.ts",
-					oldPath: "src/old-name.ts",
-					status: "renamed",
-				},
-				{
-					path: "src/multi-hunk.ts",
-					status: "modified",
-				},
-			],
-			skippedFiles: [
-				{
-					path: "dist/generated.js",
-					status: "modified",
-					reason: "ignored by policy",
-				},
-			],
-		});
-	});
-
-	it("rejects unexpected overview arguments", async () => {
-		const tool = createGetPrOverviewTool(
-			createReviewToolContext(
-				config,
-				reviewContext,
-				createGitStub(),
-				[],
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<unknown, unknown>(tool);
-
-		const result = await handler(
-			{ reviewedFilesOffset: 1 },
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "get_pr_overview",
-				arguments: {},
-			},
-		);
-
-		assert.deepEqual(result, {
-			resultType: "rejected",
-			textResultForLlm:
-				'Invalid PR overview payload: Unrecognized key: "reviewedFilesOffset"',
-		});
 	});
 
 	it("records and replaces a pull request summary", async () => {
 		const summaryDrafts = createSummaryDrafts();
 		const tool = createRecordPrSummaryTool(
 			createReviewToolContext(
-				config,
 				reviewContext,
 				createGitStub(),
 				[],
@@ -721,7 +575,6 @@ describe("Copilot tools", () => {
 		const summaryDrafts = createSummaryDrafts();
 		const tool = createRecordChangeAreaSummaryTool(
 			createReviewToolContext(
-				config,
 				reviewContext,
 				createGitStub(),
 				[],
@@ -761,7 +614,6 @@ describe("Copilot tools", () => {
 		const summaryDrafts = createSummaryDrafts();
 		const tool = createRecordChangeAreaSummaryTool(
 			createReviewToolContext(
-				config,
 				reviewContext,
 				createGitStub(),
 				[],
@@ -801,7 +653,6 @@ describe("Copilot tools", () => {
 		const summaryDrafts = createSummaryDrafts();
 		const tool = createRecordChangeAreaSummaryTool(
 			createReviewToolContext(
-				config,
 				reviewContext,
 				createGitStub(),
 				[],

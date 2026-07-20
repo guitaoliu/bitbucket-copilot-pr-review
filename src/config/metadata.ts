@@ -334,14 +334,6 @@ export const CONFIG_FIELD_METADATA = {
 		path: "review.confirmRerun",
 		description: "Prompt before rerunning unusable cached artifacts.",
 	},
-	reviewMaxFiles: {
-		path: "review.maxFiles",
-		env: "REVIEW_MAX_FILES",
-		description: "Maximum number of changed files to review.",
-		...envParser({ kind: "positiveInteger" }),
-		...repoOverride(),
-		...envDoc(26, { defaultValuePath: ["review", "maxFiles"] }),
-	},
 	reviewMaxFindings: {
 		path: "review.maxFindings",
 		env: "REVIEW_MAX_FINDINGS",
@@ -385,7 +377,8 @@ export const CONFIG_FIELD_METADATA = {
 	reviewIgnorePaths: {
 		path: "review.ignorePaths",
 		env: "REVIEW_IGNORE_PATHS",
-		description: "Comma-separated repo-relative glob patterns to skip.",
+		description:
+			"Comma-separated repo-relative glob patterns excluded from reportable finding scope.",
 		...envParser({ kind: "stringArray" }),
 		...repoOverride(),
 		...envDoc(32, { defaultValuePath: ["review", "ignorePaths"] }),

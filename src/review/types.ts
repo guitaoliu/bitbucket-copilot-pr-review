@@ -1,6 +1,6 @@
 import type { CopilotSession } from "@github/copilot-sdk";
 import type { PullRequestInfo } from "../bitbucket/types.ts";
-import type { ChangedFile, DiffStats, SkippedFile } from "../git/types.ts";
+import type { ChangedFile, DiffStats } from "../git/types.ts";
 
 type CopilotModelMetrics = Awaited<
 	ReturnType<CopilotSession["rpc"]["usage"]["getMetrics"]>
@@ -82,8 +82,7 @@ export interface ReviewContext {
 	reviewRevision: string;
 	rawDiff: string;
 	diffStats: DiffStats;
-	reviewedFiles: ChangedFile[];
-	skippedFiles: SkippedFile[];
+	reviewableFiles: ChangedFile[];
 	previousReview?: PreviousReviewReference;
 	ciSummary?: string;
 }
@@ -102,11 +101,6 @@ export interface FindingDraft {
 export interface ReviewFinding extends FindingDraft {
 	externalId: string;
 	threadKey: string;
-}
-
-export interface FileChangeSummary {
-	path: string;
-	summary: string;
 }
 
 export interface ChangeAreaSummary {
@@ -145,7 +139,6 @@ export interface ReviewOutcome {
 	assistantMessage?: string;
 	prSummary?: string;
 	changeAreas?: ChangeAreaSummary[];
-	fileSummaries?: FileChangeSummary[];
 	gitTelemetry?: ReviewGitTelemetry;
 	toolTelemetry?: ReviewToolTelemetry;
 	copilotUsage?: ReviewCopilotUsage;

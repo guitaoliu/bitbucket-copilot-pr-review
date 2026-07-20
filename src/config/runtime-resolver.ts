@@ -143,10 +143,6 @@ const RUNTIME_FIELD_RESOLVERS = [
 		cliFlagSource("confirmRerun"),
 		defaultSource(),
 	]),
-	runtimeFieldResolver("reviewMaxFiles", [
-		envSource("reviewMaxFiles"),
-		defaultSource(),
-	]),
 	runtimeFieldResolver("reviewMaxFindings", [
 		envSource("reviewMaxFindings"),
 		defaultSource(),
@@ -289,7 +285,6 @@ function assertRuntimeGroupObjects(
 		!hasBoolean(groups.review.dryRun) ||
 		!hasBoolean(groups.review.forceReview) ||
 		!hasBoolean(groups.review.confirmRerun) ||
-		!hasNumber(groups.review.maxFiles) ||
 		!hasNumber(groups.review.maxFindings) ||
 		!hasString(groups.review.minConfidence) ||
 		!hasNumber(groups.review.maxPatchChars) ||

@@ -94,7 +94,7 @@ This file is for agentic coding assistants working in this repository.
 - Functions, variables, and object properties: `camelCase`
 - Shared constants: `UPPER_SNAKE_CASE` only when they are true module-level constants; otherwise match surrounding style.
 - Test names should be behavior-focused and sentence-like, e.g. `it("rejects oversized comments before sending the request", ...)`.
-- Prefer descriptive names tied to the domain: `reviewRevision`, `publicationStatus`, `skippedFiles`, `commentStrategy`.
+- Prefer descriptive names tied to the domain: `reviewRevision`, `publicationStatus`, `reviewableFiles`, `commentStrategy`.
 
 ## Error-handling guidelines
 

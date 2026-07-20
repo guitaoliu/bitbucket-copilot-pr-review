@@ -39,7 +39,7 @@ function createContext(reviewedFileCount = 2): ReviewContext {
 			additions: reviewedFileCount,
 			deletions: 0,
 		},
-		reviewedFiles: Array.from({ length: reviewedFileCount }, (_, index) => ({
+		reviewableFiles: Array.from({ length: reviewedFileCount }, (_, index) => ({
 			path: `src/file-${index}.ts`,
 			status: "modified" as const,
 			patch: `diff --git a/src/file-${index}.ts b/src/file-${index}.ts`,
@@ -58,7 +58,6 @@ function createContext(reviewedFileCount = 2): ReviewContext {
 			deletions: 0,
 			isBinary: false,
 		})),
-		skippedFiles: [],
 	};
 }
 
@@ -80,7 +79,6 @@ describe("finalizeReviewSummary", () => {
 
 		assert.equal(result.prSummary, "Tightens request validation before merge.");
 		assert.deepEqual(result.changeAreas, drafts.changeAreas);
-		assert.deepEqual(result.fileSummaries, []);
 	});
 
 	it("preserves multiline bullet formatting for the PR summary", () => {
@@ -128,7 +126,7 @@ describe("finalizeReviewSummary", () => {
 		);
 	});
 
-	it("omits file summaries for larger reviews while keeping the PR summary", () => {
+	it("keeps the PR summary for larger reviews", () => {
 		const context = createContext(26);
 		const drafts: ReviewSummaryDrafts = {
 			prSummary: "Expands validation across many modules.",
@@ -137,6 +135,5 @@ describe("finalizeReviewSummary", () => {
 		const result = finalizeReviewSummary(context, drafts);
 
 		assert.equal(result.prSummary, "Expands validation across many modules.");
-		assert.deepEqual(result.fileSummaries, []);
 	});
 });

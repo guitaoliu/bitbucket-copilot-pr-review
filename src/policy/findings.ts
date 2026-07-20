@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ChangedFile } from "../git/types.ts";
 import {
-	createReviewedFileLookup,
+	createReviewableFileLookup,
 	normalizeFindingDraftLocation,
 } from "../review/file.ts";
 import { buildFindingThreadKey } from "../review/finding-identity.ts";
@@ -107,11 +107,11 @@ function makeExternalId(draft: FindingDraft): string {
 
 export function finalizeFindings(
 	drafts: FindingDraft[],
-	reviewedFiles: ChangedFile[],
+	reviewableFiles: ChangedFile[],
 	maxFindings: number,
 	minConfidence: Confidence,
 ): ReviewFinding[] {
-	const fileMap = createReviewedFileLookup(reviewedFiles);
+	const fileMap = createReviewableFileLookup(reviewableFiles);
 	const acceptedByKey = new Map<string, ReviewFinding>();
 	const preferredFindingKeyByLocation = new Map<
 		string,

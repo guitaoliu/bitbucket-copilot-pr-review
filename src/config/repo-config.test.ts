@@ -56,7 +56,6 @@ const baseConfig: ReviewerConfig = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFiles: 300,
 		maxFindings: 25,
 		minConfidence: "medium",
 		maxPatchChars: 12000,
@@ -80,7 +79,6 @@ describe("parseRepoReviewConfig", () => {
 		  "$schema": "./schemas/copilot-code-review.schema.json",
 		  "review": {
 		    "ignorePaths": ["i18n/locales/**/*.json"],
-		    "maxFiles": 150,
 		    "skipBranchPrefixes": ["renovate/", "deps/"]
 			  },
 			  "copilot": {
@@ -89,7 +87,6 @@ describe("parseRepoReviewConfig", () => {
 			}`);
 
 		assert.deepEqual(config.review?.ignorePaths, ["i18n/locales/**/*.json"]);
-		assert.equal(config.review?.maxFiles, 150);
 		assert.deepEqual(config.review?.skipBranchPrefixes, ["renovate/", "deps/"]);
 		assert.equal(config.copilot?.model, "gpt-5.3-codex");
 	});
@@ -101,14 +98,21 @@ describe("parseRepoReviewConfig", () => {
 		);
 	});
 
+	it("accepts but ignores the legacy review maxFiles field", () => {
+		const repoConfig = parseRepoReviewConfig(
+			'{"review":{"maxFiles":150,"maxFindings":10}}',
+		);
+		const merged = mergeRepoReviewConfig(baseConfig, repoConfig);
+
+		assert.equal(repoConfig.review?.maxFiles, 150);
+		assert.equal(merged.review.maxFindings, 10);
+		assert.equal("maxFiles" in merged.review, false);
+	});
+
 	it("rejects unreasonable numeric values", () => {
 		assert.throws(
 			() => parseRepoReviewConfig('{"copilot":{"timeoutMs":999999999}}'),
 			/at most 3600000/,
-		);
-		assert.throws(
-			() => parseRepoReviewConfig('{"review":{"maxFiles":999999}}'),
-			/at most 500/,
 		);
 		assert.throws(
 			() => parseRepoReviewConfig('{"review":{"maxPatchChars":10}}'),
@@ -171,8 +175,7 @@ describe("mergeRepoReviewConfig", () => {
 			baseConfig,
 			parseRepoReviewConfig(`{
 			  "review": {
-			    "ignorePaths": ["i18n/locales/**/*.json"],
-			    "maxFiles": 150
+			    "ignorePaths": ["i18n/locales/**/*.json"]
 			  },
 			  "report": {
 			    "commentStrategy": "update"
@@ -180,7 +183,6 @@ describe("mergeRepoReviewConfig", () => {
 			}`),
 		);
 
-		assert.equal(merged.review.maxFiles, 150);
 		assert.deepEqual(merged.review.ignorePaths, ["i18n/locales/**/*.json"]);
 		assert.equal(merged.report.commentStrategy, "update");
 	});
@@ -211,10 +213,6 @@ describe("mergeRepoReviewConfig", () => {
 		const merged = mergeRepoReviewConfig(
 			{
 				...baseConfig,
-				review: {
-					...baseConfig.review,
-					maxFiles: 300,
-				},
 				copilot: {
 					...baseConfig.copilot,
 					model: "env-model",
@@ -226,19 +224,13 @@ describe("mergeRepoReviewConfig", () => {
 							model: "env-model",
 						},
 						report: { ...baseConfig.internal?.envRepoOverrides.report },
-						review: {
-							...baseConfig.internal?.envRepoOverrides.review,
-							maxFiles: 300,
-						},
+						review: { ...baseConfig.internal?.envRepoOverrides.review },
 					},
 				},
 			},
-			parseRepoReviewConfig(
-				'{"review":{"maxFiles":150},"copilot":{"model":"repo-model"}}',
-			),
+			parseRepoReviewConfig('{"copilot":{"model":"repo-model"}}'),
 		);
 
-		assert.equal(merged.review.maxFiles, 300);
 		assert.equal(merged.copilot.model, "env-model");
 		assert.deepEqual(merged.review.skipBranchPrefixes, ["renovate/"]);
 	});
@@ -288,7 +280,6 @@ describe("getRepoReviewConfigSchema", () => {
 							maxItems?: number;
 							items?: { maxLength?: number };
 						};
-						maxFiles?: { maximum?: number };
 					};
 				};
 			};
@@ -299,7 +290,6 @@ describe("getRepoReviewConfigSchema", () => {
 			schema.properties?.copilot?.properties?.timeoutMs?.maximum,
 			3600000,
 		);
-		assert.equal(schema.properties?.review?.properties?.maxFiles?.maximum, 500);
 		assert.equal(schema.properties?.report?.properties?.title?.maxLength, 120);
 		assert.equal(
 			schema.properties?.review?.properties?.ignorePaths?.maxItems,

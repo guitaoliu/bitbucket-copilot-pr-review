@@ -257,13 +257,13 @@ describe("createSessionEventTracer", () => {
 				toolRequests: [
 					{
 						toolCallId: "tool-1",
-						name: "get_pr_overview",
+						name: "bash",
 						arguments: {},
-						intentionSummary: "Load review scope first",
+						intentionSummary: "Inspect the diff first",
 					},
 					{
 						toolCallId: "tool-2",
-						name: "bash",
+						name: "emit_finding",
 						arguments: {},
 					},
 				],
@@ -278,8 +278,8 @@ describe("createSessionEventTracer", () => {
 					{
 						phase: "tool_planning",
 						toolCount: 2,
-						toolNames: ["get_pr_overview", "bash"],
-						intentionSummaries: ["Load review scope first"],
+						toolNames: ["bash", "emit_finding"],
+						intentionSummaries: ["Inspect the diff first"],
 					},
 				],
 			},

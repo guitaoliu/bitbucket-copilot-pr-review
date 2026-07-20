@@ -52,7 +52,6 @@ const baseConfig: ReviewerConfig = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFiles: 100,
 		maxFindings: 10,
 		minConfidence: "high",
 		maxPatchChars: 12000,
@@ -98,7 +97,7 @@ function createContext(pr = createPullRequest()): ReviewContext {
 		reviewRevision: "review-rev-123",
 		rawDiff: "diff --git a/src/example.ts b/src/example.ts",
 		diffStats: { fileCount: 1, additions: 1, deletions: 0 },
-		reviewedFiles: [
+		reviewableFiles: [
 			{
 				path: "src/example.ts",
 				status: "modified",
@@ -119,7 +118,6 @@ function createContext(pr = createPullRequest()): ReviewContext {
 				isBinary: false,
 			},
 		],
-		skippedFiles: [],
 	};
 }
 

@@ -38,7 +38,6 @@ export const baseReviewerConfig: ReviewerConfig = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFiles: 100,
 		maxFindings: 10,
 		minConfidence: "high",
 		maxPatchChars: 12000,
@@ -111,8 +110,7 @@ export function createReviewContext(
 		reviewRevision: "review-rev-123",
 		rawDiff: "",
 		diffStats: { fileCount: 1, additions: 1, deletions: 0 },
-		reviewedFiles: [createChangedFile()],
-		skippedFiles: [],
+		reviewableFiles: [createChangedFile()],
 		...overrides,
 	};
 }
@@ -123,7 +121,6 @@ export function createReviewOutcome(
 	return {
 		summary: "No reportable issues found.",
 		prSummary: "Confirms the reviewed change is safe to merge.",
-		fileSummaries: [],
 		findings: [],
 		stale: false,
 		...overrides,

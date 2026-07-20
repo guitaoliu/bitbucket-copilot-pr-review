@@ -26,13 +26,6 @@ export interface ChangedFile {
 	isBinary: boolean;
 }
 
-export interface SkippedFile {
-	path: string;
-	oldPath?: string;
-	status: FileStatus;
-	reason: string;
-}
-
 export interface DiffStats {
 	fileCount: number;
 	additions: number;

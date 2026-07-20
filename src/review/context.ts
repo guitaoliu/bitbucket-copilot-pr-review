@@ -92,7 +92,6 @@ export async function buildReviewContext(
 				reasoningEffort: config.copilot.reasoningEffort,
 			},
 			reviewConfig: {
-				maxFiles: config.review.maxFiles,
 				maxFindings: config.review.maxFindings,
 				minConfidence: config.review.minConfidence,
 				maxPatchChars: config.review.maxPatchChars,
@@ -103,11 +102,7 @@ export async function buildReviewContext(
 			},
 		}),
 	);
-	const filtered = filterChangedFiles(
-		changedFiles,
-		config.review.maxFiles,
-		config.review.ignorePaths,
-	);
+	const filtered = filterChangedFiles(changedFiles, config.review.ignorePaths);
 	return omitUndefined({
 		repoRoot: config.repoRoot,
 		pr,
@@ -117,8 +112,7 @@ export async function buildReviewContext(
 		reviewRevision,
 		rawDiff: "",
 		diffStats,
-		reviewedFiles: filtered.reviewedFiles,
-		skippedFiles: filtered.skippedFiles,
+		reviewableFiles: filtered,
 		ciSummary,
 	}) satisfies ReviewContext;
 }

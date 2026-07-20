@@ -37,13 +37,5 @@ export function sanitizeReviewOutcomeForOutput(
 					})),
 				}
 			: {}),
-		...(outcome.fileSummaries
-			? {
-					fileSummaries: outcome.fileSummaries.map((entry) => ({
-						...entry,
-						summary: sanitizeModelAuthoredText(entry.summary),
-					})),
-				}
-			: {}),
 	}) satisfies ReviewOutcome;
 }

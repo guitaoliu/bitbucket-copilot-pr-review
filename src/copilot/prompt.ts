@@ -120,7 +120,8 @@ function buildEnvironmentContextSection(): string {
 	return [
 		"Review environment constraints:",
 		"- The Copilot CLI working directory is a trusted base-commit checkout. Direct file reads inspect base content unless you explicitly use git to read the PR head.",
-		"- Findings can only target reviewed files; skipped files are never valid targets.",
+		"- Findings can only target reviewable changed files and changed lines.",
+		"- Paths matching `ignored_path_patterns` are invalid finding targets but may be inspected as context.",
 		"- Shell inspection is readonly only: stay within the repository root, avoid network access, and do not run commands that write files or mutate git state.",
 		"- Lack of quick evidence is not evidence that the changed path is safe.",
 	].join("\n");
@@ -132,7 +133,7 @@ function buildCodeChangeRulesSection(config: ReviewerConfig): string {
 		"- Record exactly one PR-purpose summary with record_pr_summary. Use bullets if clearer.",
 		"- record_change_area_summary: clear areas only; use exact reviewed paths or reviewed path globs.",
 		"- Use emit_finding only for validated issues; investigate high-signal concerns before dropping them.",
-		"- Emit one finding per root cause. Target reviewed paths only; skipped paths are invalid.",
+		"- Emit one finding per root cause. Target reviewable changed files only.",
 		"- For cross-file issues validated with unchanged code, anchor to the changed reviewed file that created or increased the risk.",
 		"- Prefer a changed head-side line; use line 0 only for true file-level issues.",
 		"- Keep titles short; details explain the trigger, impact, and why the code is wrong.",
@@ -146,12 +147,13 @@ function buildCodeChangeRulesSection(config: ReviewerConfig): string {
 function buildToolEfficiencySection(): string {
 	return [
 		"Recommended workflow:",
-		"1. Call get_pr_overview once to load canonical review scope, including reviewed files you may target and skipped files you must ignore.",
-		"2. Use readonly builtin shell tools to inspect the riskiest diffs, relevant head/base code, nearby tests, and impacted paths until the changed behavior is clear. Use commands such as `git diff <merge_base_commit> <head_commit> -- <path>` and `git show <head_commit>:<path>` for PR-head content.",
-		"3. Reuse evidence you already gathered instead of re-reading the same ranges, and avoid shell formatting wrappers unless they add real inspection value.",
-		"4. For shared contracts, public interfaces, validation, auth, persistence, serialization, async flow, or unclear call paths, expand with targeted readonly git/repo inspection until hypotheses resolve.",
-		"5. Call record_pr_summary once; use bullets for distinct changes.",
-		"6. Call emit_finding for every validated distinct issue you find, then end with a concise plain-text conclusion.",
+		"1. Start from the diff. Batch cheap discovery in one readonly shell call when possible: diff summary, hunks, symbols, and call sites. Narrow paths before reading file bodies.",
+		"2. Read the smallest relevant ranges once the path or hypothesis is known. Use `git diff <merge_base_commit> <head_commit> -- <path>` and `git show <head_commit>:<path>` for PR-head content.",
+		"3. If a search fails, simplify once; if a path is uncertain, discover it with git instead of guessing or scanning broadly.",
+		"4. Reuse evidence; avoid presentation-only shell wrappers.",
+		"5. Expand readonly inspection for unclear paths or shared contracts.",
+		"6. Call record_pr_summary once; use bullets for distinct changes.",
+		"7. Call emit_finding for every validated distinct issue you find, then end with a concise plain-text conclusion.",
 	].join("\n");
 }
 
@@ -183,7 +185,10 @@ export function buildSystemMessage(
 	};
 }
 
-export function buildPrompt(context: ReviewContext): string {
+export function buildPrompt(
+	context: ReviewContext,
+	ignorePaths: readonly string[] = [],
+): string {
 	const pullRequestTitle = escapePromptMarkupText(context.pr.title);
 	const sourceBranch = escapePromptMarkupText(context.pr.source.displayId);
 	const targetBranch = escapePromptMarkupText(context.pr.target.displayId);
@@ -203,6 +208,12 @@ export function buildPrompt(context: ReviewContext): string {
 		"previous_review_findings",
 		buildPreviousReviewSummary(context.previousReview),
 	);
+	const ignoredPathPatterns =
+		ignorePaths.length > 0
+			? [
+					`ignored_path_patterns: ${escapePromptMarkupText(JSON.stringify(ignorePaths))}`,
+				]
+			: [];
 	return [
 		"Please review this Bitbucket Data Center pull request.",
 		"",
@@ -212,8 +223,7 @@ export function buildPrompt(context: ReviewContext): string {
 		`target_branch: ${targetBranch}`,
 		`head_commit: ${context.headCommit}`,
 		`merge_base_commit: ${context.mergeBaseCommit}`,
-		`reviewed_files: ${context.reviewedFiles.length}`,
-		`skipped_files: ${context.skippedFiles.length}`,
+		...ignoredPathPatterns,
 		"</pull_request_context>",
 		...prDescriptionSection,
 		...ciSummarySection,

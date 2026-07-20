@@ -41,13 +41,13 @@ function canUseOldPathForReviewedFileLookup(
 	return file.status === "renamed" && file.oldPath !== undefined;
 }
 
-export function createReviewedFileLookup(
-	reviewedFiles: ChangedFile[],
+export function createReviewableFileLookup(
+	reviewableFiles: ChangedFile[],
 ): Map<string, ChangedFile> {
 	const lookup = new Map<string, ChangedFile>();
 	const oldPathCounts = new Map<string, number>();
 
-	for (const file of reviewedFiles) {
+	for (const file of reviewableFiles) {
 		lookup.set(file.path, file);
 		if (canUseOldPathForReviewedFileLookup(file)) {
 			oldPathCounts.set(
@@ -57,7 +57,7 @@ export function createReviewedFileLookup(
 		}
 	}
 
-	for (const file of reviewedFiles) {
+	for (const file of reviewableFiles) {
 		if (
 			canUseOldPathForReviewedFileLookup(file) &&
 			oldPathCounts.get(file.oldPath) === 1
@@ -71,9 +71,9 @@ export function createReviewedFileLookup(
 
 export function normalizeFindingDraftLocation(
 	draft: FindingDraft,
-	reviewedFileMap: Map<string, ChangedFile>,
+	reviewableFileMap: Map<string, ChangedFile>,
 ): { normalizedDraft?: FindingDraft; note?: string; error?: string } {
-	const file = reviewedFileMap.get(draft.path);
+	const file = reviewableFileMap.get(draft.path);
 	if (!file) {
 		return {
 			error: `The file ${draft.path} is not one of the reviewed files.`,

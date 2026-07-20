@@ -1,55 +1,16 @@
-import type { ChangedFile, FileStatus, SkippedFile } from "../../git/types.ts";
+import type { ChangedFile } from "../../git/types.ts";
 import { formatLineRanges } from "../../policy/line-ranges.ts";
 import type { ChangedLineResolver } from "../../review/changed-lines.ts";
 import { normalizeFindingDraftLocation } from "../../review/file.ts";
 import type { FindingDraft } from "../../review/types.ts";
-import { type OmitUndefined, omitUndefined } from "../../shared/object.ts";
-
-export type ReviewedFileScope = OmitUndefined<{
-	path: string;
-	oldPath?: string;
-	status: FileStatus;
-	isBinary?: true;
-}>;
-
-export type SkippedFileScope = OmitUndefined<{
-	path: string;
-	oldPath?: string;
-	status: FileStatus;
-	reason: string;
-}>;
-
-export interface PrOverviewResult {
-	reviewedFiles: ReviewedFileScope[];
-	skippedFiles: SkippedFileScope[];
-}
-
-export function summarizeReviewedFileScope(
-	file: ChangedFile,
-): ReviewedFileScope {
-	return omitUndefined({
-		path: file.path,
-		oldPath: file.oldPath,
-		status: file.status,
-		isBinary: file.isBinary ? true : undefined,
-	});
-}
-
-export function summarizeSkippedFileScope(file: SkippedFile): SkippedFileScope {
-	return omitUndefined({
-		path: file.path,
-		oldPath: file.oldPath,
-		status: file.status,
-		reason: file.reason,
-	});
-}
+import { omitUndefined } from "../../shared/object.ts";
 
 export async function validateFindingDraftLocation(
 	draft: FindingDraft,
-	reviewedFileMap: Map<string, ChangedFile>,
+	reviewableFileMap: Map<string, ChangedFile>,
 	resolveChangedLines: ChangedLineResolver,
 ): Promise<{ normalizedDraft?: FindingDraft; note?: string; error?: string }> {
-	const result = normalizeFindingDraftLocation(draft, reviewedFileMap);
+	const result = normalizeFindingDraftLocation(draft, reviewableFileMap);
 	if (result.error) {
 		return result;
 	}
@@ -61,7 +22,7 @@ export async function validateFindingDraftLocation(
 		};
 	}
 
-	const file = reviewedFileMap.get(normalizedDraft.path);
+	const file = reviewableFileMap.get(normalizedDraft.path);
 	if (!file) {
 		return {
 			error: `The file ${normalizedDraft.path} is not one of the reviewed files.`,
@@ -72,7 +33,7 @@ export async function validateFindingDraftLocation(
 		const { changedLines } = await resolveChangedLines(file);
 		const remapped = normalizeFindingDraftLocation(
 			normalizedDraft,
-			reviewedFileMap,
+			reviewableFileMap,
 		);
 		if (remapped.error) {
 			return {

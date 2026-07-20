@@ -3,11 +3,11 @@ import { describe, it } from "node:test";
 
 import type { ChangedFile } from "../git/types.ts";
 import {
-	createReviewedFileLookup,
+	createReviewableFileLookup,
 	normalizeFindingDraftLocation,
 } from "./file.ts";
 
-describe("createReviewedFileLookup", () => {
+describe("createReviewableFileLookup", () => {
 	it("adds oldPath aliases only for renamed files", () => {
 		const renamedFile: ChangedFile = {
 			path: "src/new-name.ts",
@@ -32,7 +32,7 @@ describe("createReviewedFileLookup", () => {
 			isBinary: false,
 		};
 
-		const lookup = createReviewedFileLookup([renamedFile, copiedFile]);
+		const lookup = createReviewableFileLookup([renamedFile, copiedFile]);
 
 		assert.equal(lookup.get("src/new-name.ts"), renamedFile);
 		assert.equal(lookup.get("src/old-name.ts"), renamedFile);
@@ -64,7 +64,7 @@ describe("normalizeFindingDraftLocation", () => {
 				title: "Wrong line",
 				details: "This line is unchanged.",
 			},
-			createReviewedFileLookup([reviewedFile]),
+			createReviewableFileLookup([reviewedFile]),
 		);
 
 		assert.deepEqual(result, {
@@ -94,7 +94,7 @@ describe("normalizeFindingDraftLocation", () => {
 				title: "File issue",
 				details: "This applies to the whole changed file.",
 			},
-			createReviewedFileLookup([reviewedFile]),
+			createReviewableFileLookup([reviewedFile]),
 		);
 
 		assert.deepEqual(result, {
@@ -141,7 +141,7 @@ describe("normalizeFindingDraftLocation", () => {
 				title: "Nearby line",
 				details: "Anchored one line away inside the same hunk.",
 			},
-			createReviewedFileLookup([reviewedFile]),
+			createReviewableFileLookup([reviewedFile]),
 		);
 
 		assert.deepEqual(result, {

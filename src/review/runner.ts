@@ -106,7 +106,7 @@ export async function runReview(
 		dryRun: effectiveConfig.review.dryRun,
 	});
 	logger.info(
-		`Review scope after file filtering: ${context.reviewedFiles.length} reviewed, ${context.skippedFiles.length} skipped out of ${context.diffStats.fileCount} changed files (REVIEW_MAX_FILES=${effectiveConfig.review.maxFiles}).`,
+		`Review scope after file filtering: ${context.reviewableFiles.length} reviewable out of ${context.diffStats.fileCount} changed files.`,
 	);
 	const publicationStatus = await getExistingPublicationStatus(
 		bitbucket,

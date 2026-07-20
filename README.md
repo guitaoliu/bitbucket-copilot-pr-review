@@ -99,7 +99,6 @@ Minimal example:
   "$schema": "./schemas/copilot-code-review.schema.json",
   "review": {
     "ignorePaths": ["i18n/locales/**/*.json"],
-    "maxFiles": 300,
     "maxFindings": 25
   }
 }
@@ -120,7 +119,6 @@ Expanded example:
   },
   "review": {
     "ignorePaths": ["i18n/locales/**/*.json", "docs/generated/**"],
-    "maxFiles": 300,
     "maxFindings": 25,
     "minConfidence": "medium",
     "maxPatchChars": 12000,

@@ -29,7 +29,6 @@ export const REVIEWER_CONFIG_DEFAULTS = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFiles: 300,
 		maxFindings: 25,
 		minConfidence: "medium" as Confidence,
 		maxPatchChars: 12_000,

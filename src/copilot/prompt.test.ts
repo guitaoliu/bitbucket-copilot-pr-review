@@ -32,7 +32,6 @@ const config: ReviewerConfig = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFiles: 100,
 		maxFindings: 3,
 		minConfidence: "high",
 		maxPatchChars: 12000,
@@ -73,7 +72,7 @@ const context: ReviewContext = {
 	reviewRevision: "review-rev-123",
 	rawDiff: "",
 	diffStats: { fileCount: 1, additions: 2, deletions: 1 },
-	reviewedFiles: [
+	reviewableFiles: [
 		{
 			path: "src/example.ts",
 			status: "modified",
@@ -94,7 +93,6 @@ const context: ReviewContext = {
 			isBinary: false,
 		},
 	],
-	skippedFiles: [],
 };
 
 describe("buildPrompt", () => {
@@ -172,10 +170,22 @@ describe("buildPrompt", () => {
 		);
 	});
 
+	it("includes trusted ignored path patterns as finding policy", () => {
+		const prompt = buildPrompt(context, [
+			"dist/**",
+			"i18n/<generated>/**/*.json",
+		]);
+
+		assert.match(
+			prompt,
+			/ignored_path_patterns: \["dist\/\*\*","i18n\/&lt;generated&gt;\/\*\*\/\*\.json"\]/,
+		);
+	});
+
 	it("omits per-file summary instructions for large reviews", () => {
 		const prompt = buildPrompt({
 			...context,
-			reviewedFiles: Array.from({ length: 40 }, (_, index) => ({
+			reviewableFiles: Array.from({ length: 40 }, (_, index) => ({
 				path: `src/example-${index}.ts`,
 				status: "modified" as const,
 				patch: `diff --git a/src/example-${index}.ts b/src/example-${index}.ts`,
@@ -321,11 +331,11 @@ describe("buildSystemMessage", () => {
 		assert.match(content, /record_change_area_summary/i);
 		assert.match(
 			content,
-			/Call get_pr_overview once to load canonical review scope, including reviewed files you may target and skipped files you must ignore/,
+			/Start from the diff\. Batch cheap discovery in one readonly shell call when possible/,
 		);
 		assert.match(
 			content,
-			/Use readonly builtin shell tools to inspect the riskiest diffs, relevant head\/base code, nearby tests, and impacted paths until the changed behavior is clear/,
+			/Read the smallest relevant ranges once the path or hypothesis is known/,
 		);
 		assert.match(
 			content,
@@ -333,14 +343,17 @@ describe("buildSystemMessage", () => {
 		);
 		assert.match(
 			content,
-			/Reuse evidence you already gathered instead of re-reading the same ranges, and avoid shell formatting wrappers unless they add real inspection value/,
+			/If a search fails, simplify once; if a path is uncertain, discover it with git instead of guessing or scanning broadly/,
 		);
 		assert.match(
 			content,
-			/For shared contracts, public interfaces, validation, auth, persistence, serialization, async flow, or unclear call paths, expand with targeted readonly git\/repo inspection until hypotheses resolve/,
+			/Reuse evidence; avoid presentation-only shell wrappers/,
+		);
+		assert.match(
+			content,
+			/Expand readonly inspection for unclear paths or shared contracts/,
 		);
 		assert.match(content, /Call record_pr_summary once/i);
-		assert.equal(content.match(/Call get_pr_overview once/gi)?.length, 1);
 		assert.equal(systemMessage.mode, undefined);
 		assert.equal("sections" in systemMessage, false);
 	});

@@ -29,29 +29,26 @@ const reviewedFile: ChangedFile = {
 
 describe("filterChangedFiles", () => {
 	it("skips generated and deleted files", () => {
-		const result = filterChangedFiles(
-			[
-				reviewedFile,
-				{
-					...reviewedFile,
-					path: "pnpm-lock.yaml",
-					changedLines: [1],
-					status: "modified",
-				},
-				{
-					...reviewedFile,
-					path: "src/removed.ts",
-					status: "deleted",
-					changedLines: [],
-				},
-			],
-			10,
-		);
+		const result = filterChangedFiles([
+			reviewedFile,
+			{
+				...reviewedFile,
+				path: "pnpm-lock.yaml",
+				changedLines: [1],
+				status: "modified",
+			},
+			{
+				...reviewedFile,
+				path: "src/removed.ts",
+				status: "deleted",
+				changedLines: [],
+			},
+		]);
 
-		assert.equal(result.reviewedFiles.length, 1);
-		assert.equal(result.skippedFiles.length, 2);
-		assert.equal(result.skippedFiles[0]?.reason, "lockfile");
-		assert.equal(result.skippedFiles[1]?.reason, "deleted file");
+		assert.deepEqual(
+			result.map((file) => file.path),
+			["src/service.ts"],
+		);
 	});
 
 	it("skips files matching configured ignore globs", () => {
@@ -61,69 +58,39 @@ describe("filterChangedFiles", () => {
 				{ ...reviewedFile, path: "i18n/locales/app/fr/common.json" },
 				{ ...reviewedFile, path: "src/i18n/locales.ts" },
 			],
-			10,
 			["i18n/locales/**/*.json"],
 		);
 
 		assert.deepEqual(
-			result.reviewedFiles.map((file) => file.path),
+			result.map((file) => file.path),
 			["src/i18n/locales.ts"],
-		);
-		assert.deepEqual(
-			result.skippedFiles.map((file) => file.reason),
-			[
-				"ignored path pattern (i18n/locales/**/*.json)",
-				"ignored path pattern (i18n/locales/**/*.json)",
-			],
 		);
 	});
 
 	it("skips renamed files when the source path is disallowed", () => {
-		const result = filterChangedFiles(
-			[
-				{
-					...reviewedFile,
-					path: "src/safe.ts",
-					oldPath: "config/.env.local",
-					status: "renamed",
-				},
-			],
-			10,
-		);
-
-		assert.deepEqual(result.reviewedFiles, []);
-		assert.deepEqual(result.skippedFiles, [
+		const result = filterChangedFiles([
 			{
+				...reviewedFile,
 				path: "src/safe.ts",
 				oldPath: "config/.env.local",
 				status: "renamed",
-				reason: "source path rejected: potential secret-bearing path",
 			},
 		]);
+
+		assert.deepEqual(result, []);
 	});
 
 	it("skips copied files when the source path is disallowed", () => {
-		const result = filterChangedFiles(
-			[
-				{
-					...reviewedFile,
-					path: "src/copied.ts",
-					oldPath: "config/.env.local",
-					status: "copied",
-				},
-			],
-			10,
-		);
-
-		assert.deepEqual(result.reviewedFiles, []);
-		assert.deepEqual(result.skippedFiles, [
+		const result = filterChangedFiles([
 			{
+				...reviewedFile,
 				path: "src/copied.ts",
 				oldPath: "config/.env.local",
 				status: "copied",
-				reason: "source path rejected: potential secret-bearing path",
 			},
 		]);
+
+		assert.deepEqual(result, []);
 	});
 });
 

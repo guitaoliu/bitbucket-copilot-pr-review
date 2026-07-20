@@ -9,10 +9,7 @@ import {
 	buildPullRequestCommentTagMarker,
 	buildReviewMetadataFields,
 } from "./review/publication-state.ts";
-import {
-	buildDefaultPullRequestSummary,
-	buildSkippedFileSummary,
-} from "./review/summary.ts";
+import { buildDefaultPullRequestSummary } from "./review/summary.ts";
 import type {
 	ChangeAreaSummary,
 	ReviewContext,
@@ -185,7 +182,7 @@ function buildCommentFindingHeaderLines(findings: ReviewFinding[]): string[] {
 }
 
 function buildReviewScopeDataValue(context: ReviewContext): string {
-	return `${context.reviewedFiles.length} reviewed, ${context.skippedFiles.length} skipped`;
+	return `${context.reviewableFiles.length} reviewable`;
 }
 
 function buildPrIntentSection(
@@ -227,7 +224,7 @@ function formatChangeAreaPathReference(
 ): string {
 	if (area.paths.length === 1) {
 		const path = area.paths[0] ?? "";
-		const reviewedFile = context.reviewedFiles.some(
+		const reviewedFile = context.reviewableFiles.some(
 			(file) => file.path === path,
 		);
 		return formatCommentReference(
@@ -249,16 +246,6 @@ function buildChangeAreaSummaryLines(
 		(area) =>
 			`- ${area.title} (${formatChangeAreaPathReference(area, context)}): ${area.summary}`,
 	);
-}
-
-function buildSkippedFilesLines(context: ReviewContext): string[] {
-	return context.skippedFiles.map((file) => {
-		const label = formatCommentReference(
-			file.path,
-			buildPullRequestDiffLink(context.pr.link, file.path),
-		);
-		return `- ${label}: ${buildSkippedFileSummary(file)}`;
-	});
 }
 
 function getCommentLengthWithSections(sections: string[]): number {
@@ -314,7 +301,7 @@ function buildPullRequestSummarySection(context: ReviewContext): string {
 	const prLabel = `#${context.pr.id} ${context.pr.title}`;
 	const lines = [
 		"### Review Scope",
-		`- PR: ${formatCommentReference(prLabel, context.pr.link, false)}; branches: \`${context.pr.source.displayId}\` -> \`${context.pr.target.displayId}\`; diff: ${context.diffStats.fileCount} ${pluralize(context.diffStats.fileCount, "file")} (+${context.diffStats.additions}/-${context.diffStats.deletions}); reviewed: ${context.reviewedFiles.length}; skipped: ${context.skippedFiles.length}.`,
+		`- PR: ${formatCommentReference(prLabel, context.pr.link, false)}; branches: \`${context.pr.source.displayId}\` -> \`${context.pr.target.displayId}\`; diff: ${context.diffStats.fileCount} ${pluralize(context.diffStats.fileCount, "file")} (+${context.diffStats.additions}/-${context.diffStats.deletions}); reviewable: ${context.reviewableFiles.length}.`,
 	];
 
 	return lines.join("\n");
@@ -436,20 +423,9 @@ export function buildPullRequestComment(
 	}
 
 	const visibleSections = [...leadingSections, ...optionalSections, prSummary];
-	const skippedFilesSection = fitCommentSection({
-		baseSections: visibleSections,
-		heading: "### Outside Review Scope",
-		lines: buildSkippedFilesLines(context),
-		omittedLabel: pluralize(
-			context.skippedFiles.length,
-			"skipped file",
-			"skipped files",
-		),
-		maxChars: BITBUCKET_PR_COMMENT_MAX_CHARS,
-	});
 
 	return truncateText(
-		[...visibleSections, skippedFilesSection]
+		visibleSections
 			.filter((section) => section && section.trim().length > 0)
 			.join(COMMENT_SECTION_SEPARATOR)
 			.trim(),

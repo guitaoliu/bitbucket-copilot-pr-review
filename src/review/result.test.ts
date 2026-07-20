@@ -16,8 +16,6 @@ import {
 import type { ReviewArtifacts } from "./runner-types.ts";
 import type { ReviewContext, ReviewOutcome } from "./types.ts";
 
-const PER_FILE_SUMMARY_LIMIT = 25;
-
 function createReviewContext(): ReviewContext {
 	const pr = createPullRequest();
 
@@ -30,7 +28,7 @@ function createReviewContext(): ReviewContext {
 		reviewRevision: "review-rev-123",
 		rawDiff: "",
 		diffStats: { fileCount: 2, additions: 3, deletions: 1 },
-		reviewedFiles: [
+		reviewableFiles: [
 			{
 				path: "src/service.ts",
 				status: "modified",
@@ -70,13 +68,6 @@ function createReviewContext(): ReviewContext {
 				isBinary: false,
 			},
 		],
-		skippedFiles: [
-			{
-				path: "dist/generated.js",
-				status: "modified",
-				reason: "ignored by policy",
-			},
-		],
 	};
 }
 
@@ -84,17 +75,6 @@ function createReviewOutcome(): ReviewOutcome {
 	return {
 		summary: "Found 1 issue.",
 		prSummary: "Hardens the service validation path before merge.",
-		fileSummaries: [
-			{
-				path: "src/service.ts",
-				summary: "Adds a null guard before dereferencing the service response.",
-			},
-			{
-				path: "src/other.ts",
-				summary:
-					"Adjusts the related helper to match the new service behavior.",
-			},
-		],
 		findings: [
 			{
 				externalId: "finding-1",
@@ -127,8 +107,7 @@ describe("buildSkippedReviewOutput", () => {
 				targetBranch: "main",
 				headCommit: "abc123",
 				mergeBaseCommit: "base-123",
-				reviewedFiles: 0,
-				skippedFiles: 0,
+				reviewableFiles: 0,
 			},
 			review: {
 				summary: skipReason,
@@ -162,7 +141,7 @@ describe("buildReviewArtifacts", () => {
 				["Review revision", "review-rev-123"],
 				["Review schema", "2"],
 				["Reviewed commit", "head-123"],
-				["Review scope", "2 reviewed, 1 skipped"],
+				["Review scope", "2 reviewable"],
 			],
 		);
 		assert.match(artifacts.commentBody, /<!-- copilot-pr-review -->/);
@@ -193,7 +172,7 @@ describe("buildReviewArtifacts", () => {
 		assert.doesNotMatch(artifacts.commentBody, /### Main Concerns/);
 		assert.doesNotMatch(artifacts.commentBody, /### Change Areas/);
 		assert.doesNotMatch(artifacts.commentBody, /### File Changes/);
-		assert.match(artifacts.commentBody, /### Outside Review Scope/);
+		assert.doesNotMatch(artifacts.commentBody, /### Outside Review Scope/);
 		assert.doesNotMatch(artifacts.commentBody, /Adds a null guard/);
 		assert.match(
 			artifacts.commentBody,
@@ -210,7 +189,7 @@ describe("buildReviewArtifacts", () => {
 
 	it("bounds large comment bodies under the Bitbucket limit", () => {
 		const context = createReviewContext();
-		context.reviewedFiles = Array.from({ length: 200 }, (_, index) => ({
+		context.reviewableFiles = Array.from({ length: 200 }, (_, index) => ({
 			path: `src/file-${index}.ts`,
 			status: "modified" as const,
 			patch: `diff --git a/src/file-${index}.ts b/src/file-${index}.ts`,
@@ -229,41 +208,32 @@ describe("buildReviewArtifacts", () => {
 			deletions: 0,
 			isBinary: false,
 		}));
-		context.skippedFiles = Array.from({ length: 200 }, (_, index) => ({
-			path: `dist/generated-${index}.js`,
-			status: "modified" as const,
-			reason: `generated or vendored path ${index}`,
-		}));
 		context.diffStats = {
-			fileCount: context.reviewedFiles.length + context.skippedFiles.length,
-			additions: context.reviewedFiles.length,
+			fileCount: context.reviewableFiles.length,
+			additions: context.reviewableFiles.length,
 			deletions: 0,
 		};
 
 		const review: ReviewOutcome = {
 			summary: "Found many issues.",
 			prSummary: "Large review for truncation coverage.",
-			fileSummaries: context.reviewedFiles.map((file, index) => ({
-				path: file.path,
-				summary: `Summary ${index} ${"q".repeat(120)}.`,
-			})),
 			findings: Array.from({ length: 140 }, (_, index) => ({
 				externalId: `finding-${index}`,
 				path:
-					context.reviewedFiles[index % context.reviewedFiles.length]?.path ??
-					"src/service.ts",
+					context.reviewableFiles[index % context.reviewableFiles.length]
+						?.path ?? "src/service.ts",
 				line: index + 1,
 				severity: "HIGH",
 				type: "BUG",
 				confidence: "high",
 				threadKey: buildFindingThreadKey({
 					path:
-						context.reviewedFiles[index % context.reviewedFiles.length]?.path ??
-						"src/service.ts",
+						context.reviewableFiles[index % context.reviewableFiles.length]
+							?.path ?? "src/service.ts",
 					line: index + 1,
 					type: "BUG",
 				}),
-				title: `Finding ${index} ${"r".repeat(80)}`,
+				title: `Finding ${index} ${"r".repeat(240)}`,
 				details: "Large detail.",
 			})),
 			stale: false,
@@ -277,46 +247,6 @@ describe("buildReviewArtifacts", () => {
 			artifacts.commentBody,
 			/omitted to fit Bitbucket comment limit/,
 		);
-	});
-
-	it("omits reviewed changes in artifacts for reviews above the summary cutoff", () => {
-		const context = createReviewContext();
-		context.reviewedFiles = Array.from(
-			{ length: PER_FILE_SUMMARY_LIMIT + 1 },
-			(_, index) => ({
-				path: `src/file-${index}.ts`,
-				status: "modified" as const,
-				patch: `diff --git a/src/file-${index}.ts b/src/file-${index}.ts`,
-				changedLines: [index + 1],
-				hunks: [
-					{
-						oldStart: index + 1,
-						oldLines: 1,
-						newStart: index + 1,
-						newLines: 1,
-						header: "",
-						changedLines: [index + 1],
-					},
-				],
-				additions: 1,
-				deletions: 0,
-				isBinary: false,
-			}),
-		);
-		context.diffStats = {
-			fileCount: context.reviewedFiles.length + context.skippedFiles.length,
-			additions: context.reviewedFiles.length,
-			deletions: 0,
-		};
-
-		const artifacts = buildReviewArtifacts(baseConfig, context, {
-			...createReviewOutcome(),
-			fileSummaries: [],
-		});
-
-		assert.doesNotMatch(artifacts.commentBody, /### Change Areas/);
-		assert.match(artifacts.commentBody, /### What Changed/);
-		assert.match(artifacts.commentBody, /### Findings/);
 	});
 });
 
@@ -342,7 +272,7 @@ describe("buildReviewRunOutput", () => {
 				sessionDurationMs: 80,
 				errorCount: 0,
 				byTool: {
-					get_pr_overview: {
+					bash: {
 						requested: 1,
 						allowed: 1,
 						denied: 0,
@@ -384,8 +314,7 @@ describe("buildReviewRunOutput", () => {
 				headCommit: "head-123",
 				mergeBaseCommit: "base-123",
 				reviewRevision: "review-rev-123",
-				reviewedFiles: 2,
-				skippedFiles: 1,
+				reviewableFiles: 2,
 			},
 			metrics: {
 				gitTelemetry: review.gitTelemetry,
@@ -395,7 +324,6 @@ describe("buildReviewRunOutput", () => {
 			review: {
 				summary: review.summary,
 				prSummary: review.prSummary,
-				fileSummaries: review.fileSummaries,
 				findings: review.findings,
 				stale: review.stale,
 			},
@@ -426,12 +354,6 @@ describe("buildReviewRunOutput", () => {
 					title: "Area <!-- injected-area-title -->",
 					paths: ["src/service.ts"],
 					summary: "Area summary <!-- injected-area-summary -->.",
-				},
-			],
-			fileSummaries: [
-				{
-					path: "src/service.ts",
-					summary: "Service summary <!-- injected-file-summary -->.",
 				},
 			],
 			findings: [
@@ -480,10 +402,6 @@ describe("buildReviewRunOutput", () => {
 		assert.equal(
 			output.review.changeAreas?.[0]?.summary,
 			"Area summary &lt;!-- injected-area-summary --&gt;.",
-		);
-		assert.equal(
-			output.review.fileSummaries?.[0]?.summary,
-			"Service summary &lt;!-- injected-file-summary --&gt;.",
 		);
 		assert.equal(
 			output.review.findings[0]?.title,

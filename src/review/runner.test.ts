@@ -64,14 +64,14 @@ type FakeBitbucketClient = {
 };
 
 describe("runReview", () => {
-	it("logs reviewed and skipped counts after file filtering", async () => {
+	it("logs the reviewable file count after filtering", async () => {
 		const pr = createPullRequest();
 		const baseContext = createReviewContext(pr);
 		const context = {
 			...baseContext,
 			diffStats: { fileCount: 7, additions: 4, deletions: 1 },
-			reviewedFiles: [
-				...baseContext.reviewedFiles,
+			reviewableFiles: [
+				...baseContext.reviewableFiles,
 				{
 					path: "src/second.ts",
 					status: "modified" as const,
@@ -90,33 +90,6 @@ describe("runReview", () => {
 					additions: 1,
 					deletions: 0,
 					isBinary: false,
-				},
-			],
-			skippedFiles: [
-				{
-					path: "dist/a.js",
-					status: "modified" as const,
-					reason: "generated or vendored path",
-				},
-				{
-					path: "dist/b.js",
-					status: "modified" as const,
-					reason: "generated or vendored path",
-				},
-				{
-					path: "dist/c.js",
-					status: "modified" as const,
-					reason: "generated or vendored path",
-				},
-				{
-					path: "dist/d.js",
-					status: "modified" as const,
-					reason: "generated or vendored path",
-				},
-				{
-					path: "dist/e.js",
-					status: "modified" as const,
-					reason: "generated or vendored path",
 				},
 			],
 		} satisfies ReviewContext;
@@ -155,7 +128,7 @@ describe("runReview", () => {
 
 		assert.ok(
 			infoMessages.includes(
-				"Review scope after file filtering: 2 reviewed, 5 skipped out of 7 changed files (REVIEW_MAX_FILES=100).",
+				"Review scope after file filtering: 2 reviewable out of 7 changed files.",
 			),
 		);
 		assert.ok(infoMessages.includes("Starting review run"));

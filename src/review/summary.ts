@@ -1,8 +1,6 @@
-import type { SkippedFile } from "../git/types.ts";
 import { sanitizeModelAuthoredText, truncateText } from "../shared/text.ts";
 import type {
 	ChangeAreaSummary,
-	FileChangeSummary,
 	ReviewContext,
 	ReviewSummaryDrafts,
 } from "./types.ts";
@@ -51,18 +49,6 @@ function normalizeMultilineSummaryText(
 	return truncateText(normalized, maxChars, { preserveMaxLength: true });
 }
 
-function summarizeSkippedReason(reason: string): string {
-	if (reason.startsWith("exceeds REVIEW_MAX_FILES limit")) {
-		return "max-files limit";
-	}
-
-	if (reason.startsWith("ignored path pattern (")) {
-		return "ignored path pattern";
-	}
-
-	return reason;
-}
-
 export function buildDefaultPullRequestSummary(context: ReviewContext): string {
 	const title = normalizeInlineSummaryText(
 		context.pr.title,
@@ -94,30 +80,12 @@ export function buildDefaultPullRequestSummary(context: ReviewContext): string {
 	return `Prepares ${context.pr.source.displayId} for merge into ${context.pr.target.displayId}.`;
 }
 
-export function buildSkippedFileSummary(file: SkippedFile): string {
-	const reason = summarizeSkippedReason(file.reason);
-
-	switch (file.status) {
-		case "added":
-			return reason;
-		case "deleted":
-			return reason;
-		case "renamed":
-			return file.oldPath ? `renamed from ${file.oldPath}; ${reason}` : reason;
-		case "copied":
-			return file.oldPath ? `copied from ${file.oldPath}; ${reason}` : reason;
-		default:
-			return reason;
-	}
-}
-
 export function finalizeReviewSummary(
 	context: ReviewContext,
 	drafts: ReviewSummaryDrafts,
 ): {
 	prSummary: string;
 	changeAreas: ChangeAreaSummary[];
-	fileSummaries: FileChangeSummary[];
 } {
 	const prSummary =
 		normalizeMultilineSummaryText(drafts.prSummary, MAX_PR_SUMMARY_LENGTH) ??
@@ -126,6 +94,5 @@ export function finalizeReviewSummary(
 	return {
 		prSummary,
 		changeAreas: drafts.changeAreas ?? [],
-		fileSummaries: [],
 	};
 }

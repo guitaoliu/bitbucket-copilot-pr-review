@@ -81,7 +81,7 @@ Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pu
 | `BITBUCKET_AUTH_TYPE` | auto-detected from provided credentials | Bitbucket authentication strategy. |
 | `BITBUCKET_CA_CERT_PATH` | - | PEM CA bundle path for Bitbucket TLS. |
 | `BITBUCKET_INSECURE_TLS` | `false` | Disable TLS certificate verification for Bitbucket (not recommended). |
-| `COPILOT_MODEL` | `gpt-5.4` | Copilot model override. |
+| `COPILOT_MODEL` | `gpt-5.6-terra` | Copilot model override. |
 | `COPILOT_REASONING_EFFORT` | `xhigh` | Copilot reasoning effort. |
 | `COPILOT_TIMEOUT_MS` | `1800000` | Copilot timeout in milliseconds. |
 | `CI_SUMMARY_PATH` | - | Path to a CI summary file included in review context. |
@@ -93,13 +93,12 @@ Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pu
 | `REPORT_LINK` | falls back to `BUILD_URL` when present | Code Insights report link. |
 | `BUILD_URL` | used when `REPORT_LINK` is unset | Fallback report link from CI build URL. |
 | `REVIEW_FORCE` | `false` | Force review even when the revision was already published. |
-| `REVIEW_MAX_FILES` | `300` | Maximum number of changed files to review. |
 | `REVIEW_MAX_FINDINGS` | `25` | Maximum number of findings to publish. |
 | `REVIEW_MIN_CONFIDENCE` | `medium` | Minimum confidence threshold for findings. |
 | `REVIEW_MAX_PATCH_CHARS` | `12000` | Maximum diff size sent to Copilot per file. |
 | `REVIEW_DEFAULT_FILE_SLICE_LINES` | `250` | Default line window when reading file slices. |
 | `REVIEW_MAX_FILE_SLICE_LINES` | `400` | Maximum line window for file slices. |
-| `REVIEW_IGNORE_PATHS` | [] | Comma-separated repo-relative glob patterns to skip. |
+| `REVIEW_IGNORE_PATHS` | [] | Comma-separated repo-relative glob patterns excluded from reportable finding scope. |
 | `REVIEW_SKIP_BRANCH_PREFIXES` | `renovate/` | Comma-separated source branch prefixes that should be skipped. |
 
 <!-- GENERATED_CONFIG_REFERENCE:END -->
@@ -158,17 +157,16 @@ Target repository instructions and broader project context are discovered by the
 
 When the target repository contains a root-level `copilot-code-review.json`, the reviewer loads it from the trusted base commit and uses it for repo-scoped review configuration such as ignored paths, review limits, and selected Copilot or report overrides. Environment variables and CLI flags still take precedence. The JSON schema is published at `schemas/copilot-code-review.schema.json`.
 
-By default, the reviewer inspects up to 300 changed files after filtering. When more than 25 files remain in scope, it still runs the review but skips per-file changed-file summaries in the tagged PR comment.
+The reviewer inspects all changed files that remain after filtering.
 
 Example `copilot-code-review.json`:
 
 ```json
 {
   "$schema": "./schemas/copilot-code-review.schema.json",
-  "review": {
-    "ignorePaths": ["i18n/locales/**/*.json"],
-    "maxFiles": 300,
-    "maxFindings": 25
+	"review": {
+		"ignorePaths": ["i18n/locales/**/*.json"],
+		"maxFindings": 25
   },
   "copilot": {
     "model": "gpt-5.4",
@@ -182,7 +180,7 @@ Example `copilot-code-review.json`:
 
 Example with common repo-specific customizations:
 
-- `review.ignorePaths` skips noisy generated or localized assets
+- `review.ignorePaths` excludes noisy generated or localized assets from reportable finding scope
 - `copilot.model` pins a different model for this repository only
 - `report.title` shortens the Bitbucket Code Insights title for this repo
 
@@ -196,10 +194,9 @@ Example with common repo-specific customizations:
     "title": "Copilot Review",
     "commentStrategy": "recreate"
   },
-  "review": {
-    "ignorePaths": ["i18n/locales/**/*.json", "docs/generated/**"],
-    "maxFiles": 300,
-    "maxFindings": 25,
+	"review": {
+		"ignorePaths": ["i18n/locales/**/*.json", "docs/generated/**"],
+		"maxFindings": 25,
     "minConfidence": "medium",
     "maxPatchChars": 12000,
     "defaultFileSliceLines": 250,
@@ -285,7 +282,6 @@ Useful reviewer env vars in CI:
 - `REPORTER_NAME=GitHub Copilot`
 - `COPILOT_TIMEOUT_MS=1800000`
 - `REVIEW_MAX_FINDINGS=25`
-- `REVIEW_MAX_FILES=300`
 - `REVIEW_IGNORE_PATHS=i18n/locales/**/*.json`
 
 For a safe first rollout, start with `--dry-run`, inspect the payload in your CI logs, then remove `--dry-run` once the Code Insights output looks right.

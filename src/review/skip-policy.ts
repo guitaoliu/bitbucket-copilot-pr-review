@@ -130,7 +130,6 @@ function buildReviewOutcomeFromArtifacts(
 			buildReviewFindingFromStoredFinding(finding, index, config),
 		),
 		stale: false,
-		fileSummaries: [],
 	};
 }
 

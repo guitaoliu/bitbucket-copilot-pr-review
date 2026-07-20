@@ -1,6 +1,5 @@
 import path from "node:path";
-import type { ChangedFile, SkippedFile } from "../git/types.ts";
-import { omitUndefined } from "../shared/object.ts";
+import type { ChangedFile } from "../git/types.ts";
 import { getRepoFileAccessDecision } from "./path-access.ts";
 
 function matchesIgnoredPath(
@@ -74,45 +73,7 @@ function shouldReviewFile(
 
 export function filterChangedFiles(
 	files: ChangedFile[],
-	maxFiles: number,
 	ignorePaths: string[] = [],
-): { reviewedFiles: ChangedFile[]; skippedFiles: SkippedFile[] } {
-	const reviewedFiles: ChangedFile[] = [];
-	const skippedFiles: SkippedFile[] = [];
-
-	for (const file of files) {
-		const decision = shouldReviewFile(file, ignorePaths);
-		if (!decision.include) {
-			skippedFiles.push(
-				omitUndefined({
-					path: file.path,
-					oldPath: file.oldPath,
-					status: file.status,
-					reason: decision.reason || "excluded by review policy",
-				}) satisfies SkippedFile,
-			);
-			continue;
-		}
-
-		reviewedFiles.push(file);
-	}
-
-	if (reviewedFiles.length <= maxFiles) {
-		return { reviewedFiles, skippedFiles };
-	}
-
-	return {
-		reviewedFiles: reviewedFiles.slice(0, maxFiles),
-		skippedFiles: skippedFiles.concat(
-			reviewedFiles.slice(maxFiles).map(
-				(file) =>
-					omitUndefined({
-						path: file.path,
-						oldPath: file.oldPath,
-						status: file.status,
-						reason: `exceeds REVIEW_MAX_FILES limit (${maxFiles})`,
-					}) satisfies SkippedFile,
-			),
-		),
-	};
+): ChangedFile[] {
+	return files.filter((file) => shouldReviewFile(file, ignorePaths).include);
 }

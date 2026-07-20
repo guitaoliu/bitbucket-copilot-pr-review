@@ -6,8 +6,6 @@ import { buildFindingThreadKey } from "./review/finding-identity.ts";
 import type { ReviewContext, ReviewOutcome } from "./review/types.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "./shared/text.ts";
 
-const PER_FILE_SUMMARY_LIMIT = 25;
-
 const config: ReviewerConfig = {
 	repoRoot: "/tmp/repo",
 	gitRemoteName: "origin",
@@ -41,7 +39,6 @@ const config: ReviewerConfig = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFiles: 100,
 		maxFindings: 10,
 		minConfidence: "high",
 		maxPatchChars: 12000,
@@ -84,7 +81,7 @@ function createContext(prLink: string | undefined): ReviewContext {
 		reviewRevision: "review-rev-123",
 		rawDiff: "",
 		diffStats: { fileCount: 6, additions: 4, deletions: 1 },
-		reviewedFiles: [
+		reviewableFiles: [
 			{
 				path: "src/service.ts",
 				status: "modified",
@@ -144,29 +141,6 @@ function createContext(prLink: string | undefined): ReviewContext {
 				isBinary: false,
 			},
 		],
-		skippedFiles: [
-			{
-				path: "dist/generated.js",
-				status: "modified",
-				reason: "generated or vendored path",
-			},
-			{
-				path: "i18n/locales/en.json",
-				status: "modified",
-				reason: "ignored path pattern (i18n/locales/**/*.json)",
-			},
-			{
-				path: "src/copied.ts",
-				oldPath: "src/original.ts",
-				status: "copied",
-				reason: "exceeds REVIEW_MAX_FILES limit (3)",
-			},
-			{
-				path: "src/removed.ts",
-				status: "deleted",
-				reason: "deleted file",
-			},
-		],
 	};
 }
 
@@ -175,22 +149,6 @@ function createOutcome(): ReviewOutcome {
 		summary: "Found 2 issues.",
 		prSummary:
 			"Tightens request validation in the service flow and cleans up renamed modules before merge.",
-		fileSummaries: [
-			{
-				path: "src/service.ts",
-				summary:
-					"Adds stricter null handling and updates the main service branch behavior.",
-			},
-			{
-				path: "src/new-file.ts",
-				summary: "Introduces a new helper used by the updated validation flow.",
-			},
-			{
-				path: "src/new-name.ts",
-				summary:
-					"Renames the module and adjusts its imports to match the new location.",
-			},
-		],
 		findings: [
 			{
 				externalId: "finding-1",
@@ -260,7 +218,7 @@ describe("buildPullRequestComment", () => {
 		assert.match(comment, /### Review Scope/);
 		assert.match(
 			comment,
-			/- PR: \[#123 Test PR\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\); branches: `feature` -> `main`; diff: 6 files \(\+4\/-1\); reviewed: 3; skipped: 4\./,
+			/- PR: \[#123 Test PR\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\); branches: `feature` -> `main`; diff: 6 files \(\+4\/-1\); reviewable: 3\./,
 		);
 		assert.doesNotMatch(comment, /- Change mix:/);
 		assert.doesNotMatch(comment, /- Outside-scope reasons:/);
@@ -273,23 +231,7 @@ describe("buildPullRequestComment", () => {
 			comment,
 			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\] \[src\/service\.ts:42\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fservice\.ts\?t=42\) - Null handling is broken/,
 		);
-		assert.match(comment, /### Outside Review Scope/);
-		assert.match(
-			comment,
-			/- \[dist\/generated\.js\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#dist%2Fgenerated\.js\): generated or vendored path/,
-		);
-		assert.match(
-			comment,
-			/- \[i18n\/locales\/en\.json\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#i18n%2Flocales%2Fen\.json\): ignored path pattern/,
-		);
-		assert.match(
-			comment,
-			/- \[src\/copied\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fcopied\.ts\): copied from src\/original\.ts; max-files limit/,
-		);
-		assert.match(
-			comment,
-			/- \[src\/removed\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fremoved\.ts\): deleted file/,
-		);
+		assert.doesNotMatch(comment, /### Outside Review Scope/);
 		assert.match(
 			comment,
 			/2\. \[Type: CODE_SMELL \| Severity: MEDIUM \| Confidence: high\] \[src\/new-name\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fnew-name\.ts\) - Rename lost an import/,
@@ -319,12 +261,7 @@ describe("buildPullRequestComment", () => {
 			comment,
 			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\] `src\/service\.ts:42` - Null handling is broken/,
 		);
-		assert.match(comment, /### Outside Review Scope/);
-		assert.match(
-			comment,
-			/- `dist\/generated\.js`: generated or vendored path/,
-		);
-		assert.match(comment, /- `i18n\/locales\/en\.json`: ignored path pattern/);
+		assert.doesNotMatch(comment, /### Outside Review Scope/);
 		assert.doesNotMatch(comment, /\[src\/service\.ts:42\]\(/);
 	});
 
@@ -376,56 +313,11 @@ describe("buildPullRequestComment", () => {
 		assert.match(comment, /Hidden marker &lt;!-- injected --&gt;/);
 	});
 
-	it("groups reviewed files with identical summaries", () => {
-		const context = createContext(undefined);
-		const [serviceFile, newFile, renamedFile] = context.reviewedFiles;
-		assert.ok(serviceFile);
-		assert.ok(newFile);
-		assert.ok(renamedFile);
-		context.reviewedFiles = [
-			{
-				...serviceFile,
-				path: "src/auth/login.ts",
-			},
-			{
-				...newFile,
-				path: "src/auth/logout.ts",
-			},
-			{
-				...renamedFile,
-				path: "src/session.ts",
-			},
-		];
-
-		const comment = buildPullRequestComment(config, context, {
-			...createOutcome(),
-			fileSummaries: [
-				{
-					path: "src/auth/login.ts",
-					summary: "Threads password-state metadata through auth flows.",
-				},
-				{
-					path: "src/auth/logout.ts",
-					summary: "Threads password-state metadata through auth flows.",
-				},
-				{
-					path: "src/session.ts",
-					summary: "Persists session metadata for changed users.",
-				},
-			],
-		});
-
-		assert.doesNotMatch(comment, /### Change Areas/);
-		assert.doesNotMatch(comment, /### File Changes/);
-		assert.doesNotMatch(comment, /Threads password-state metadata/);
-		assert.doesNotMatch(comment, /Persists session metadata/);
-	});
-
 	it("renders explicit change area summaries", () => {
 		const context = createContext(
 			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
 		);
-		context.reviewedFiles.push({
+		context.reviewableFiles.push({
 			path: "pages/[id].tsx",
 			status: "modified",
 			patch: "diff --git a/pages/[id].tsx b/pages/[id].tsx",
@@ -527,7 +419,7 @@ describe("buildPullRequestComment", () => {
 				["Review revision", "review-rev-123"],
 				["Review schema", "2"],
 				["Reviewed commit", "head-123"],
-				["Review scope", "3 reviewed, 4 skipped"],
+				["Review scope", "3 reviewable"],
 			],
 		);
 	});
@@ -536,7 +428,7 @@ describe("buildPullRequestComment", () => {
 		const context = createContext(
 			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
 		);
-		context.reviewedFiles = Array.from({ length: 180 }, (_, index) => ({
+		context.reviewableFiles = Array.from({ length: 180 }, (_, index) => ({
 			path: `src/reviewed-${index}.ts`,
 			status: "modified" as const,
 			patch: `diff --git a/src/reviewed-${index}.ts b/src/reviewed-${index}.ts`,
@@ -555,41 +447,32 @@ describe("buildPullRequestComment", () => {
 			deletions: 0,
 			isBinary: false,
 		}));
-		context.skippedFiles = Array.from({ length: 350 }, (_, index) => ({
-			path: `dist/generated-${index}.js`,
-			status: "modified" as const,
-			reason: `generated or vendored path ${"x".repeat(40)}`,
-		}));
 		context.diffStats = {
-			fileCount: context.reviewedFiles.length + context.skippedFiles.length,
-			additions: context.reviewedFiles.length,
+			fileCount: context.reviewableFiles.length,
+			additions: context.reviewableFiles.length,
 			deletions: 0,
 		};
 
 		const outcome: ReviewOutcome = {
 			summary: "Found many issues.",
 			prSummary: "Expands validation and support code across many modules.",
-			fileSummaries: context.reviewedFiles.map((file, index) => ({
-				path: file.path,
-				summary: `Detailed review summary ${index} ${"y".repeat(120)}.`,
-			})),
 			findings: Array.from({ length: 120 }, (_, index) => ({
 				externalId: `finding-${index}`,
 				path:
-					context.reviewedFiles[index % context.reviewedFiles.length]?.path ??
-					"src/service.ts",
+					context.reviewableFiles[index % context.reviewableFiles.length]
+						?.path ?? "src/service.ts",
 				line: index + 1,
 				severity: "HIGH" as const,
 				type: "BUG" as const,
 				confidence: "high" as const,
 				threadKey: buildFindingThreadKey({
 					path:
-						context.reviewedFiles[index % context.reviewedFiles.length]?.path ??
-						"src/service.ts",
+						context.reviewableFiles[index % context.reviewableFiles.length]
+							?.path ?? "src/service.ts",
 					line: index + 1,
 					type: "BUG",
 				}),
-				title: `Important finding ${index} ${"z".repeat(80)}`,
+				title: `Important finding ${index} ${"z".repeat(240)}`,
 				details: "Large review detail.",
 			})),
 			stale: false,
@@ -604,48 +487,5 @@ describe("buildPullRequestComment", () => {
 		assert.match(comment, /### What Changed/);
 		assert.match(comment, /### Review Scope/);
 		assert.match(comment, /omitted to fit Bitbucket comment limit/);
-	});
-
-	it("omits reviewed change summaries when the review is above the cutoff", () => {
-		const prLink =
-			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123";
-		const context = createContext(prLink);
-		context.reviewedFiles = Array.from(
-			{ length: PER_FILE_SUMMARY_LIMIT + 1 },
-			(_, index) => ({
-				path: `src/reviewed-${index}.ts`,
-				status: "modified" as const,
-				patch: `diff --git a/src/reviewed-${index}.ts b/src/reviewed-${index}.ts`,
-				changedLines: [index + 1],
-				hunks: [
-					{
-						oldStart: index + 1,
-						oldLines: 1,
-						newStart: index + 1,
-						newLines: 1,
-						header: "",
-						changedLines: [index + 1],
-					},
-				],
-				additions: 1,
-				deletions: 0,
-				isBinary: false,
-			}),
-		);
-		context.diffStats = {
-			fileCount: context.reviewedFiles.length + context.skippedFiles.length,
-			additions: context.reviewedFiles.length,
-			deletions: 0,
-		};
-
-		const comment = buildPullRequestComment(config, context, {
-			...createOutcome(),
-			fileSummaries: [],
-		});
-
-		assert.match(comment, /### What Changed/);
-		assert.match(comment, /### Review Scope/);
-		assert.doesNotMatch(comment, /### Change Areas/);
-		assert.doesNotMatch(comment, /### File Changes/);
 	});
 });

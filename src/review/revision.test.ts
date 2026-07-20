@@ -15,7 +15,6 @@ describe("buildReviewRevision", () => {
 				reasoningEffort: "xhigh",
 			},
 			reviewConfig: {
-				maxFiles: 100,
 				maxFindings: 10,
 				minConfidence: "high",
 				maxPatchChars: 12_000,
@@ -49,7 +48,6 @@ describe("buildReviewRevision", () => {
 				reasoningEffort: "xhigh",
 			},
 			reviewConfig: {
-				maxFiles: 100,
 				maxFindings: 10,
 				minConfidence: "high",
 				maxPatchChars: 12_000,
@@ -69,7 +67,6 @@ describe("buildReviewRevision", () => {
 				reasoningEffort: "xhigh",
 			},
 			reviewConfig: {
-				maxFiles: 100,
 				maxFindings: 10,
 				minConfidence: "medium",
 				maxPatchChars: 12_000,
