@@ -53,10 +53,11 @@ fi
 
 require_command git
 require_command node
-require_command pnpm
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REVIEWER_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+
+[[ -x "$REVIEWER_ROOT/node_modules/.bin/tsdown" ]] || die "Run pnpm install in $REVIEWER_ROOT first"
 
 TARGET_REPO_INPUT="$1"
 PR_URL_RAW="$2"
@@ -119,7 +120,12 @@ else
   printf 'Bitbucket TLS verification: strict\n'
 fi
 
-declare -a REVIEW_COMMAND=(node "$REVIEWER_ROOT/src/cli.ts")
+(
+  cd -- "$REVIEWER_ROOT"
+  ./node_modules/.bin/tsdown
+)
+
+declare -a REVIEW_COMMAND=(node "$REVIEWER_ROOT/dist/cli.js")
 if (( ${#REVIEW_ARGS[@]} > 0 )); then
   REVIEW_COMMAND+=("${REVIEW_ARGS[@]}")
 fi

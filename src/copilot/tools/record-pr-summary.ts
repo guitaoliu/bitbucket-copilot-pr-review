@@ -5,6 +5,7 @@ import type { ReviewToolContext } from "./context.ts";
 
 const recordPrSummarySchema = z.object({
 	summary: z.string().min(1).max(1000),
+	reviewOutcome: z.enum(["clean", "findings_recorded"]),
 });
 
 export function createRecordPrSummaryTool(toolContext: ReviewToolContext) {
@@ -22,10 +23,19 @@ export function createRecordPrSummaryTool(toolContext: ReviewToolContext) {
 					description:
 						"A concise summary of the PR's purpose and main behavior change. Use short bullet points when that is clearer than one sentence.",
 				},
+				reviewOutcome: {
+					type: "string",
+					enum: ["clean", "findings_recorded"],
+					description:
+						"Use clean only when no qualifying findings remain; otherwise use findings_recorded after emitting every qualifying finding.",
+				},
 			},
-			required: ["summary"],
+			required: ["summary", "reviewOutcome"],
 		},
-		handler: async (args: { summary: string }) => {
+		handler: async (args: {
+			summary: string;
+			reviewOutcome: "clean" | "findings_recorded";
+		}) => {
 			const parsed = recordPrSummarySchema.safeParse(args);
 			if (!parsed.success) {
 				return toRejectedResult(
@@ -34,6 +44,7 @@ export function createRecordPrSummaryTool(toolContext: ReviewToolContext) {
 			}
 
 			summaryDrafts.prSummary = parsed.data.summary;
+			summaryDrafts.reviewOutcome = parsed.data.reviewOutcome;
 			return "Recorded the pull request summary.";
 		},
 	});

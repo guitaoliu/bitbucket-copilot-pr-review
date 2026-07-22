@@ -1,23 +1,16 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-	entry: {
-		cli: "src/cli.ts",
-	},
+	entry: ["src/**/*.test.ts"],
 	platform: "node",
 	format: "esm",
 	target: "node24",
+	outDir: ".test-dist",
 	clean: true,
-	minify: true,
 	loader: {
 		".md": "text",
 	},
-	outExtensions() {
-		return {
-			js: ".js",
-		};
-	},
-	banner: {
-		js: "#!/usr/bin/env node",
+	deps: {
+		onlyBundle: false,
 	},
 });

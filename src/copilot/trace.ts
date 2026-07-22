@@ -6,6 +6,7 @@ import { REVIEW_TOOL_NAMES } from "./tools/index.ts";
 export type CopilotSessionEventTracer = {
 	handleEvent(event: SessionEvent): void;
 	getReasoningStatus(): "content" | "empty" | "missing";
+	getFailedBackgroundShellCount(): number;
 };
 
 const REVIEW_TOOL_NAME_SET: ReadonlySet<string> = new Set(REVIEW_TOOL_NAMES);
@@ -26,6 +27,7 @@ export function createSessionEventTracer(
 	>();
 	let reasoningContentObserved = false;
 	let reasoningEventObserved = false;
+	let failedBackgroundShellCount = 0;
 
 	const appendContent = (reasoningId: string, content: string): void => {
 		if (!content) {
@@ -274,6 +276,20 @@ export function createSessionEventTracer(
 					data.kind && typeof data.kind === "object"
 						? (data.kind as Record<string, unknown>)
 						: undefined;
+				if (
+					kind?.type === "shell_completed" &&
+					typeof kind.exitCode === "number" &&
+					kind.exitCode !== 0
+				) {
+					failedBackgroundShellCount += 1;
+					logger.warn("Copilot background shell failed", {
+						shellId: kind.shellId,
+						exitCode: kind.exitCode,
+						description: kind.description,
+						content,
+					});
+					return;
+				}
 				logger.info("Copilot system notification", {
 					kind: typeof kind?.type === "string" ? kind.type : undefined,
 					status: typeof kind?.status === "string" ? kind.status : undefined,
@@ -286,6 +302,9 @@ export function createSessionEventTracer(
 				return "content";
 			}
 			return reasoningEventObserved ? "empty" : "missing";
+		},
+		getFailedBackgroundShellCount() {
+			return failedBackgroundShellCount;
 		},
 	};
 }

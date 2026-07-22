@@ -175,6 +175,13 @@ async function invokeSessionTool(
 	});
 }
 
+async function recordCleanReview(configArg: SessionConfig): Promise<void> {
+	await invokeSessionTool(configArg, "record_pr_summary", {
+		summary: "Refactors the reviewed behavior.",
+		reviewOutcome: "clean",
+	});
+}
+
 describe("runCopilotReview", () => {
 	it("uses the SDK default bundled CLI resolution", async () => {
 		const context = createReviewContext();
@@ -187,7 +194,9 @@ describe("runCopilotReview", () => {
 				return () => {};
 			},
 			async sendAndWait() {
-				return { data: { content: "Found one issue that was not recorded." } };
+				assert.ok(createdSessionConfig);
+				await recordCleanReview(createdSessionConfig);
+				return { data: { content: "Looks good." } };
 			},
 			async disconnect() {},
 		};
@@ -224,10 +233,7 @@ describe("runCopilotReview", () => {
 			outcome.summary,
 			"No validated reportable issues were published from the reviewed pull request changes.",
 		);
-		assert.equal(
-			outcome.assistantMessage,
-			"Found one issue that was not recorded.",
-		);
+		assert.equal(outcome.assistantMessage, "Looks good.");
 		assert.ok(
 			logSpy.infoEntries.some(
 				(entry) => entry.message === "Copilot did not emit reasoning events.",
@@ -235,6 +241,23 @@ describe("runCopilotReview", () => {
 		);
 		assert.ok(createdSessionConfig);
 		assert.equal(createdSessionConfig.reasoningSummary, "concise");
+		assert.deepEqual(
+			logSpy.infoEntries.find((entry) =>
+				entry.message.startsWith("Copilot review scope prompt"),
+			),
+			{
+				message: "Copilot review scope prompt",
+				details: [
+					{
+						content: [
+							"review_scope: changed=1 reviewable=1 +1 -0",
+							"reviewable_files:",
+							'M +1 -0 "src/example.ts"',
+						],
+					},
+				],
+			},
+		);
 
 		const infoEntriesBeforePreTool = logSpy.infoEntries.length;
 		const preToolOutput = await createdSessionConfig.hooks?.onPreToolUse?.(
@@ -254,12 +277,15 @@ describe("runCopilotReview", () => {
 	it("passes a resolved GitHub token into the created Copilot client", async () => {
 		const context = createReviewContext();
 		const createdOptions: Array<Record<string, unknown>> = [];
+		let createdSessionConfig: SessionConfig | undefined;
 
 		const session = {
 			on() {
 				return () => {};
 			},
 			async sendAndWait() {
+				assert.ok(createdSessionConfig);
+				await recordCleanReview(createdSessionConfig);
 				return { data: { content: "Looks good." } };
 			},
 			async disconnect() {},
@@ -280,7 +306,8 @@ describe("runCopilotReview", () => {
 
 					return {
 						async start() {},
-						async createSession() {
+						async createSession(configArg: SessionConfig) {
+							createdSessionConfig = configArg;
 							return session as never;
 						},
 						async stop() {
@@ -321,12 +348,13 @@ describe("runCopilotReview", () => {
 				createCopilotClient() {
 					return {
 						async start() {},
-						async createSession() {
+						async createSession(configArg: SessionConfig) {
 							return {
 								on() {
 									return () => {};
 								},
 								async sendAndWait() {
+									await recordCleanReview(configArg);
 									return { data: { content: "Looks good." } };
 								},
 								rpc: {
@@ -393,52 +421,75 @@ describe("runCopilotReview", () => {
 		const logSpy = createLoggerSpy();
 		let sendCount = 0;
 
-		await runCopilotReview(config, context, {} as never, logSpy.logger, {
-			createCopilotClient() {
-				return {
-					async start() {},
-					async createSession(configArg: SessionConfig) {
-						return {
-							on() {
-								return () => {};
-							},
-							async sendAndWait() {
-								sendCount += 1;
-								if (sendCount === 1) {
-									await configArg.hooks?.onPostToolUse?.(
-										{
-											toolName: "bash",
-											toolArgs: {},
-											toolResult: createSdkToolResult({}),
-										} as never,
-										{ sessionId: "session-1" } as never,
-									);
-									await invokeSessionTool(configArg, "record_pr_summary", {
-										summary: "Refactors the reviewed behavior.",
-									});
-									await configArg.hooks?.onPostToolUse?.(
-										{
-											toolName: "record_pr_summary",
-											toolArgs: {
-												summary: "Refactors the reviewed behavior.",
-											},
-											toolResult: createSdkToolResult({}),
-										} as never,
-										{ sessionId: "session-1" } as never,
-									);
-								}
+		const outcome = await runCopilotReview(
+			config,
+			context,
+			{} as never,
+			logSpy.logger,
+			{
+				createCopilotClient() {
+					return {
+						async start() {},
+						async createSession(configArg: SessionConfig) {
+							return {
+								on() {
+									return () => {};
+								},
+								async sendAndWait() {
+									sendCount += 1;
+									if (sendCount === 1) {
+										await configArg.hooks?.onPostToolUse?.(
+											{
+												toolName: "bash",
+												toolArgs: {},
+												toolResult: createSdkToolResult({}),
+											} as never,
+											{ sessionId: "session-1" } as never,
+										);
+										await invokeSessionTool(configArg, "record_pr_summary", {
+											summary: "Refactors the reviewed behavior.",
+											reviewOutcome: "clean",
+										});
+										await configArg.hooks?.onPostToolUse?.(
+											{
+												toolName: "record_pr_summary",
+												toolArgs: {
+													summary: "Refactors the reviewed behavior.",
+													reviewOutcome: "clean",
+												},
+												toolResult: createSdkToolResult({}),
+											} as never,
+											{ sessionId: "session-1" } as never,
+										);
+										await configArg.hooks?.onPreToolUse?.(
+											{
+												toolName: "record_change_area_summary",
+												toolArgs: {},
+											} as never,
+											{ sessionId: "session-1" } as never,
+										);
+										await configArg.hooks?.onPostToolUseFailure?.(
+											{
+												toolName: "record_change_area_summary",
+												toolArgs: {},
+												error: "No reviewed paths matched.",
+											} as never,
+											{ sessionId: "session-1" } as never,
+										);
+									}
 
-								return { data: { content: "Looks good." } };
-							},
-							async disconnect() {},
-						} as never;
-					},
-					async stop() {
-						return [];
-					},
-				} as never;
+									return { data: { content: "Looks good." } };
+								},
+								async disconnect() {},
+							} as never;
+						},
+						async stop() {
+							return [];
+						},
+					} as never;
+				},
 			},
-		});
+		);
 
 		assert.equal(sendCount, 1);
 		assert.deepEqual(
@@ -450,46 +501,56 @@ describe("runCopilotReview", () => {
 			[],
 		);
 		assert.deepEqual(logSpy.warnEntries, []);
+		assert.equal(outcome.toolTelemetry?.errorCount, 1);
+		assert.equal(
+			outcome.toolTelemetry?.byTool.record_change_area_summary?.resultCounts
+				.failure,
+			1,
+		);
 	});
 
-	it("does not continue when the model records no structured review output", async () => {
+	it("rejects missing or inconsistent structured completion outcomes", async () => {
 		const context = createReviewContext();
 		const logSpy = createLoggerSpy();
 		let sendCount = 0;
 
-		await runCopilotReview(config, context, {} as never, logSpy.logger, {
-			createCopilotClient() {
-				return {
-					async start() {},
-					async createSession() {
+		for (const reviewOutcome of [undefined, "findings_recorded"] as const) {
+			await assert.rejects(
+				runCopilotReview(config, context, {} as never, logSpy.logger, {
+					createCopilotClient() {
 						return {
-							on() {
-								return () => {};
+							async start() {},
+							async createSession(configArg: SessionConfig) {
+								return {
+									on() {
+										return () => {};
+									},
+									async sendAndWait() {
+										sendCount += 1;
+										if (reviewOutcome) {
+											await invokeSessionTool(configArg, "record_pr_summary", {
+												summary: "Found a build regression.",
+												reviewOutcome,
+											});
+										}
+										return { data: { content: "Looks good." } };
+									},
+									async disconnect() {},
+								} as never;
 							},
-							async sendAndWait() {
-								sendCount += 1;
-								return { data: { content: "Looks good." } };
+							async stop() {
+								return [];
 							},
-							async disconnect() {},
 						} as never;
 					},
-					async stop() {
-						return [];
-					},
-				} as never;
-			},
-		});
+				}),
+				reviewOutcome
+					? /does not match 0 finalized findings/
+					: /did not record a structured completion outcome/,
+			);
+		}
 
-		assert.equal(sendCount, 1);
-		assert.deepEqual(
-			logSpy.infoEntries.filter((entry) =>
-				entry.message.startsWith(
-					"Continuing Copilot review because review completion signals are incomplete",
-				),
-			),
-			[],
-		);
-		assert.deepEqual(logSpy.warnEntries, []);
+		assert.equal(sendCount, 2);
 	});
 
 	it("wraps Copilot startup HTML parse failures with actionable auth guidance", async () => {
@@ -558,6 +619,7 @@ describe("runCopilotReview", () => {
 								return () => {};
 							},
 							async sendAndWait() {
+								await recordCleanReview(configArg);
 								sessionEventHandlers[0]?.({
 									id: "reasoning-1",
 									timestamp: "2026-03-25T00:00:00.000Z",
@@ -706,6 +768,18 @@ describe("runCopilotReview", () => {
 		});
 
 		assert.deepEqual(logSpy.infoEntries, [
+			{
+				message: "Copilot review scope prompt",
+				details: [
+					{
+						content: [
+							"review_scope: changed=1 reviewable=1 +1 -0",
+							"reviewable_files:",
+							'M +1 -0 "src/example.ts"',
+						],
+					},
+				],
+			},
 			{
 				message: "Copilot emitted reasoning events without content.",
 				details: [],

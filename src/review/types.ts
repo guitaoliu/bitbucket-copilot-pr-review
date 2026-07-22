@@ -109,6 +109,8 @@ export interface ChangeAreaSummary {
 	summary: string;
 }
 
+type ReviewCompletionOutcome = "clean" | "findings_recorded";
+
 export interface StoredReviewFinding {
 	path: string;
 	line?: number;
@@ -130,6 +132,7 @@ interface PreviousReviewReference {
 
 export interface ReviewSummaryDrafts {
 	prSummary?: string;
+	reviewOutcome?: ReviewCompletionOutcome;
 	changeAreas?: ChangeAreaSummary[];
 }
 

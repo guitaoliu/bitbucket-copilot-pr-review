@@ -45,14 +45,14 @@ This file is for agentic coding assistants working in this repository.
 - Build distributable CLI: `pnpm build`
 - Normal run: `pnpm review -- <pull-request-url>`
 - Dry run without publishing: `pnpm review:dry-run -- <pull-request-url> --dry-run`
-- Source invocation: `pnpm review:src:dry-run -- <pull-request-url> --dry-run`
 - Built CLI help: `node dist/cli.js review --help`
 
 ## Single-test commands
 
-- Run one test file: `node --test src/config/load.test.ts`
-- Run one named test in one file: `node --test --test-name-pattern="uses simplified defaults" src/config/load.test.ts`
-- Run one suite/test pattern across all files: `node --test --test-name-pattern="buildPullRequestComment" "src/**/*.test.ts"`
+- Build test bundles: `pnpm test:build`
+- Run one test file after bundling: `node --test .test-dist/config/load.test.mjs`
+- Run one named test after bundling: `node --test --test-name-pattern="uses simplified defaults" .test-dist/config/load.test.mjs`
+- Run one suite/test pattern after bundling: `node --test --test-name-pattern="buildPullRequestComment" ".test-dist/**/*.test.mjs"`
 
 ## Build/lint/test workflow for changes
 

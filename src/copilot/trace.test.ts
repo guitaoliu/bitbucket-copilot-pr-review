@@ -214,6 +214,44 @@ describe("createSessionEventTracer", () => {
 		]);
 	});
 
+	it("records non-zero background shell exits as failures", () => {
+		const { infoCalls, logger, warnCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			ephemeral: true,
+			type: "system.notification",
+			data: {
+				content: "<system_notification>Shell failed</system_notification>",
+				kind: {
+					type: "shell_completed",
+					shellId: "shell-1",
+					exitCode: 128,
+					description: "Inspect the diff",
+				},
+			},
+		} as SessionEvent);
+
+		assert.equal(tracer.getFailedBackgroundShellCount(), 1);
+		assert.deepEqual(infoCalls, []);
+		assert.deepEqual(warnCalls, [
+			{
+				message: "Copilot background shell failed",
+				details: [
+					{
+						shellId: "shell-1",
+						exitCode: 128,
+						description: "Inspect the diff",
+						content: "<system_notification>Shell failed</system_notification>",
+					},
+				],
+			},
+		]);
+	});
+
 	it("logs assistant intent as visible progress", () => {
 		const { logger, infoCalls } = createLoggerSpy();
 		const tracer = createSessionEventTracer(logger);

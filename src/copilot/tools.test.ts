@@ -538,10 +538,19 @@ describe("Copilot tools", () => {
 				summaryDrafts,
 			),
 		);
-		const handler = getHandler<{ summary: string }, string>(tool);
+		const handler = getHandler<
+			{
+				summary: string;
+				reviewOutcome: "clean" | "findings_recorded";
+			},
+			string
+		>(tool);
 
 		const firstResult = await handler(
-			{ summary: "Adds stricter validation to the renamed service flow." },
+			{
+				summary: "Adds stricter validation to the renamed service flow.",
+				reviewOutcome: "findings_recorded",
+			},
 			{
 				sessionId: "session",
 				toolCallId: "tool",
@@ -550,7 +559,10 @@ describe("Copilot tools", () => {
 			},
 		);
 		const secondResult = await handler(
-			{ summary: "Tightens validation and updates the renamed service path." },
+			{
+				summary: "Tightens validation and updates the renamed service path.",
+				reviewOutcome: "clean",
+			},
 			{
 				sessionId: "session",
 				toolCallId: "tool",
@@ -565,6 +577,7 @@ describe("Copilot tools", () => {
 			summaryDrafts.prSummary,
 			"Tightens validation and updates the renamed service path.",
 		);
+		assert.equal(summaryDrafts.reviewOutcome, "clean");
 		assert.match(
 			JSON.stringify(tool.parameters),
 			/Use short bullet points when that is clearer than one sentence/,

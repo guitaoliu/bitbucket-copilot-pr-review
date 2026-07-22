@@ -27,7 +27,11 @@ import type {
 import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
 import { truncateText } from "../shared/text.ts";
-import { buildPrompt, buildSystemMessage } from "./prompt.ts";
+import {
+	buildPrompt,
+	buildReviewScopeLines,
+	buildSystemMessage,
+} from "./prompt.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
 import { createSessionEventTracer } from "./trace.ts";
 
@@ -572,6 +576,22 @@ function getToolTelemetryCounter(
 	return created;
 }
 
+function recordBackgroundShellFailures(
+	toolTelemetry: ReviewToolTelemetry,
+	failureCount: number,
+): void {
+	if (failureCount === 0) {
+		return;
+	}
+
+	toolTelemetry.errorCount += failureCount;
+	const counter = getToolTelemetryCounter(toolTelemetry, "bash");
+	const successCount = counter.resultCounts.success ?? 0;
+	counter.resultCounts.success = Math.max(0, successCount - failureCount);
+	counter.resultCounts.failure =
+		(counter.resultCounts.failure ?? 0) + failureCount;
+}
+
 function buildPreToolLogMessage(input: PreToolUseInput): string {
 	return [
 		"Copilot requested tool",
@@ -671,6 +691,9 @@ function createReviewSessionHooks(
 			const resultType = input.toolResult.resultType;
 			counter.resultCounts[resultType] =
 				(counter.resultCounts[resultType] ?? 0) + 1;
+			if (resultType !== "success") {
+				toolTelemetry.errorCount += 1;
+			}
 			updateRejectedFindingProgress(input, progressState);
 
 			if (input.toolName !== "bash") {
@@ -680,6 +703,18 @@ function createReviewSessionHooks(
 			}
 		},
 		onPostToolUseFailure: async (input: PostToolUseFailureInput) => {
+			const toolTelemetry =
+				progressState.toolTelemetry ?? createEmptyReviewToolTelemetry();
+			progressState.toolTelemetry = toolTelemetry;
+			toolTelemetry.totalCompleted += 1;
+			toolTelemetry.errorCount += 1;
+			const counter = getToolTelemetryCounter(toolTelemetry, input.toolName);
+			counter.completed += 1;
+			counter.resultCounts.failure = (counter.resultCounts.failure ?? 0) + 1;
+			const startedAt = shiftToolStartTime(progressState, input.toolName);
+			const durationMs = startedAt !== undefined ? Date.now() - startedAt : 0;
+			counter.totalDurationMs += durationMs;
+			toolTelemetry.totalDurationMs += durationMs;
 			if (input.toolName !== "bash") {
 				logger.info(buildPostToolFailureLogMessage(input));
 			}
@@ -717,6 +752,24 @@ function summarizeOutcome(
 	}
 
 	return `Copilot identified ${findingsCount} reportable issue${findingsCount === 1 ? "" : "s"} in the reviewed pull request changes.`;
+}
+
+function assertReviewCompletion(
+	reviewOutcome: ReviewSummaryDrafts["reviewOutcome"],
+	findingsCount: number,
+): void {
+	if (!reviewOutcome) {
+		throw new Error(
+			"Copilot review did not record a structured completion outcome.",
+		);
+	}
+
+	const expectedOutcome = findingsCount > 0 ? "findings_recorded" : "clean";
+	if (reviewOutcome !== expectedOutcome) {
+		throw new Error(
+			`Copilot review outcome ${reviewOutcome} does not match ${findingsCount} finalized findings.`,
+		);
+	}
 }
 
 export async function runCopilotReview(
@@ -806,6 +859,9 @@ export async function runCopilotReview(
 
 		let response: Awaited<ReturnType<CopilotSessionLike["sendAndWait"]>>;
 		try {
+			logger.info("Copilot review scope prompt", {
+				content: buildReviewScopeLines(context),
+			});
 			response = await session.sendAndWait(
 				{ prompt: buildPrompt(context, config.review.ignorePaths) },
 				config.copilot.timeoutMs,
@@ -830,6 +886,10 @@ export async function runCopilotReview(
 		const reviewSummary = finalizeReviewSummary(context, summaryDrafts);
 		const assistantMessage = response?.data.content;
 		toolTelemetry.sessionDurationMs = Date.now() - reviewStartedAt;
+		recordBackgroundShellFailures(
+			toolTelemetry,
+			sessionEventTracer.getFailedBackgroundShellCount(),
+		);
 		let copilotUsage: ReviewCopilotUsage | undefined;
 		if (session.rpc?.usage) {
 			try {
@@ -850,6 +910,7 @@ export async function runCopilotReview(
 				logger.warn("Failed to read Copilot review usage", error);
 			}
 		}
+		assertReviewCompletion(summaryDrafts.reviewOutcome, findings.length);
 
 		return omitUndefined({
 			summary: summarizeOutcome(context, findings.length),

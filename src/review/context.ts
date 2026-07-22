@@ -86,7 +86,7 @@ export async function buildReviewContext(
 			headCommit: pr.source.latestCommit,
 			mergeBaseCommit,
 			ciSummary,
-			promptVersion: "2026-05-accuracy-stability-1",
+			promptVersion: "2026-07-precision-markdown-2",
 			copilot: {
 				model: config.copilot.model,
 				reasoningEffort: config.copilot.reasoningEffort,
