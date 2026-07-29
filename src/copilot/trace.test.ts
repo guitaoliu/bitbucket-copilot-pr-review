@@ -280,6 +280,93 @@ describe("createSessionEventTracer", () => {
 		]);
 	});
 
+	it("logs assistant turn retries as visible progress", () => {
+		const { logger, infoCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			ephemeral: true,
+			type: "assistant.turn_retry",
+			agentId: "agent-1",
+			data: {
+				turnId: "turn-2",
+				model: "gpt-5.6-terra",
+				reason: "transient_error",
+			},
+		});
+
+		assert.deepEqual(infoCalls, [
+			{
+				message: "Copilot model call retry",
+				details: [
+					{
+						agentId: "agent-1",
+						turnId: "turn-2",
+						model: "gpt-5.6-terra",
+						reason: "transient_error",
+					},
+				],
+			},
+		]);
+	});
+
+	it("logs structured model call failure diagnostics", () => {
+		const { logger, warnCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			ephemeral: true,
+			type: "model.call_failure",
+			data: {
+				source: "top_level",
+				model: "gpt-5.6-terra",
+				failureKind: "api",
+				transport: "websocket",
+				statusCode: 400,
+				badRequestKind: "structured_error",
+				errorCode: "model_max_prompt_tokens_exceeded",
+				errorType: "websocket_error",
+				durationMs: 1250,
+				serviceRequestId: "service-request-1",
+				providerCallId: "provider-call-1",
+				reasoningEffort: "xhigh",
+				isAuto: false,
+				isByok: false,
+			},
+		});
+
+		assert.deepEqual(warnCalls, [
+			{
+				message: "Copilot model call failed",
+				details: [
+					{
+						agentId: undefined,
+						source: "top_level",
+						model: "gpt-5.6-terra",
+						failureKind: "api",
+						transport: "websocket",
+						statusCode: 400,
+						badRequestKind: "structured_error",
+						errorCode: "model_max_prompt_tokens_exceeded",
+						errorType: "websocket_error",
+						durationMs: 1250,
+						serviceRequestId: "service-request-1",
+						providerCallId: "provider-call-1",
+						reasoningEffort: "xhigh",
+						isAuto: false,
+						isByok: false,
+					},
+				],
+			},
+		]);
+	});
+
 	it("logs tool planning from assistant messages", () => {
 		const { logger, infoCalls, traceCalls } = createLoggerSpy();
 		const tracer = createSessionEventTracer(logger);

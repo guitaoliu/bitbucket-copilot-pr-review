@@ -120,6 +120,54 @@ export function createSessionEventTracer(
 				return;
 			}
 
+			if (event.type === "assistant.turn_retry") {
+				const { model, reason, turnId } = event.data;
+				logger.info("Copilot model call retry", {
+					agentId: event.agentId,
+					turnId,
+					model,
+					reason,
+				});
+				return;
+			}
+
+			if (event.type === "model.call_failure") {
+				const {
+					badRequestKind,
+					durationMs,
+					errorCode,
+					errorType,
+					failureKind,
+					isAuto,
+					isByok,
+					model,
+					providerCallId,
+					reasoningEffort,
+					serviceRequestId,
+					source,
+					statusCode,
+					transport,
+				} = event.data;
+				logger.warn("Copilot model call failed", {
+					agentId: event.agentId,
+					source,
+					model,
+					failureKind,
+					transport,
+					statusCode,
+					badRequestKind,
+					errorCode,
+					errorType,
+					durationMs,
+					serviceRequestId,
+					providerCallId,
+					reasoningEffort,
+					isAuto,
+					isByok,
+				});
+				return;
+			}
+
 			if (event.type === "assistant.reasoning_delta") {
 				const data = getEventData(event);
 				const reasoningId =
