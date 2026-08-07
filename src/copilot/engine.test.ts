@@ -495,7 +495,7 @@ describe("runCopilotReview", () => {
 		assert.deepEqual(
 			logSpy.infoEntries.filter((entry) =>
 				entry.message.startsWith(
-					"Continuing Copilot review because review completion signals are incomplete",
+					"Continuing Copilot review because the structured completion outcome is missing",
 				),
 			),
 			[],
@@ -507,6 +507,65 @@ describe("runCopilotReview", () => {
 				.failure,
 			1,
 		);
+	});
+
+	it("requests structured completion when the initial review omits it", async () => {
+		const context = createReviewContext();
+		const logSpy = createLoggerSpy();
+		let sendCount = 0;
+
+		const outcome = await runCopilotReview(
+			config,
+			context,
+			{} as never,
+			logSpy.logger,
+			{
+				createCopilotClient() {
+					return {
+						async start() {},
+						async createSession(configArg: SessionConfig) {
+							return {
+								on() {
+									return () => {};
+								},
+								async sendAndWait(options: { prompt: string }) {
+									sendCount += 1;
+									if (sendCount === 1) {
+										await invokeSessionTool(configArg, "emit_finding", {
+											path: "src/example.ts",
+											line: 1,
+											severity: "HIGH",
+											type: "BUG",
+											confidence: "high",
+											title: "Broken behavior",
+											details: "The changed line breaks the reviewed behavior.",
+										});
+									} else {
+										assert.match(
+											options.prompt,
+											/"findings_recorded" for the 1 finalized finding/,
+										);
+										await invokeSessionTool(configArg, "record_pr_summary", {
+											summary: "Refactors the reviewed behavior.",
+											reviewOutcome: "findings_recorded",
+										});
+									}
+									return { data: { content: "Review complete." } };
+								},
+								async disconnect() {},
+							} as never;
+						},
+						async stop() {
+							return [];
+						},
+					} as never;
+				},
+			},
+		);
+
+		assert.equal(sendCount, 2);
+		assert.equal(outcome.findings.length, 1);
+		assert.equal(outcome.prSummary, "Refactors the reviewed behavior.");
 	});
 
 	it("rejects missing or inconsistent structured completion outcomes", async () => {
@@ -550,7 +609,7 @@ describe("runCopilotReview", () => {
 			);
 		}
 
-		assert.equal(sendCount, 2);
+		assert.equal(sendCount, 3);
 	});
 
 	it("wraps Copilot startup HTML parse failures with actionable auth guidance", async () => {

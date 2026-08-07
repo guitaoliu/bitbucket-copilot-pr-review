@@ -293,7 +293,11 @@ function buildCopilotAuthTroubleshootingHint(config: ReviewerConfig): string {
 function wrapCopilotSessionStageError(
 	error: unknown,
 	config: ReviewerConfig,
-	stage: "client startup" | "session creation" | "review request",
+	stage:
+		| "client startup"
+		| "session creation"
+		| "review request"
+		| "review completion request",
 ): Error {
 	const cause = error instanceof Error ? error : new Error(String(error));
 	if (isHtmlJsonParseError(cause)) {
@@ -877,12 +881,40 @@ export async function runCopilotReview(
 					: "Copilot did not emit reasoning events.",
 			);
 		}
-		const findings = finalizeFindings(
+		let findings = finalizeFindings(
 			drafts,
 			context.reviewableFiles,
 			config.review.maxFindings,
 			config.review.minConfidence,
 		);
+		if (!summaryDrafts.reviewOutcome) {
+			const reviewOutcome = findings.length > 0 ? "findings_recorded" : "clean";
+			const findingLabel = findings.length === 1 ? "finding" : "findings";
+			logger.info(
+				"Continuing Copilot review because the structured completion outcome is missing.",
+				{ findings: findings.length },
+			);
+			try {
+				response = await session.sendAndWait(
+					{
+						prompt: `Finish the review without further inspection or findings. Call record_pr_summary now with a concise PR summary and reviewOutcome "${reviewOutcome}" for the ${findings.length} finalized ${findingLabel}, then return the final response.`,
+					},
+					config.copilot.timeoutMs,
+				);
+			} catch (error) {
+				throw wrapCopilotSessionStageError(
+					error,
+					config,
+					"review completion request",
+				);
+			}
+			findings = finalizeFindings(
+				drafts,
+				context.reviewableFiles,
+				config.review.maxFindings,
+				config.review.minConfidence,
+			);
+		}
 		const reviewSummary = finalizeReviewSummary(context, summaryDrafts);
 		const assistantMessage = response?.data.content;
 		toolTelemetry.sessionDurationMs = Date.now() - reviewStartedAt;
