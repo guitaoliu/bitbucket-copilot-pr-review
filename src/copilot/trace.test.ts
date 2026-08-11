@@ -280,39 +280,6 @@ describe("createSessionEventTracer", () => {
 		]);
 	});
 
-	it("logs assistant turn retries as visible progress", () => {
-		const { logger, infoCalls } = createLoggerSpy();
-		const tracer = createSessionEventTracer(logger);
-
-		tracer.handleEvent({
-			id: "1",
-			timestamp: "2026-03-25T00:00:00.000Z",
-			parentId: null,
-			ephemeral: true,
-			type: "assistant.turn_retry",
-			agentId: "agent-1",
-			data: {
-				turnId: "turn-2",
-				model: "gpt-5.6-terra",
-				reason: "transient_error",
-			},
-		});
-
-		assert.deepEqual(infoCalls, [
-			{
-				message: "Copilot model call retry",
-				details: [
-					{
-						agentId: "agent-1",
-						turnId: "turn-2",
-						model: "gpt-5.6-terra",
-						reason: "transient_error",
-					},
-				],
-			},
-		]);
-	});
-
 	it("logs structured model call failure diagnostics", () => {
 		const { logger, warnCalls } = createLoggerSpy();
 		const tracer = createSessionEventTracer(logger);
