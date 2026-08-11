@@ -120,17 +120,6 @@ export function createSessionEventTracer(
 				return;
 			}
 
-			if (event.type === "assistant.turn_retry") {
-				const { model, reason, turnId } = event.data;
-				logger.info("Copilot model call retry", {
-					agentId: event.agentId,
-					turnId,
-					model,
-					reason,
-				});
-				return;
-			}
-
 			if (event.type === "model.call_failure") {
 				const {
 					badRequestKind,
