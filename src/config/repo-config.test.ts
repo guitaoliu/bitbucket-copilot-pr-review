@@ -82,13 +82,15 @@ describe("parseRepoReviewConfig", () => {
 		    "skipBranchPrefixes": ["renovate/", "deps/"]
 			  },
 			  "copilot": {
-			    "model": "gpt-5.3-codex"
+			    "model": "gpt-5.3-codex",
+			    "reasoningEffort": "max"
 			  }
 			}`);
 
 		assert.deepEqual(config.review?.ignorePaths, ["i18n/locales/**/*.json"]);
 		assert.deepEqual(config.review?.skipBranchPrefixes, ["renovate/", "deps/"]);
 		assert.equal(config.copilot?.model, "gpt-5.3-codex");
+		assert.equal(config.copilot?.reasoningEffort, "max");
 	});
 
 	it("rejects unknown keys", () => {

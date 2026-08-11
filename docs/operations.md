@@ -81,8 +81,8 @@ Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pu
 | `BITBUCKET_AUTH_TYPE` | auto-detected from provided credentials | Bitbucket authentication strategy. |
 | `BITBUCKET_CA_CERT_PATH` | - | PEM CA bundle path for Bitbucket TLS. |
 | `BITBUCKET_INSECURE_TLS` | `false` | Disable TLS certificate verification for Bitbucket (not recommended). |
-| `COPILOT_MODEL` | `gpt-5.6-terra` | Copilot model override. |
-| `COPILOT_REASONING_EFFORT` | `xhigh` | Copilot reasoning effort. |
+| `COPILOT_MODEL` | `gpt-5.6-luna` | Copilot model override. |
+| `COPILOT_REASONING_EFFORT` | `max` | Copilot reasoning effort. |
 | `COPILOT_TIMEOUT_MS` | `1800000` | Copilot timeout in milliseconds. |
 | `CI_SUMMARY_PATH` | - | Path to a CI summary file included in review context. |
 | `REPORT_KEY` | `copilot-pr-review` | Code Insights report key. |
@@ -143,7 +143,7 @@ scripts/run-local-review.sh /path/to/local/my-repo \
   https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
-The helper script reads credentials from your environment, defaults to `gpt-5.4` with `xhigh` reasoning, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and accepts either `FORCE_REVIEW=1` or `REVIEW_FORCE=1` to bypass a cached revision skip.
+The helper script reads credentials from your environment, inherits the application's `gpt-5.6-luna` with `max` reasoning defaults unless you override them, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and accepts either `FORCE_REVIEW=1` or `REVIEW_FORCE=1` to bypass a cached revision skip.
 
 The review JSON output includes `metrics.toolTelemetry` so you can inspect which Copilot tools were requested, allowed, denied, and completed.
 
@@ -217,8 +217,6 @@ Recommended local test flow:
 ```bash
 export REPO_ROOT="/path/to/local/my-repo"
 export BITBUCKET_TOKEN="<bitbucket token>"
-export COPILOT_MODEL="gpt-5.4"
-export COPILOT_REASONING_EFFORT="xhigh"
 export BITBUCKET_CA_CERT_PATH="/path/to/root-ca.pem"
 
 export LOG_LEVEL="debug"

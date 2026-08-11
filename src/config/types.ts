@@ -1,7 +1,8 @@
+import type { SessionConfig } from "@github/copilot-sdk";
 import type { Confidence } from "../review/types.ts";
 import type { LogLevel } from "../shared/types.ts";
 
-export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = NonNullable<SessionConfig["reasoningEffort"]>;
 export type PullRequestCommentStrategy = "update" | "recreate";
 
 export interface ReviewerConfigRepoOverrides {

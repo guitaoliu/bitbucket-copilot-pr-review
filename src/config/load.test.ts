@@ -97,6 +97,7 @@ describe("parseEnvironment", () => {
 		const env = parseEnvironment({
 			BITBUCKET_TOKEN: "token",
 			COPILOT_MODEL: "env-model",
+			COPILOT_REASONING_EFFORT: "max",
 			REPORT_COMMENT_STRATEGY: "update",
 			REVIEW_IGNORE_PATHS: "generated/**, docs/**",
 			REVIEW_SKIP_BRANCH_PREFIXES: "renovate/, deps/",
@@ -105,6 +106,7 @@ describe("parseEnvironment", () => {
 		assert.deepEqual(getEnvRepoOverrides(env), {
 			copilot: {
 				model: "env-model",
+				reasoningEffort: "max",
 			},
 			report: {
 				commentStrategy: "update",
@@ -336,7 +338,8 @@ describe("loadConfig feature flags", () => {
 		assert.equal(config.bitbucket.repoSlug, "repo");
 		assert.equal(config.bitbucket.prId, 123);
 		assert.equal(config.bitbucket.tls.insecureSkipVerify, false);
-		assert.equal(config.copilot.model, "gpt-5.6-terra");
+		assert.equal(config.copilot.model, "gpt-5.6-luna");
+		assert.equal(config.copilot.reasoningEffort, "max");
 		assert.equal(config.report.key, "copilot-pr-review");
 		assert.equal(config.review.forceReview, false);
 		assert.equal(config.review.confirmRerun, false);

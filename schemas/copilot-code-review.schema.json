@@ -19,7 +19,7 @@
 				},
 				"reasoningEffort": {
 					"type": "string",
-					"enum": ["low", "medium", "high", "xhigh"],
+					"enum": ["low", "medium", "high", "xhigh", "max"],
 					"description": "Optional reasoning effort override for this repository."
 				},
 				"timeoutMs": {

@@ -25,6 +25,7 @@ export const REASONING_EFFORT_VALUES = [
 	"medium",
 	"high",
 	"xhigh",
+	"max",
 ] as const satisfies readonly ReasoningEffort[];
 
 export const REPORT_COMMENT_STRATEGY_VALUES = [

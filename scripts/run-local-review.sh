@@ -30,8 +30,9 @@ Optional environment:
   NODE_USE_SYSTEM_CA=1         Use the Node.js system CA store (default)
   BITBUCKET_CA_CERT_PATH=/path/to/corp-ca.pem
   BITBUCKET_INSECURE_TLS=1     Disable Bitbucket TLS certificate verification (not recommended)
-  COPILOT_MODEL=gpt-5.6-luna
-  COPILOT_REASONING_EFFORT=xhigh
+  COPILOT_MODEL=<model>         Override the application default model
+  COPILOT_REASONING_EFFORT=<effort>
+                                Override the application default reasoning effort
   LOG_LEVEL=debug
 EOF
 }
@@ -79,8 +80,6 @@ if [[ ! "$PR_URL" =~ ^https?://.+/projects/[^/]+/repos/[^/]+/pull-requests/[0-9]
 fi
 
 export REPO_ROOT="$TARGET_REPO_ROOT"
-export COPILOT_MODEL="${COPILOT_MODEL:-gpt-5.6-luna}"
-export COPILOT_REASONING_EFFORT="${COPILOT_REASONING_EFFORT:-xhigh}"
 export LOG_LEVEL="${LOG_LEVEL:-debug}"
 export NODE_USE_SYSTEM_CA="${NODE_USE_SYSTEM_CA:-1}"
 
@@ -105,8 +104,8 @@ fi
 printf 'Reviewer root: %s\n' "$REVIEWER_ROOT"
 printf 'Target repo: %s\n' "$REPO_ROOT"
 printf 'Bitbucket PR: %s\n' "$PR_URL"
-printf 'Model: %s\n' "$COPILOT_MODEL"
-printf 'Reasoning effort: %s\n' "$COPILOT_REASONING_EFFORT"
+printf 'Model override: %s\n' "${COPILOT_MODEL:-application default}"
+printf 'Reasoning effort override: %s\n' "${COPILOT_REASONING_EFFORT:-application default}"
 printf 'Node system CA: %s\n' "$( [[ "$NODE_USE_SYSTEM_CA" == "1" ]] && printf 'enabled' || printf 'disabled' )"
 printf 'Mode: %s\n' "$( [[ "${PUBLISH:-0}" == "1" ]] && printf 'publish' || printf 'dry-run' )"
 printf 'Force review: %s\n' "$( [[ "$FORCE_REVIEW_EFFECTIVE" == "1" ]] && printf 'enabled' || printf 'disabled' )"
