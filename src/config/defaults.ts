@@ -6,7 +6,7 @@ import type {
 } from "./types.ts";
 
 const DEFAULT_LOG_LEVEL: LogLevel = "info";
-const DEFAULT_REASONING_EFFORT: ReasoningEffort = "max";
+const DEFAULT_REASONING_EFFORT: ReasoningEffort = "xhigh";
 const DEFAULT_COMMENT_STRATEGY: PullRequestCommentStrategy = "recreate";
 const DEFAULT_MIN_CONFIDENCE: Confidence = "medium";
 const DEFAULT_IGNORE_PATHS: string[] = [];
@@ -21,7 +21,7 @@ export const REVIEWER_CONFIG_DEFAULTS = {
 		},
 	},
 	copilot: {
-		model: "gpt-5.6-luna",
+		model: "gpt-5.6-terra",
 		reasoningEffort: DEFAULT_REASONING_EFFORT,
 		timeoutMs: 1_800_000,
 	},

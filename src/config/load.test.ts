@@ -338,8 +338,8 @@ describe("loadConfig feature flags", () => {
 		assert.equal(config.bitbucket.repoSlug, "repo");
 		assert.equal(config.bitbucket.prId, 123);
 		assert.equal(config.bitbucket.tls.insecureSkipVerify, false);
-		assert.equal(config.copilot.model, "gpt-5.6-luna");
-		assert.equal(config.copilot.reasoningEffort, "max");
+		assert.equal(config.copilot.model, "gpt-5.6-terra");
+		assert.equal(config.copilot.reasoningEffort, "xhigh");
 		assert.equal(config.report.key, "copilot-pr-review");
 		assert.equal(config.review.forceReview, false);
 		assert.equal(config.review.confirmRerun, false);
