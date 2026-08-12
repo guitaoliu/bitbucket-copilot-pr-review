@@ -144,7 +144,7 @@ describe("parseEnvironment", () => {
 						COPILOT_TIMEOUT_MS: "999999999",
 					}),
 				),
-			/copilot\.timeoutMs: copilot\.timeoutMs must be at most 3600000\./,
+			/copilot\.timeoutMs: copilot\.timeoutMs must be at most 7200000\./,
 		);
 	});
 });

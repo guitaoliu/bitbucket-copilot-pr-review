@@ -117,7 +117,7 @@ describe("parseRepoReviewConfig", () => {
 	it("rejects unreasonable numeric values", () => {
 		assert.throws(
 			() => parseRepoReviewConfig('{"copilot":{"timeoutMs":999999999}}'),
-			/at most 3600000/,
+			/at most 7200000/,
 		);
 		assert.throws(
 			() => parseRepoReviewConfig('{"review":{"maxPatchChars":10}}'),
@@ -293,7 +293,7 @@ describe("getRepoReviewConfigSchema", () => {
 		assert.ok(schema.properties?.review?.properties?.ignorePaths);
 		assert.equal(
 			schema.properties?.copilot?.properties?.timeoutMs?.maximum,
-			3600000,
+			7200000,
 		);
 		assert.equal(schema.properties?.report?.properties?.title?.maxLength, 120);
 		assert.equal(

@@ -25,7 +25,7 @@
 				"timeoutMs": {
 					"type": "integer",
 					"minimum": 60000,
-					"maximum": 3600000,
+					"maximum": 7200000,
 					"description": "Optional Copilot timeout in milliseconds."
 				}
 			},

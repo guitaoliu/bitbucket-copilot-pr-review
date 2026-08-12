@@ -10,7 +10,7 @@ export const REPO_CONFIG_LIMITS = {
 	schemaRefMaxLength: 2048,
 	modelMaxLength: 120,
 	reportTitleMaxLength: 120,
-	timeoutMs: { min: 60_000, max: 3_600_000 },
+	timeoutMs: { min: 60_000, max: 7_200_000 },
 	maxPatchChars: { min: 500, max: 50_000 },
 	defaultFileSliceLines: { min: 1, max: 500 },
 	maxFileSliceLines: { min: 1, max: 1_000 },
