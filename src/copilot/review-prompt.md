@@ -18,12 +18,12 @@
 
 ## Finding gate
 - All findings must be PR-introduced, PR-worsened, or newly exposed on a changed path.
-- Report only discrete, actionable defects with a concrete trigger and impact that the author would likely fix.
+- Report only actionable defects the author would fix. State triggering inputs, environment, or state, concrete impact, and condition-dependent severity.
 - Exclude intentional behavior and claims based on unstated assumptions; prove affected callers, contracts, or runtime paths.
 - Prefer no finding over a weak, ambiguous, or preference-only finding.
 - Start from the diff; inspect head, base, relevant callers, callees, or tests only as needed to validate a concern.
 - Follow plausible concerns with targeted reads until validated or disproven; before emitting, re-read the target hunk and rule out guards, null or empty checks, early returns, and caller invariants.
-- Treat CI as a clue, not proof. Never assume unverified behavior.
+- Treat CI as a clue, not proof.
 - No question-shaped or speculative findings: investigate the code path until you can verify the concern or rule it out.
 
 ## Finding taxonomy

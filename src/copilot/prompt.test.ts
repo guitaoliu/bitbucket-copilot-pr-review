@@ -291,6 +291,7 @@ describe("buildSystemMessage", () => {
 
 		assert.match(content, /reviewable changed files and changed lines/);
 		assert.match(content, /untrusted evidence/);
+		assert.match(content, /condition-dependent severity/);
 		assert.match(
 			content,
 			/every distinct finding at high confidence or better/,
