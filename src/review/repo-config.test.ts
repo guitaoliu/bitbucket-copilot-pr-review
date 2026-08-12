@@ -42,7 +42,6 @@ const baseConfig: ReviewerConfig = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFindings: 25,
 		minConfidence: "medium",
 		maxPatchChars: 12000,
 		defaultFileSliceLines: 250,

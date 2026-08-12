@@ -83,7 +83,6 @@ export interface ReviewContext {
 	rawDiff: string;
 	diffStats: DiffStats;
 	reviewableFiles: ChangedFile[];
-	previousReview?: PreviousReviewReference;
 	ciSummary?: string;
 }
 
@@ -110,25 +109,6 @@ export interface ChangeAreaSummary {
 }
 
 type ReviewCompletionOutcome = "clean" | "findings_recorded";
-
-export interface StoredReviewFinding {
-	path: string;
-	line?: number;
-	severity: Severity;
-	type: AnnotationType;
-	confidence?: Confidence;
-	title: string;
-	details?: string;
-	category?: string;
-	externalId?: string;
-	threadKey?: string;
-}
-
-interface PreviousReviewReference {
-	revision?: string;
-	reviewedCommit: string;
-	findings: StoredReviewFinding[];
-}
 
 export interface ReviewSummaryDrafts {
 	prSummary?: string;

@@ -1,23 +1,15 @@
 import type { RawBitbucketCodeInsightsReport } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
-import { buildFindingThreadKey } from "./finding-identity.ts";
 import {
 	getInsightReportFindingCount,
 	getInsightReportReviewedCommit,
 	getInsightReportReviewRevision,
 	getInsightReportReviewSchema,
 	parsePullRequestCommentMetadata,
-	rewritePullRequestCommentMetadata,
 } from "./publication-state.ts";
-import { buildReviewArtifacts } from "./result.ts";
 import { getReviewRevisionSchema } from "./revision.ts";
-import type { ReviewArtifacts, ReviewBitbucketClient } from "./runner-types.ts";
-import type {
-	ReviewContext,
-	ReviewFinding,
-	ReviewOutcome,
-	StoredReviewFinding,
-} from "./types.ts";
+import type { ReviewBitbucketClient } from "./runner-types.ts";
+import type { ReviewContext } from "./types.ts";
 
 type StoredComment = Awaited<
 	ReturnType<ReviewBitbucketClient["findPullRequestCommentByTag"]>
@@ -26,7 +18,6 @@ type StoredComment = Awaited<
 export interface ExistingPublicationStatus {
 	existingReport: RawBitbucketCodeInsightsReport | undefined;
 	existingComment: StoredComment;
-	commentStoredFindings?: StoredReviewFinding[];
 	reportCommit?: string;
 	existingPublicationComplete: boolean;
 	reportRevision?: string;
@@ -39,12 +30,10 @@ export interface ExistingPublicationStatus {
 }
 
 export interface ReviewReusePlan {
-	action: "skip" | "republish" | "review";
+	action: "skip" | "review";
 	reason?: string;
 	repairWarning?: string;
 	confirmMessage?: string;
-	reusedReview?: ReviewOutcome;
-	reusedArtifacts?: ReviewArtifacts;
 }
 
 function shouldConfirmRerun(
@@ -57,114 +46,6 @@ function shouldConfirmRerun(
 	);
 }
 
-function summarizeReportDetails(
-	report: RawBitbucketCodeInsightsReport | undefined,
-): string {
-	const details = report?.details?.trim();
-	if (!details) {
-		return "Reused the existing review artifacts for an unchanged PR revision.";
-	}
-
-	return (
-		details
-			.split(/\n\nAdvisory AI review generated/)[0]
-			?.split(/\n\nTop findings:/)[0]
-			?.trim() ||
-		"Reused the existing review artifacts for an unchanged PR revision."
-	);
-}
-
-function buildReviewFindingFromStoredFinding(
-	finding: StoredReviewFinding,
-	index: number,
-	config: ReviewerConfig,
-): ReviewFinding {
-	return {
-		externalId: finding.externalId ?? `reused-finding-${index + 1}`,
-		threadKey:
-			finding.threadKey ??
-			buildFindingThreadKey({
-				path: finding.path,
-				line: finding.line ?? 0,
-				type: finding.type,
-			}),
-		path: finding.path,
-		line: finding.line ?? 0,
-		severity: finding.severity,
-		type: finding.type,
-		confidence: finding.confidence ?? config.review.minConfidence,
-		title: finding.title,
-		details: finding.details ?? "",
-		...(finding.category ? { category: finding.category } : {}),
-	};
-}
-
-function getReusableStoredFindings(
-	context: ReviewContext,
-	status: ExistingPublicationStatus,
-): StoredReviewFinding[] | undefined {
-	if (status.commentRevision !== context.reviewRevision) {
-		return undefined;
-	}
-
-	if (
-		!status.reportCommit ||
-		status.commentReviewedCommit !== status.reportCommit
-	) {
-		return undefined;
-	}
-
-	return status.commentStoredFindings ?? [];
-}
-
-function buildReviewOutcomeFromArtifacts(
-	context: ReviewContext,
-	status: ExistingPublicationStatus,
-	config: ReviewerConfig,
-): ReviewOutcome {
-	const storedFindings = getReusableStoredFindings(context, status) ?? [];
-
-	return {
-		summary: summarizeReportDetails(status.existingReport),
-		findings: storedFindings.map((finding, index) =>
-			buildReviewFindingFromStoredFinding(finding, index, config),
-		),
-		stale: false,
-	};
-}
-
-function canReuseExistingArtifacts(
-	context: ReviewContext,
-	status: ExistingPublicationStatus,
-): boolean {
-	if (!status.existingReport || !status.reportCommit) {
-		return false;
-	}
-
-	if (status.reportSchema !== getReviewRevisionSchema()) {
-		return false;
-	}
-
-	if (status.reportRevision !== context.reviewRevision) {
-		return false;
-	}
-
-	if (status.reportReviewedCommit !== status.reportCommit) {
-		return false;
-	}
-
-	const expectedAnnotationCount = getInsightReportFindingCount(
-		status.existingReport,
-	);
-	if (expectedAnnotationCount === undefined) {
-		return false;
-	}
-
-	const reusableStoredFindings = getReusableStoredFindings(context, status);
-
-	return reusableStoredFindings?.length === expectedAnnotationCount;
-}
-
 function buildUnusableReasons(
 	context: ReviewContext,
 	status: {
@@ -175,7 +56,6 @@ function buildUnusableReasons(
 		commentRevision?: string;
 		commentReviewedCommit?: string;
 		commentPublishedCommit?: string;
-		storedFindingCount: number;
 		expectedAnnotationCount?: number;
 	},
 ): string[] {
@@ -219,10 +99,6 @@ function buildUnusableReasons(
 
 	if (status.expectedAnnotationCount === undefined) {
 		reasons.push("report findings field is missing or invalid");
-	} else if (status.storedFindingCount !== status.expectedAnnotationCount) {
-		reasons.push(
-			`stored finding count ${status.storedFindingCount} != findings ${status.expectedAnnotationCount}`,
-		);
 	}
 
 	return reasons;
@@ -242,22 +118,11 @@ export async function getExistingPublicationStatus(
 				existingComment.text,
 			)
 		: undefined;
-	const candidateReportCommit =
-		commentMetadata?.reviewedCommit ?? context.headCommit;
-
-	let reportCommit = context.headCommit;
-	let existingReport = await bitbucket.getCodeInsightsReport(
+	const reportCommit = context.headCommit;
+	const existingReport = await bitbucket.getCodeInsightsReport(
 		context.headCommit,
 		config.report.key,
 	);
-
-	if (!existingReport && candidateReportCommit !== context.headCommit) {
-		existingReport = await bitbucket.getCodeInsightsReport(
-			candidateReportCommit,
-			config.report.key,
-		);
-		reportCommit = candidateReportCommit;
-	}
 
 	const reportRevision = getInsightReportReviewRevision(existingReport);
 	const reportReviewedCommit = getInsightReportReviewedCommit(existingReport);
@@ -271,12 +136,10 @@ export async function getExistingPublicationStatus(
 		commentMetadata?.revision === context.reviewRevision &&
 		commentMetadata.reviewedCommit === context.headCommit &&
 		commentMetadata.publishedCommit === context.headCommit &&
-		expectedAnnotationCount !== undefined &&
-		(commentMetadata?.storedFindings?.length ?? 0) === expectedAnnotationCount;
+		expectedAnnotationCount !== undefined;
 	const unusableReasons = existingReport
 		? buildUnusableReasons(context, {
 				reportCommit,
-				storedFindingCount: commentMetadata?.storedFindings?.length ?? 0,
 				...(reportSchema ? { reportSchema } : {}),
 				...(reportRevision ? { reportRevision } : {}),
 				...(reportReviewedCommit ? { reportReviewedCommit } : {}),
@@ -312,9 +175,6 @@ export async function getExistingPublicationStatus(
 		...(commentMetadata?.reviewedCommit
 			? { commentReviewedCommit: commentMetadata.reviewedCommit }
 			: {}),
-		...(commentMetadata?.storedFindings
-			? { commentStoredFindings: commentMetadata.storedFindings }
-			: {}),
 		unusableReasons,
 	};
 }
@@ -335,48 +195,13 @@ export function buildReviewReusePlan(
 		};
 	}
 
-	if (canReuseExistingArtifacts(context, status)) {
-		const reusedReview = buildReviewOutcomeFromArtifacts(
-			context,
-			status,
-			config,
-		);
-		const reusedArtifacts = buildReviewArtifacts(config, context, reusedReview);
-		const commentBody = status.existingComment
-			? rewritePullRequestCommentMetadata(status.existingComment.text, {
-					tag: config.report.commentTag,
-					revision: context.reviewRevision,
-					reviewedCommit: context.headCommit,
-					publishedCommit: context.headCommit,
-					...(status.commentStoredFindings
-						? {
-								findingsJson: JSON.stringify(status.commentStoredFindings),
-							}
-						: {}),
-				})
-			: reusedArtifacts.commentBody;
-
-		return {
-			action: "republish",
-			repairWarning:
-				status.reportCommit === context.headCommit
-					? `Repairing the published artifacts for unchanged PR revision ${context.reviewRevision} on head ${context.headCommit} without rerunning review.`
-					: `Reusing the existing review for unchanged PR revision ${context.reviewRevision} from head ${status.reportCommit} and republishing it onto head ${context.headCommit}.`,
-			reusedReview,
-			reusedArtifacts: {
-				report: reusedArtifacts.report,
-				commentBody,
-			},
-		};
-	}
-
 	if (status.existingReport) {
 		const reasonSuffix =
 			status.unusableReasons.length > 0
 				? ` Details: ${status.unusableReasons.join("; ")}.`
 				: "";
 		const confirmMessage = shouldConfirmRerun(context, status)
-			? `Existing cached artifacts for PR revision ${context.reviewRevision} look unusable. ${status.unusableReasons.join("; ") || "No additional details available."}`
+			? `Existing published artifacts for PR revision ${context.reviewRevision} look unusable. ${status.unusableReasons.join("; ") || "No additional details available."}`
 			: undefined;
 		return {
 			action: "review",

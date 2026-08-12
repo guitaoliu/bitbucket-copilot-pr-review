@@ -36,7 +36,6 @@ export const REVIEWER_CONFIG_DEFAULTS = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFindings: 25,
 		minConfidence: DEFAULT_MIN_CONFIDENCE,
 		maxPatchChars: 12_000,
 		defaultFileSliceLines: 250,

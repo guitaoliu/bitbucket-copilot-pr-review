@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-const REVIEW_REVISION_SCHEMA = "2";
+const REVIEW_REVISION_SCHEMA = "3";
 const REVIEW_INPUT_VERSION = "2026-05-accuracy-stability-1";
 
 export function getReviewRevisionSchema(): string {
@@ -18,7 +18,6 @@ export function buildReviewRevision(input: {
 		reasoningEffort: string;
 	};
 	reviewConfig?: {
-		maxFindings: number;
 		minConfidence: string;
 		maxPatchChars: number;
 		defaultFileSliceLines: number;

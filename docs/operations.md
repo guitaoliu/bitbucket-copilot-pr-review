@@ -59,7 +59,7 @@ Usage: `bitbucket-copilot-pr-review review <pull-request-url> [options]`
 | --- | --- |
 | `--dry-run` | Run without publishing results to Bitbucket |
 | `--force-review` | Re-run even if the current PR revision already has published results |
-| `--confirm-rerun` | Ask before rerunning unusable cached artifacts for an unchanged PR revision |
+| `--confirm-rerun` | Ask before rerunning an incomplete publication for an unchanged PR revision |
 | `--repo-root <path>` | Use a different local checkout as the repository root |
 | `-h`, `--help` | Show this help text |
 
@@ -93,7 +93,6 @@ Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pu
 | `REPORT_LINK` | falls back to `BUILD_URL` when present | Code Insights report link. |
 | `BUILD_URL` | used when `REPORT_LINK` is unset | Fallback report link from CI build URL. |
 | `REVIEW_FORCE` | `false` | Force review even when the revision was already published. |
-| `REVIEW_MAX_FINDINGS` | `25` | Maximum number of findings to publish. |
 | `REVIEW_MIN_CONFIDENCE` | `medium` | Minimum confidence threshold for findings. |
 | `REVIEW_MAX_PATCH_CHARS` | `12000` | Maximum diff size sent to Copilot per file. |
 | `REVIEW_DEFAULT_FILE_SLICE_LINES` | `250` | Default line window when reading file slices. |
@@ -143,7 +142,7 @@ scripts/run-local-review.sh /path/to/local/my-repo \
   https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
-The helper script reads credentials from your environment, inherits the application's `gpt-5.6-luna` with `max` reasoning defaults unless you override them, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and accepts either `FORCE_REVIEW=1` or `REVIEW_FORCE=1` to bypass a cached revision skip.
+The helper script reads credentials from your environment, inherits the application's `gpt-5.6-luna` with `max` reasoning defaults unless you override them, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and accepts either `FORCE_REVIEW=1` or `REVIEW_FORCE=1` to bypass a published revision skip.
 
 The review JSON output includes `metrics.toolTelemetry` so you can inspect which Copilot tools were requested, allowed, denied, and completed.
 
@@ -165,8 +164,7 @@ Example `copilot-code-review.json`:
 {
   "$schema": "./schemas/copilot-code-review.schema.json",
 	"review": {
-		"ignorePaths": ["i18n/locales/**/*.json"],
-		"maxFindings": 25
+		"ignorePaths": ["i18n/locales/**/*.json"]
   },
   "copilot": {
     "model": "gpt-5.4",
@@ -196,7 +194,6 @@ Example with common repo-specific customizations:
   },
 	"review": {
 		"ignorePaths": ["i18n/locales/**/*.json", "docs/generated/**"],
-		"maxFindings": 25,
     "minConfidence": "medium",
     "maxPatchChars": 12000,
     "defaultFileSliceLines": 250,
@@ -205,7 +202,7 @@ Example with common repo-specific customizations:
 }
 ```
 
-By default, the reviewer computes a revision fingerprint from the effective PR diff (`merge-base -> source head`) and skips only when that exact PR revision already has a fully published result for the same `REPORT_KEY`. If the source head changes but the effective diff stays the same, the reviewer reuses the cached result and republishes it onto the new head without rerunning Copilot. If the target branch moves and changes the effective diff, the reviewer runs again. If the report exists but the published artifacts are missing or stale, the reviewer repairs them automatically. Use `--force-review` or `REVIEW_FORCE=1` to force a rerun on the same revision.
+By default, the reviewer skips only when the current source head and revision already have a complete Code Insights report and tagged summary comment for the same `REPORT_KEY`. A source-head or revision change runs Copilot again. An incomplete publication also reruns Copilot, then reconciles existing finding threads by their stable thread keys. Use `--force-review` or `REVIEW_FORCE=1` to force a rerun on the same revision.
 
 Recommended local test flow:
 
@@ -279,7 +276,6 @@ Useful reviewer env vars in CI:
 - `REPORT_LINK="<build or job URL>"`
 - `REPORTER_NAME=GitHub Copilot`
 - `COPILOT_TIMEOUT_MS=1800000`
-- `REVIEW_MAX_FINDINGS=25`
 - `REVIEW_IGNORE_PATHS=i18n/locales/**/*.json`
 
 For a safe first rollout, start with `--dry-run`, inspect the payload in your CI logs, then remove `--dry-run` once the Code Insights output looks right.

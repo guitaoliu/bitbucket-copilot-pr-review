@@ -16,7 +16,6 @@ export interface ReviewerConfigRepoOverrides {
 		commentStrategy?: PullRequestCommentStrategy | undefined;
 	};
 	review: {
-		maxFindings?: number | undefined;
 		minConfidence?: Confidence | undefined;
 		maxPatchChars?: number | undefined;
 		defaultFileSliceLines?: number | undefined;
@@ -82,7 +81,6 @@ export interface ReviewerConfig {
 		dryRun: boolean;
 		forceReview: boolean;
 		confirmRerun: boolean;
-		maxFindings: number;
 		minConfidence: Confidence;
 		maxPatchChars: number;
 		defaultFileSliceLines: number;

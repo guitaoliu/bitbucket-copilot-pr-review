@@ -335,14 +335,6 @@ export const CONFIG_FIELD_METADATA = {
 		path: "review.confirmRerun",
 		description: "Prompt before rerunning unusable cached artifacts.",
 	},
-	reviewMaxFindings: {
-		path: "review.maxFindings",
-		env: "REVIEW_MAX_FINDINGS",
-		description: "Maximum number of findings to publish.",
-		...envParser({ kind: "positiveInteger" }),
-		...repoOverride(),
-		...envDoc(27, { defaultValuePath: ["review", "maxFindings"] }),
-	},
 	reviewMinConfidence: {
 		path: "review.minConfidence",
 		env: "REVIEW_MIN_CONFIDENCE",

@@ -92,7 +92,6 @@ export async function buildReviewContext(
 				reasoningEffort: config.copilot.reasoningEffort,
 			},
 			reviewConfig: {
-				maxFindings: config.review.maxFindings,
 				minConfidence: config.review.minConfidence,
 				maxPatchChars: config.review.maxPatchChars,
 				defaultFileSliceLines: config.review.defaultFileSliceLines,

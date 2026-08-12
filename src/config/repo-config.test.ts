@@ -56,7 +56,6 @@ const baseConfig: ReviewerConfig = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFindings: 25,
 		minConfidence: "medium",
 		maxPatchChars: 12000,
 		defaultFileSliceLines: 250,
@@ -101,14 +100,18 @@ describe("parseRepoReviewConfig", () => {
 	});
 
 	it("accepts but ignores the legacy review maxFiles field", () => {
-		const repoConfig = parseRepoReviewConfig(
-			'{"review":{"maxFiles":150,"maxFindings":10}}',
-		);
+		const repoConfig = parseRepoReviewConfig('{"review":{"maxFiles":150}}');
 		const merged = mergeRepoReviewConfig(baseConfig, repoConfig);
 
 		assert.equal(repoConfig.review?.maxFiles, 150);
-		assert.equal(merged.review.maxFindings, 10);
 		assert.equal("maxFiles" in merged.review, false);
+	});
+
+	it("rejects the removed review maxFindings field", () => {
+		assert.throws(
+			() => parseRepoReviewConfig('{"review":{"maxFindings":10}}'),
+			/unrecognized key/i,
+		);
 	});
 
 	it("rejects unreasonable numeric values", () => {

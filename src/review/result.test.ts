@@ -139,7 +139,7 @@ describe("buildReviewArtifacts", () => {
 				["Findings", 1],
 				["Finding taxonomy", "1 bug"],
 				["Review revision", "review-rev-123"],
-				["Review schema", "2"],
+				["Review schema", "3"],
 				["Reviewed commit", "head-123"],
 				["Review scope", "2 reviewable"],
 			],
@@ -149,7 +149,7 @@ describe("buildReviewArtifacts", () => {
 			artifacts.commentBody,
 			/<!-- copilot-pr-review:revision:review-rev-123 -->/,
 		);
-		assert.match(
+		assert.doesNotMatch(
 			artifacts.commentBody,
 			/<!-- copilot-pr-review:findings-json:/,
 		);
@@ -184,7 +184,7 @@ describe("buildReviewArtifacts", () => {
 			baseConfig.report.commentTag,
 			artifacts.commentBody,
 		);
-		assert.equal(metadata?.storedFindings?.[0]?.threadKey, "thread-1");
+		assert.equal(metadata?.reviewedCommit, "head-123");
 	});
 
 	it("bounds large comment bodies under the Bitbucket limit", () => {

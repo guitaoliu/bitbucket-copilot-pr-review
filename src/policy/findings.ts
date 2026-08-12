@@ -108,7 +108,6 @@ function makeExternalId(draft: FindingDraft): string {
 export function finalizeFindings(
 	drafts: FindingDraft[],
 	reviewableFiles: ChangedFile[],
-	maxFindings: number,
 	minConfidence: Confidence,
 ): ReviewFinding[] {
 	const fileMap = createReviewableFileLookup(reviewableFiles);
@@ -244,5 +243,5 @@ export function finalizeFindings(
 			.localeCompare([right.path, String(right.line), right.title].join(":"));
 	});
 
-	return accepted.slice(0, maxFindings);
+	return accepted;
 }

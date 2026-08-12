@@ -472,12 +472,11 @@ function buildToolLogFields(toolName: string, toolArgs: unknown): string[] {
 }
 
 function buildProgressFields(
-	config: ReviewerConfig,
 	drafts: FindingDraft[],
 	progressState: ReviewProgressState,
 ): string[] {
 	return [
-		`findings=${drafts.length}/${config.review.maxFindings}`,
+		`findings=${drafts.length}`,
 		`dropped_findings_invalid_payload=${getDroppedFindingCounts(progressState).invalidPayload}`,
 		`dropped_findings_invalid_location=${getDroppedFindingCounts(progressState).invalidLocation}`,
 		`pr_summary=${progressState.summaryDrafts.prSummary ? "recorded" : "missing"}`,
@@ -606,7 +605,6 @@ function buildPreToolLogMessage(input: PreToolUseInput): string {
 
 function buildPostToolLogMessage(
 	input: PostToolUseInput,
-	config: ReviewerConfig,
 	drafts: FindingDraft[],
 	progressState: ReviewProgressState,
 ): string {
@@ -621,7 +619,7 @@ function buildPostToolLogMessage(
 			? `error=${formatToolLogValue(input.toolResult.error)}`
 			: undefined,
 		...buildToolLogFields(input.toolName, input.toolArgs),
-		...buildProgressFields(config, drafts, progressState),
+		...buildProgressFields(drafts, progressState),
 	]
 		.filter((entry): entry is string => entry !== undefined)
 		.join(" ");
@@ -642,7 +640,6 @@ function buildPostToolFailureLogMessage(
 }
 
 function createReviewSessionHooks(
-	config: ReviewerConfig,
 	logger: Logger,
 	drafts: FindingDraft[],
 	progressState: ReviewProgressState = {
@@ -701,9 +698,7 @@ function createReviewSessionHooks(
 			updateRejectedFindingProgress(input, progressState);
 
 			if (input.toolName !== "bash") {
-				logger.info(
-					buildPostToolLogMessage(input, config, drafts, progressState),
-				);
+				logger.info(buildPostToolLogMessage(input, drafts, progressState));
 			}
 		},
 		onPostToolUseFailure: async (input: PostToolUseFailureInput) => {
@@ -837,7 +832,7 @@ export async function runCopilotReview(
 			}
 			return decision;
 		},
-		hooks: createReviewSessionHooks(config, logger, drafts, progressState),
+		hooks: createReviewSessionHooks(logger, drafts, progressState),
 		workingDirectory: config.repoRoot,
 		includeSubAgentStreamingEvents: true,
 		infiniteSessions: { enabled: false },
@@ -884,7 +879,6 @@ export async function runCopilotReview(
 		let findings = finalizeFindings(
 			drafts,
 			context.reviewableFiles,
-			config.review.maxFindings,
 			config.review.minConfidence,
 		);
 		if (!summaryDrafts.reviewOutcome) {
@@ -911,7 +905,6 @@ export async function runCopilotReview(
 			findings = finalizeFindings(
 				drafts,
 				context.reviewableFiles,
-				config.review.maxFindings,
 				config.review.minConfidence,
 			);
 		}

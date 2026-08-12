@@ -15,7 +15,6 @@ describe("buildReviewRevision", () => {
 				reasoningEffort: "xhigh",
 			},
 			reviewConfig: {
-				maxFindings: 10,
 				minConfidence: "high",
 				maxPatchChars: 12_000,
 				defaultFileSliceLines: 250,
@@ -48,7 +47,6 @@ describe("buildReviewRevision", () => {
 				reasoningEffort: "xhigh",
 			},
 			reviewConfig: {
-				maxFindings: 10,
 				minConfidence: "high",
 				maxPatchChars: 12_000,
 				defaultFileSliceLines: 250,
@@ -67,7 +65,6 @@ describe("buildReviewRevision", () => {
 				reasoningEffort: "xhigh",
 			},
 			reviewConfig: {
-				maxFindings: 10,
 				minConfidence: "medium",
 				maxPatchChars: 12_000,
 				defaultFileSliceLines: 250,

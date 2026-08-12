@@ -58,12 +58,6 @@
 					"description": "Deprecated compatibility field; accepted but ignored.",
 					"deprecated": true
 				},
-				"maxFindings": {
-					"type": "integer",
-					"minimum": 1,
-					"maximum": 100,
-					"description": "Maximum number of findings to publish."
-				},
 				"minConfidence": {
 					"type": "string",
 					"enum": ["low", "medium", "high"],

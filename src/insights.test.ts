@@ -39,7 +39,6 @@ const config: ReviewerConfig = {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		maxFindings: 10,
 		minConfidence: "high",
 		maxPatchChars: 12000,
 		defaultFileSliceLines: 250,
@@ -417,7 +416,7 @@ describe("buildPullRequestComment", () => {
 				["Findings", 2],
 				["Finding taxonomy", "1 bug, 1 code smell"],
 				["Review revision", "review-rev-123"],
-				["Review schema", "2"],
+				["Review schema", "3"],
 				["Reviewed commit", "head-123"],
 				["Review scope", "3 reviewable"],
 			],
@@ -483,7 +482,7 @@ describe("buildPullRequestComment", () => {
 		assert.ok(comment.length <= BITBUCKET_PR_COMMENT_MAX_CHARS);
 		assert.match(comment, /<!-- copilot-pr-review -->/);
 		assert.match(comment, /<!-- copilot-pr-review:revision:review-rev-123 -->/);
-		assert.match(comment, /<!-- copilot-pr-review:findings-json:/);
+		assert.doesNotMatch(comment, /<!-- copilot-pr-review:findings-json:/);
 		assert.match(comment, /### What Changed/);
 		assert.match(comment, /### Review Scope/);
 		assert.match(comment, /omitted to fit Bitbucket comment limit/);

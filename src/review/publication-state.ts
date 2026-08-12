@@ -1,142 +1,22 @@
-import { deflateRawSync, inflateRawSync } from "node:zlib";
 import type {
 	InsightReportDataField,
 	InsightReportPayload,
 } from "../bitbucket/types.ts";
-import { omitUndefined } from "../shared/object.ts";
-import { sanitizeModelAuthoredText } from "../shared/text.ts";
-import { buildFindingThreadKey } from "./finding-identity.ts";
 import { getReviewRevisionSchema } from "./revision.ts";
-import type { StoredReviewFinding } from "./types.ts";
 
 const REVIEW_REVISION_FIELD_TITLE = "Review revision";
 const REVIEW_SCHEMA_FIELD_TITLE = "Review schema";
 const REVIEWED_COMMIT_FIELD_TITLE = "Reviewed commit";
-const FINDINGS_METADATA_KEY = "findings-json";
 
 const COMMENT_METADATA_KEYS = [
 	"schema",
 	"revision",
 	"reviewed-commit",
 	"published-commit",
-	FINDINGS_METADATA_KEY,
 ] as const;
-
-const STORED_FINDING_SEVERITIES = new Set(["LOW", "MEDIUM", "HIGH"]);
-const STORED_FINDING_TYPES = new Set(["BUG", "CODE_SMELL", "VULNERABILITY"]);
-const STORED_FINDING_CONFIDENCES = new Set(["low", "medium", "high"]);
-
-function encodeCommentMetadataValue(value: string): string {
-	return deflateRawSync(Buffer.from(value, "utf8")).toString("base64");
-}
-
-function decodeCommentMetadataValue(value: string): string | undefined {
-	try {
-		return inflateRawSync(Buffer.from(value, "base64")).toString("utf8");
-	} catch {
-		try {
-			return Buffer.from(value, "base64").toString("utf8");
-		} catch {
-			return undefined;
-		}
-	}
-}
 
 function escapeRegexLiteral(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function parseStoredReviewFinding(
-	entry: unknown,
-): StoredReviewFinding | undefined {
-	if (!entry || typeof entry !== "object") {
-		return undefined;
-	}
-
-	const candidate = entry as Record<string, unknown>;
-	if (
-		typeof candidate.path !== "string" ||
-		candidate.path.trim().length === 0 ||
-		typeof candidate.title !== "string" ||
-		candidate.title.trim().length === 0 ||
-		typeof candidate.severity !== "string" ||
-		!STORED_FINDING_SEVERITIES.has(candidate.severity) ||
-		typeof candidate.type !== "string" ||
-		!STORED_FINDING_TYPES.has(candidate.type)
-	) {
-		return undefined;
-	}
-
-	if (
-		candidate.line !== undefined &&
-		(!Number.isInteger(candidate.line) ||
-			typeof candidate.line !== "number" ||
-			candidate.line < 0)
-	) {
-		return undefined;
-	}
-
-	if (
-		candidate.confidence !== undefined &&
-		(typeof candidate.confidence !== "string" ||
-			!STORED_FINDING_CONFIDENCES.has(candidate.confidence))
-	) {
-		return undefined;
-	}
-
-	if (
-		candidate.details !== undefined &&
-		typeof candidate.details !== "string"
-	) {
-		return undefined;
-	}
-
-	if (
-		candidate.category !== undefined &&
-		typeof candidate.category !== "string"
-	) {
-		return undefined;
-	}
-
-	if (
-		candidate.externalId !== undefined &&
-		(typeof candidate.externalId !== "string" ||
-			candidate.externalId.trim().length === 0)
-	) {
-		return undefined;
-	}
-
-	if (
-		candidate.threadKey !== undefined &&
-		(typeof candidate.threadKey !== "string" ||
-			candidate.threadKey.trim().length === 0)
-	) {
-		return undefined;
-	}
-
-	return omitUndefined({
-		path: candidate.path,
-		line: candidate.line as number | undefined,
-		severity: candidate.severity as StoredReviewFinding["severity"],
-		type: candidate.type as StoredReviewFinding["type"],
-		confidence: candidate.confidence as
-			| StoredReviewFinding["confidence"]
-			| undefined,
-		title: candidate.title,
-		details: candidate.details as string | undefined,
-		category: candidate.category as string | undefined,
-		externalId: candidate.externalId as string | undefined,
-		threadKey:
-			(candidate.threadKey as string | undefined) ??
-			buildFindingThreadKey({
-				path: candidate.path,
-				line:
-					typeof candidate.line === "number" && Number.isInteger(candidate.line)
-						? candidate.line
-						: 0,
-				type: candidate.type as StoredReviewFinding["type"],
-			}),
-	}) satisfies StoredReviewFinding;
 }
 
 function getReportFieldValue(
@@ -159,12 +39,6 @@ function getTextReportField(
 	return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function isTagMarkerLine(tag: string, line: string): boolean {
-	return new RegExp(
-		`^<!--\\s*${escapeRegexLiteral(tag)}(?::[^>]*)?\\s*-->$`,
-	).test(line.trim());
-}
-
 export function buildPullRequestCommentTagMarker(tag: string): string {
 	return `<!-- ${tag} -->`;
 }
@@ -175,7 +49,6 @@ export function buildPullRequestCommentMetadataMarkers(options: {
 	reviewedCommit: string;
 	publishedCommit: string;
 	schema?: string;
-	findingsJson?: string;
 }): string[] {
 	const schema = options.schema ?? getReviewRevisionSchema();
 	return [
@@ -183,42 +56,7 @@ export function buildPullRequestCommentMetadataMarkers(options: {
 		`<!-- ${options.tag}:revision:${options.revision} -->`,
 		`<!-- ${options.tag}:reviewed-commit:${options.reviewedCommit} -->`,
 		`<!-- ${options.tag}:published-commit:${options.publishedCommit} -->`,
-		...(options.findingsJson
-			? [
-					`<!-- ${options.tag}:${FINDINGS_METADATA_KEY}:${encodeCommentMetadataValue(options.findingsJson)} -->`,
-				]
-			: []),
 	];
-}
-
-export function rewritePullRequestCommentMetadata(
-	text: string,
-	options: {
-		tag: string;
-		revision: string;
-		reviewedCommit: string;
-		publishedCommit: string;
-		schema?: string;
-		findingsJson?: string;
-	},
-): string {
-	const body = text
-		.split(/\r?\n/)
-		.filter((line) => !isTagMarkerLine(options.tag, line))
-		.join("\n")
-		.trim();
-
-	const markers = [
-		buildPullRequestCommentTagMarker(options.tag),
-		...buildPullRequestCommentMetadataMarkers(options),
-	];
-
-	return [markers.join("\n"), body]
-		.map((value, index) =>
-			index === 0 ? value : sanitizeModelAuthoredText(value),
-		)
-		.filter((value) => value.length > 0)
-		.join("\n\n");
 }
 
 export function parsePullRequestCommentMetadata(
@@ -230,7 +68,6 @@ export function parsePullRequestCommentMetadata(
 			revision?: string;
 			reviewedCommit?: string;
 			publishedCommit?: string;
-			storedFindings?: StoredReviewFinding[];
 	  }
 	| undefined {
 	if (!text.includes(buildPullRequestCommentTagMarker(tag))) {
@@ -242,7 +79,6 @@ export function parsePullRequestCommentMetadata(
 		revision?: string;
 		reviewedCommit?: string;
 		publishedCommit?: string;
-		storedFindings?: StoredReviewFinding[];
 	} = {};
 
 	for (const key of COMMENT_METADATA_KEYS) {
@@ -267,25 +103,6 @@ export function parsePullRequestCommentMetadata(
 			case "published-commit":
 				metadata.publishedCommit = value;
 				break;
-			case FINDINGS_METADATA_KEY: {
-				const decoded = decodeCommentMetadataValue(value);
-				if (!decoded) {
-					break;
-				}
-
-				try {
-					const parsed = JSON.parse(decoded);
-					if (Array.isArray(parsed)) {
-						metadata.storedFindings = parsed.flatMap((entry) => {
-							const finding = parseStoredReviewFinding(entry);
-							return finding ? [finding] : [];
-						});
-					}
-				} catch {
-					// Ignore malformed stored finding metadata and require a fresh review.
-				}
-				break;
-			}
 		}
 	}
 

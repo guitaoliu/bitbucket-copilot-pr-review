@@ -961,7 +961,7 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 		]);
 	});
 
-	it("updates a legacy finding thread in place when the stable thread key matches", async () => {
+	it("creates a new thread when a legacy finding has a different externalId", async () => {
 		const requestCalls: Array<{
 			pathname: string;
 			method: string | undefined;
@@ -1018,27 +1018,15 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 			{
 				revision: "review-rev-123",
 				reviewedCommit: "head-123",
-				previousReviewFindings: [
-					{
-						externalId: "finding-old",
-						threadKey: "thread-keep",
-						path: "src/example.ts",
-						line: 10,
-						severity: "HIGH",
-						type: "BUG",
-						title: "Legacy title",
-					},
-				],
 			},
 		);
 
 		assert.deepEqual(requestCalls, [
 			{
 				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
-				method: "PUT",
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments",
+				method: "POST",
 				body: {
-					version: 2,
 					text: [
 						"<!-- copilot-pr-review:finding:finding-new -->",
 						"<!-- copilot-pr-review:finding-thread:thread-keep -->",
@@ -1052,7 +1040,20 @@ describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
 						"",
 						"Updated details.",
 					].join("\n"),
+					anchor: {
+						diffType: "EFFECTIVE",
+						path: "src/example.ts",
+						line: 10,
+						lineType: "ADDED",
+						fileType: "TO",
+					},
 				},
+			},
+			{
+				pathname:
+					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
+				method: "DELETE",
+				body: undefined,
 			},
 		]);
 	});

@@ -41,7 +41,7 @@
 - Keep titles short and comments factual and single-paragraph; state the trigger, impact, and why the code is wrong.
 - Choose severity, type, and confidence conservatively. Use HIGH for issues likely to block safe merge or cause serious production impact, MEDIUM for material but more bounded risk, and LOW for real but narrower merge-relevant risk.
 - Use category only when it is obvious and helpful; prefer short values like security, correctness, data-integrity, concurrency, reliability, performance, or tests. Otherwise omit it.
-- Emit up to {{maxFindings}} distinct findings at {{minConfidence}} confidence or better. If more validate, keep the strongest; the cap is not a stop signal.
+- Emit every distinct finding at {{minConfidence}} confidence or better. If none qualify, emit none. Do not stop early; list all qualifying findings.
 
 ## Recommended workflow
 1. Trust review_scope and reviewable_files. Do not rerun name-status, numstat, dirstat, or a full diff. Batch targeted diffs and related symbol/call-site searches.

@@ -1,7 +1,6 @@
 {
 	"$schema": "./schemas/copilot-code-review.schema.json",
 	"review": {
-		"maxFindings": 25,
 		"minConfidence": "medium",
 		"maxPatchChars": 12000,
 		"defaultFileSliceLines": 250,

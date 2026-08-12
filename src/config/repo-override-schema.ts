@@ -11,7 +11,6 @@ export const REPO_CONFIG_LIMITS = {
 	modelMaxLength: 120,
 	reportTitleMaxLength: 120,
 	timeoutMs: { min: 60_000, max: 3_600_000 },
-	maxFindings: { min: 1, max: 100 },
 	maxPatchChars: { min: 500, max: 50_000 },
 	defaultFileSliceLines: { min: 1, max: 500 },
 	maxFileSliceLines: { min: 1, max: 1_000 },
@@ -115,12 +114,6 @@ export function createReviewOverrideSchema(options?: {
 				.positive("review.maxFiles must be positive.")
 				.describe("Deprecated compatibility field; accepted but ignored.")
 				.meta({ deprecated: true })
-				.optional(),
-			maxFindings: boundedInteger(
-				"review.maxFindings",
-				REPO_CONFIG_LIMITS.maxFindings,
-			)
-				.describe("Maximum number of findings to publish.")
 				.optional(),
 			minConfidence: z
 				.enum(CONFIDENCE_VALUES)

@@ -7,11 +7,7 @@ import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import type { Logger } from "../shared/logger.ts";
 import type { PreparedReviewContext } from "./context.ts";
-import type {
-	ReviewContext,
-	ReviewOutcome,
-	StoredReviewFinding,
-} from "./types.ts";
+import type { ReviewContext, ReviewOutcome } from "./types.ts";
 import type { DetachedReviewWorkspace } from "./workspace.ts";
 
 export interface ReviewBitbucketClient {
@@ -34,7 +30,6 @@ export interface ReviewBitbucketClient {
 		metadata: {
 			revision: string;
 			reviewedCommit: string;
-			previousReviewFindings?: readonly StoredReviewFinding[];
 		},
 	): Promise<void>;
 	upsertPullRequestComment(

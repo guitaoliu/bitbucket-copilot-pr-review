@@ -176,6 +176,27 @@ describe("repo path access decisions", () => {
 });
 
 describe("finalizeFindings", () => {
+	it("keeps every qualifying finding", () => {
+		const changedLines = Array.from({ length: 30 }, (_, index) => index + 1);
+		const drafts: FindingDraft[] = changedLines.map((line) => ({
+			path: "src/service.ts",
+			line,
+			severity: "MEDIUM",
+			type: "BUG",
+			confidence: "high",
+			title: `Issue ${line}`,
+			details: `Details for issue ${line}.`,
+		}));
+
+		const findings = finalizeFindings(
+			drafts,
+			[{ ...reviewedFile, changedLines }],
+			"high",
+		);
+
+		assert.equal(findings.length, 30);
+	});
+
 	it("keeps only threshold-meeting, non-duplicate findings on changed lines", () => {
 		const drafts: FindingDraft[] = [
 			{
@@ -216,7 +237,7 @@ describe("finalizeFindings", () => {
 			},
 		];
 
-		const findings = finalizeFindings(drafts, [reviewedFile], 5, "high");
+		const findings = finalizeFindings(drafts, [reviewedFile], "high");
 		assert.equal(findings.length, 1);
 		assert.equal(findings[0]?.line, 10);
 		assert.ok(findings[0]?.externalId.startsWith("finding-"));
@@ -244,7 +265,7 @@ describe("finalizeFindings", () => {
 			},
 		];
 
-		const findings = finalizeFindings(drafts, [reviewedFile], 5, "medium");
+		const findings = finalizeFindings(drafts, [reviewedFile], "medium");
 
 		assert.equal(findings.length, 1);
 		assert.equal(findings[0]?.severity, "HIGH");
@@ -273,7 +294,7 @@ describe("finalizeFindings", () => {
 			},
 		];
 
-		const findings = finalizeFindings(drafts, [reviewedFile], 5, "medium");
+		const findings = finalizeFindings(drafts, [reviewedFile], "medium");
 
 		assert.equal(findings.length, 1);
 		assert.equal(findings[0]?.type, "BUG");
@@ -311,7 +332,6 @@ describe("finalizeFindings", () => {
 					status: "renamed",
 				},
 			],
-			5,
 			"medium",
 		);
 
@@ -352,7 +372,6 @@ describe("finalizeFindings", () => {
 					status: "copied",
 				},
 			],
-			5,
 			"medium",
 		);
 
@@ -375,7 +394,6 @@ describe("finalizeFindings", () => {
 				},
 			],
 			[reviewedFile],
-			5,
 			"medium",
 		);
 
@@ -405,7 +423,6 @@ describe("finalizeFindings", () => {
 				},
 			],
 			[reviewedFile],
-			5,
 			"medium",
 		);
 		const updated = finalizeFindings(
@@ -421,7 +438,6 @@ describe("finalizeFindings", () => {
 				},
 			],
 			[reviewedFile],
-			5,
 			"medium",
 		);
 
@@ -452,7 +468,6 @@ describe("finalizeFindings", () => {
 				},
 			],
 			[reviewedFile],
-			5,
 			"medium",
 		);
 

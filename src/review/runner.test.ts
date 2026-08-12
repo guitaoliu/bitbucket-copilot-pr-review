@@ -10,11 +10,7 @@ import {
 	createReviewContext,
 	createReviewOutcome,
 } from "../test-support/review-fixtures.ts";
-import { buildFindingThreadKey } from "./finding-identity.ts";
-import {
-	buildPullRequestCommentMetadataMarkers,
-	buildReviewMetadataFields,
-} from "./publication-state.ts";
+import { buildReviewMetadataFields } from "./publication-state.ts";
 import { runReview } from "./runner.ts";
 import type { ReviewContext } from "./types.ts";
 
@@ -668,7 +664,6 @@ describe("runReview", () => {
 						"<!-- copilot-pr-review:schema:2 -->",
 						"<!-- copilot-pr-review:revision:review-rev-123 -->",
 						"<!-- copilot-pr-review:reviewed-commit:head-123 -->",
-						"<!-- copilot-pr-review:published-commit:head-123 -->",
 					].join("\n"),
 				};
 			},
@@ -710,7 +705,7 @@ describe("runReview", () => {
 				},
 				confirmRerun: async ({ message }) => {
 					sequence.push(`confirm:${message}`);
-					assert.match(message, /Existing cached artifacts/);
+					assert.match(message, /Existing published artifacts/);
 					return false;
 				},
 			},
@@ -726,7 +721,7 @@ describe("runReview", () => {
 		);
 		assert.match(
 			sequence[1] ?? "",
-			/^confirm:Existing cached artifacts for PR revision review-rev-123 look unusable\./,
+			/^confirm:Existing published artifacts for PR revision review-rev-123 look unusable\./,
 		);
 	});
 
@@ -807,91 +802,6 @@ describe("runReview", () => {
 		assert.equal(confirmCalled, false);
 		assert.equal(copilotCalled, true);
 		assert.equal(result.skipped, false);
-		assert.equal(warnings.length, 1);
-		assert.match(
-			warnings[0] ?? "",
-			/rerunning review to refresh the published output/,
-		);
-	});
-
-	it("passes prior stored findings into a fresh review as reference context", async () => {
-		const pr = createPullRequest();
-		const context = createReviewContext(pr);
-		const oldHead = "head-old";
-		const oldRevision = "review-rev-old";
-		let passedContext: ReviewContext | undefined;
-		const storedFindings = [
-			{
-				externalId: "finding-1",
-				threadKey: buildFindingThreadKey({
-					path: "src/example.ts",
-					line: 10,
-					type: "BUG",
-				}),
-				path: "src/example.ts",
-				line: 10,
-				severity: "HIGH" as const,
-				type: "BUG" as const,
-				confidence: "high" as const,
-				title: "Null handling is broken",
-				details: "The old review found a null dereference.",
-			},
-		];
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
-			},
-			async getCodeInsightsReport(commitId) {
-				if (commitId === context.headCommit) {
-					return undefined;
-				}
-
-				const metadata = buildReviewMetadataFields({
-					revision: oldRevision,
-					reviewedCommit: oldHead,
-				}).map(({ title, value }) => ({ title, value }));
-				return {
-					data: [{ title: "Findings", value: 1 }, ...metadata],
-				};
-			},
-			async findPullRequestCommentByTag() {
-				return {
-					text: [
-						"<!-- copilot-pr-review -->",
-						...buildPullRequestCommentMetadataMarkers({
-							tag: baseConfig.report.commentTag,
-							revision: oldRevision,
-							reviewedCommit: oldHead,
-							publishedCommit: oldHead,
-							findingsJson: JSON.stringify(storedFindings),
-						}),
-						"## Copilot PR Review",
-					].join("\n"),
-				};
-			},
-			async publishCodeInsights() {},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {},
-		};
-
-		await runReview(baseConfig, logger, {
-			createBitbucketClient: () => client as never,
-			prepareReviewContext: async () => ({
-				config: baseConfig,
-				git: createGitStub(),
-				mergeBaseCommit: context.mergeBaseCommit,
-			}),
-			buildReviewContext: async () => context,
-			runCopilotReview: async (_config, reviewContext) => {
-				passedContext = reviewContext;
-				return createReviewOutcome();
-			},
-		});
-
-		assert.deepEqual(passedContext?.previousReview, {
-			revision: oldRevision,
-			reviewedCommit: oldHead,
-			findings: storedFindings,
-		});
+		assert.equal(warnings.length, 0);
 	});
 });

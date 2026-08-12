@@ -1,5 +1,5 @@
 import type { PullRequestCommentStrategy } from "../config/types.ts";
-import type { ReviewFinding, StoredReviewFinding } from "../review/types.ts";
+import type { ReviewFinding } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
 import {
@@ -65,7 +65,6 @@ interface PullRequestCommentAnchor {
 interface FindingCommentMetadata {
 	revision: string;
 	reviewedCommit: string;
-	previousReviewFindings?: readonly StoredReviewFinding[];
 }
 
 function getErrorMessage(error: unknown): string {
@@ -433,31 +432,16 @@ export class PullRequestCommentsApi {
 		}
 	}
 
-	private async listPullRequestFindingComments(
-		tag: string,
-		previousReviewFindings: readonly StoredReviewFinding[] = [],
-	): Promise<{
+	private async listPullRequestFindingComments(tag: string): Promise<{
 		commentsByThreadKey: Map<string, PullRequestComment>;
 		legacyCommentsByExternalId: Map<string, PullRequestComment>;
 	}> {
 		const comments = await this.listPullRequestComments();
 		const commentsByThreadKey = new Map<string, PullRequestComment>();
 		const legacyCommentsByExternalId = new Map<string, PullRequestComment>();
-		const threadKeyByLegacyExternalId = new Map(
-			previousReviewFindings.flatMap((finding) =>
-				finding.externalId && finding.threadKey
-					? [[finding.externalId, finding.threadKey] as const]
-					: [],
-			),
-		);
-
 		for (const comment of comments.sort(comparePullRequestComments)) {
 			const legacyExternalId = parseFindingCommentExternalId(tag, comment.text);
-			const threadKey =
-				parseFindingCommentThreadKey(tag, comment.text) ??
-				(legacyExternalId
-					? threadKeyByLegacyExternalId.get(legacyExternalId)
-					: undefined);
+			const threadKey = parseFindingCommentThreadKey(tag, comment.text);
 			if (!threadKey) {
 				if (!legacyExternalId) {
 					continue;
@@ -491,10 +475,7 @@ export class PullRequestCommentsApi {
 		metadata: FindingCommentMetadata,
 	): Promise<void> {
 		const { commentsByThreadKey, legacyCommentsByExternalId } =
-			await this.listPullRequestFindingComments(
-				tag,
-				metadata.previousReviewFindings,
-			);
+			await this.listPullRequestFindingComments(tag);
 		const desiredThreadKeys = new Set(
 			findings.map((finding) => finding.threadKey),
 		);

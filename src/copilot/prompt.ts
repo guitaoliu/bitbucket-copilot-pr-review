@@ -11,7 +11,6 @@ import {
 import reviewPromptTemplate from "./review-prompt.md";
 
 const MAX_CI_SUMMARY_CHARS = 2000;
-const MAX_PREVIOUS_REVIEW_CHARS = 3000;
 
 const FILE_STATUS_CODES = {
 	added: "A",
@@ -69,50 +68,11 @@ function buildTruncatedCiSummary(
 	});
 }
 
-function formatPreviousReviewFinding(
-	finding: NonNullable<ReviewContext["previousReview"]>["findings"][number],
-	index: number,
-): string {
-	const location =
-		finding.line && finding.line > 0
-			? `${finding.path}:${finding.line}`
-			: finding.path;
-	const confidence = finding.confidence ?? "unknown";
-	const detail = finding.details?.trim();
-	return [
-		`${index + 1}. [${finding.type}/${finding.severity}/${confidence}] ${location} - ${finding.title}`,
-		...(detail ? [`   ${detail}`] : []),
-	].join("\n");
-}
-
-function buildPreviousReviewSummary(
-	previousReview: ReviewContext["previousReview"],
-): string | undefined {
-	if (!previousReview || previousReview.findings.length === 0) {
-		return undefined;
-	}
-
-	const lines = [
-		"Treat these prior automated review findings as historical reference only; re-validate these findings against the current diff before emitting them again.",
-		`reviewed_commit: ${previousReview.reviewedCommit}`,
-		...(previousReview.revision
-			? [`revision: ${previousReview.revision}`]
-			: []),
-		"findings:",
-		...previousReview.findings.map(formatPreviousReviewFinding),
-	];
-
-	return truncateText(lines.join("\n"), MAX_PREVIOUS_REVIEW_CHARS, {
-		preserveMaxLength: true,
-	});
-}
-
 export function buildSystemMessage(
 	config: ReviewerConfig,
 ): SystemMessageConfig {
 	return {
 		content: reviewPromptTemplate
-			.replace("{{maxFindings}}", String(config.review.maxFindings))
 			.replace("{{minConfidence}}", config.review.minConfidence)
 			.trim(),
 	};
@@ -138,11 +98,6 @@ export function buildPrompt(
 		"ci_summary",
 		buildTruncatedCiSummary(context.ciSummary),
 	);
-	const previousReviewSection = buildUntrustedContextSection(
-		"Prior automated review findings for reference only:",
-		"previous_review_findings",
-		buildPreviousReviewSummary(context.previousReview),
-	);
 	const ignoredPathPatterns =
 		ignorePaths.length > 0
 			? [
@@ -165,6 +120,5 @@ export function buildPrompt(
 		"</pull_request_context>",
 		...prDescriptionSection,
 		...ciSummarySection,
-		...previousReviewSection,
 	].join("\n");
 }

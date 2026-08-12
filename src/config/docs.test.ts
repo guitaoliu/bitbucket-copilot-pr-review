@@ -33,6 +33,7 @@ describe("buildConfigReferenceMarkdown", () => {
 			/`GH_HOST` \| `github\.com` \| GitHub host used for Copilot authentication and API requests, for example `mycompany\.ghe\.com`\./,
 		);
 		assert.doesNotMatch(markdown, /`COPILOT_GITHUB_TOKEN`/);
+		assert.doesNotMatch(markdown, /`REVIEW_MAX_FINDINGS`/);
 		assert.match(markdown, /Argument: `<pull-request-url>`/);
 	});
 });
