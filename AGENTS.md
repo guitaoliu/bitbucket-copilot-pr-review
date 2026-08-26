@@ -26,14 +26,14 @@ This file is for agentic coding assistants working in this repository.
 ## Runtime and package manager
 
 - Use Node.js 24+.
-- Use `pnpm` 10+.
+- Use standalone `pnpm` 11.24.0. Do not use Corepack.
 - This repo is ESM-only TypeScript with `module` and `moduleResolution` set to `NodeNext` in `tsconfig.json`.
 - TypeScript source imports include explicit `.ts` file extensions. Preserve that style.
 
 ## Install and setup commands
 
 - Install dependencies: `pnpm install`
-- Enable Corepack if needed: `corepack enable`
+- If pnpm is unavailable, stop instead of enabling Corepack.
 - Typecheck: `pnpm typecheck`
 - Lint + format check: `pnpm check`
 - Auto-fix formatting/lint issues: `pnpm check:fix`

@@ -14,7 +14,7 @@ This project computes a PR diff locally, gives Copilot a tightly scoped read-onl
 ## Requirements
 
 - Node.js 24.12+
-- pnpm 10+
+- pnpm 11.24.0 installed directly, without Corepack
 - Bitbucket Data Center API access
 - a GitHub Copilot-enabled account
 
@@ -54,7 +54,7 @@ When the dry run looks correct, rerun without `--dry-run` to publish the Bitbuck
 1. Install dependencies and build the CLI locally:
 
    ```bash
-   corepack enable
+   npm install --global pnpm@11.24.0
    pnpm install
    pnpm build
    ```
