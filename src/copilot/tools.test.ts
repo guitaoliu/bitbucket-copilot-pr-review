@@ -528,6 +528,44 @@ describe("Copilot tools", () => {
 		);
 	});
 
+	it("publishes runtime payload limits in tool schemas", () => {
+		const toolContext = createReviewToolContext(
+			reviewContext,
+			createGitStub(),
+			[],
+			createSummaryDrafts(),
+		);
+		type Property = {
+			minLength?: number;
+			maxLength?: number;
+			minItems?: number;
+			items?: { minLength?: number };
+		};
+		const properties = <TArgs>(tool: Tool<TArgs>) =>
+			(tool.parameters as { properties?: Record<string, Property> }).properties;
+
+		const prSummary = properties(createRecordPrSummaryTool(toolContext));
+		assert.equal(prSummary?.summary?.minLength, 1);
+		assert.equal(prSummary?.summary?.maxLength, 1000);
+
+		const changeArea = properties(
+			createRecordChangeAreaSummaryTool(toolContext),
+		);
+		assert.equal(changeArea?.title?.minLength, 1);
+		assert.equal(changeArea?.title?.maxLength, 80);
+		assert.equal(changeArea?.paths?.minItems, 1);
+		assert.equal(changeArea?.paths?.items?.minLength, 1);
+		assert.equal(changeArea?.summary?.minLength, 1);
+		assert.equal(changeArea?.summary?.maxLength, 500);
+
+		const finding = properties(createEmitFindingTool(toolContext));
+		assert.equal(finding?.path?.minLength, 1);
+		assert.equal(finding?.title?.minLength, 1);
+		assert.equal(finding?.title?.maxLength, 200);
+		assert.equal(finding?.details?.maxLength, 1600);
+		assert.equal(finding?.category?.maxLength, 80);
+	});
+
 	it("records and replaces a pull request summary", async () => {
 		const summaryDrafts = createSummaryDrafts();
 		const tool = createRecordPrSummaryTool(

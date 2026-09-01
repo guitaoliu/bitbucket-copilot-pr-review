@@ -17,6 +17,7 @@ export function createEmitFindingTool(toolContext: ReviewToolContext) {
 			properties: {
 				path: {
 					type: "string",
+					minLength: 1,
 					description: "Reviewed file path in the current commit.",
 				},
 				line: {
@@ -28,13 +29,20 @@ export function createEmitFindingTool(toolContext: ReviewToolContext) {
 				severity: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] },
 				type: { type: "string", enum: ["BUG", "CODE_SMELL", "VULNERABILITY"] },
 				confidence: { type: "string", enum: ["low", "medium", "high"] },
-				title: { type: "string", description: "A short issue title." },
+				title: {
+					type: "string",
+					minLength: 1,
+					maxLength: 200,
+					description: "A short issue title.",
+				},
 				details: {
 					type: "string",
+					maxLength: 1600,
 					description: "A concise explanation of why this is an issue.",
 				},
 				category: {
 					type: "string",
+					maxLength: 80,
 					description:
 						"Optional short category when obvious and helpful, such as security, correctness, data-integrity, concurrency, reliability, performance, or tests.",
 				},

@@ -20,6 +20,8 @@ export function createRecordPrSummaryTool(toolContext: ReviewToolContext) {
 			properties: {
 				summary: {
 					type: "string",
+					minLength: 1,
+					maxLength: 1000,
 					description:
 						"A concise summary of the PR's purpose and main behavior change. Use short bullet points when that is clearer than one sentence.",
 				},

@@ -67,17 +67,22 @@ export function createRecordChangeAreaSummaryTool(
 			properties: {
 				title: {
 					type: "string",
+					minLength: 1,
+					maxLength: 80,
 					description:
 						"A short label for this logical change area, such as Authentication flow or Config schema.",
 				},
 				paths: {
 					type: "array",
-					items: { type: "string" },
+					minItems: 1,
+					items: { type: "string", minLength: 1 },
 					description:
 						"Exact reviewed file paths or path globs that belong to this area. Patterns are validated only within the reviewed scope.",
 				},
 				summary: {
 					type: "string",
+					minLength: 1,
+					maxLength: 500,
 					description:
 						"What this group of changed files does together. Skip this tool if the files do not form a clear logical area.",
 				},
