@@ -5,7 +5,8 @@
 		"src/cli.ts!",
 		"scripts/generate-config-docs.mjs!",
 		"scripts/generate-repo-config-schema.mjs!",
-		"scripts/release-check.mjs!"
+		"scripts/release-check.mjs!",
+		"scripts/resolve-npm-dist-tag.mjs!"
 	],
 	"project": [
 		"src/**/*.ts!",
