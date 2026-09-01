@@ -35,7 +35,7 @@
 		"review:dry-run": "pnpm build && node dist/cli.js review --dry-run",
 		"generate:repo-config-schema": "node scripts/generate-repo-config-schema.mjs",
 		"test:build": "tsdown --config tsdown.test.config.ts",
-		"test": "pnpm test:build && node --test \".test-dist/**/*.test.mjs\""
+		"test": "pnpm test:build && node --test \".test-dist/**/*.test.mjs\" \"scripts/**/*.test.mjs\""
 	},
 	"dependencies": {
 		"@github/copilot": "1.0.81",

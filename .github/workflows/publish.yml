@@ -34,10 +34,16 @@ jobs:
       - name: Verify release artifacts
         run: pnpm release:check
 
+      - name: Resolve npm dist-tag
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          npm_tag="$(node scripts/resolve-npm-dist-tag.mjs "$version" "$GITHUB_REF_NAME")"
+          echo "NPM_TAG=$npm_tag" >> "$GITHUB_ENV"
+
       - name: Generate GitHub release notes
         run: npx changelogithub
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish package to npm
-        run: npm publish --provenance
+        run: npm publish --provenance --tag "$NPM_TAG"

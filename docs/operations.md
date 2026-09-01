@@ -293,7 +293,7 @@ Before the workflow can publish, configure the package's trusted publisher on np
 - repository: `bitbucket-copilot-pr-review`
 - workflow filename: `publish.yml`
 
-After that, bump `package.json`, create a tag like `v0.1.1`, and push the tag to GitHub. The workflow installs dependencies with pnpm, runs `pnpm release:check`, generates the GitHub release notes with `npx changelogithub`, and publishes with `npm publish` on a GitHub-hosted runner using OIDC.
+After that, bump `package.json`, create a matching tag like `v0.1.1`, and push the tag to GitHub. Stable `X.Y.Z` versions publish to the npm `latest` tag. `X.Y.Z-beta` and `X.Y.Z-beta.N` versions publish to `beta`. Tag/version mismatches and other prerelease formats fail before GitHub release generation. The workflow installs dependencies with pnpm, runs `pnpm release:check`, generates the GitHub release notes with `npx changelogithub`, and publishes with `npm publish` on a GitHub-hosted runner using OIDC.
 
 ## Notes
 
