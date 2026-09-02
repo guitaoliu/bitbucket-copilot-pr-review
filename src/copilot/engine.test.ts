@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { describe, it } from "node:test";
 import type {
 	PermissionRequest,
@@ -12,6 +13,8 @@ import type { Logger } from "../shared/logger.ts";
 import { runCopilotReview } from "./engine.ts";
 import { buildSystemMessage } from "./prompt.ts";
 import type { ReviewSandbox } from "./sandbox.ts";
+
+const require = createRequire(import.meta.url);
 
 type HookToolResult = {
 	resultType: string;
@@ -48,9 +51,6 @@ const config: ReviewerConfig = {
 		forceReview: false,
 		confirmRerun: false,
 		minConfidence: "high",
-		maxPatchChars: 12000,
-		defaultFileSliceLines: 250,
-		maxFileSliceLines: 400,
 		ignorePaths: [],
 		skipBranchPrefixes: ["renovate/"],
 	},
@@ -156,6 +156,7 @@ function createTestReviewSandbox(): ReviewSandbox {
 			allowDevToolAccess: false,
 		},
 		allowedPaths: ["/tmp/repo", "/tmp/review-scratch"],
+		logDirectory: "/tmp/review-logs",
 		scratchDirectory: "/tmp/review-scratch",
 		async cleanup() {},
 	};
@@ -205,11 +206,29 @@ async function invokeSessionTool(
 	});
 }
 
-async function recordCleanReview(configArg: SessionConfig): Promise<void> {
+async function recordSuccessfulInspection(
+	configArg: SessionConfig,
+): Promise<void> {
+	await configArg.hooks?.onPostToolUse?.(
+		{
+			toolName: "bash",
+			toolArgs: { command: "git diff" },
+			toolResult: createSdkToolResult({}),
+		} as never,
+		{ sessionId: "session-1" } as never,
+	);
+}
+
+async function recordCleanSummary(configArg: SessionConfig): Promise<void> {
 	await invokeSessionTool(configArg, "record_pr_summary", {
 		summary: "Refactors the reviewed behavior.",
 		reviewOutcome: "clean",
 	});
+}
+
+async function recordCleanReview(configArg: SessionConfig): Promise<void> {
+	await recordSuccessfulInspection(configArg);
+	await recordCleanSummary(configArg);
 }
 
 describe("runCopilotReview", () => {
@@ -258,16 +277,25 @@ describe("runCopilotReview", () => {
 
 		assert.equal(createdOptions.length, 1);
 		const connection = createdOptions[0]?.connection as
-			| { kind?: string; args?: string[] }
+			| { kind?: string; path?: string; args?: string[] }
 			| undefined;
 		assert.equal(connection?.kind, "stdio");
+		assert.equal(
+			connection?.path,
+			require.resolve("@github/copilot/npm-loader.js"),
+		);
 		assert.ok(connection?.args?.includes("--sandbox"));
 		assert.ok(connection?.args?.includes("--disallow-temp-dir"));
 		const secretEnvironmentArgument = connection?.args?.find((argument) =>
 			argument.startsWith("--secret-env-vars="),
 		);
 		assert.match(secretEnvironmentArgument ?? "", /(?:^|,)HOME(?:,|$)/);
+		assert.match(
+			secretEnvironmentArgument ?? "",
+			/(?:^|,)COPILOT_SDK_AUTH_TOKEN(?:,|$)/,
+		);
 		assert.doesNotMatch(secretEnvironmentArgument ?? "", /(?:^|,)PATH(?:,|$)/);
+		assert.ok(connection?.args?.includes("--log-dir=/tmp/review-logs"));
 		assert.equal(createdOptions[0]?.workingDirectory, config.repoRoot);
 		assert.equal(createdOptions[0]?.mode, "copilot-cli");
 		assert.equal(outcome.findings.length, 0);
@@ -581,6 +609,7 @@ describe("runCopilotReview", () => {
 								async sendAndWait(options: { prompt: string }) {
 									sendCount += 1;
 									if (sendCount === 1) {
+										await recordSuccessfulInspection(configArg);
 										await invokeSessionTool(configArg, "emit_finding", {
 											path: "src/example.ts",
 											line: 1,
@@ -638,6 +667,7 @@ describe("runCopilotReview", () => {
 									},
 									async sendAndWait() {
 										sendCount += 1;
+										await recordSuccessfulInspection(configArg);
 										if (reviewOutcome) {
 											await invokeSessionTool(configArg, "record_pr_summary", {
 												summary: "Found a build regression.",
@@ -824,8 +854,8 @@ describe("runCopilotReview", () => {
 		);
 	});
 
-	it("does not treat a rejected shell permission as unsandboxed execution", async () => {
-		const outcome = await runCopilotReview(
+	it("fails closed when every shell inspection is rejected", async () => {
+		const review = runCopilotReview(
 			config,
 			createReviewContext(),
 			{} as never,
@@ -852,7 +882,7 @@ describe("runCopilotReview", () => {
 										data: {
 											toolCallId: "bash-1",
 											toolName: "bash",
-											arguments: { command: "curl https://example.com" },
+											arguments: { command: "git diff" },
 										},
 									} as never);
 									const decision = await configArg.onPermissionRequest?.(
@@ -860,12 +890,13 @@ describe("runCopilotReview", () => {
 											canOfferSessionApproval: false,
 											kind: "shell",
 											toolCallId: "bash-1",
-											commands: [{ identifier: "curl", readOnly: true }],
-											fullCommandText: "curl https://example.com",
-											intention: "Fetch a dependency",
+											commands: [{ identifier: "git", readOnly: true }],
+											fullCommandText: "git diff",
+											intention: "Inspect the diff",
 											hasWriteFileRedirection: false,
 											possiblePaths: [],
-											possibleUrls: [{ url: "https://example.com" }],
+											possibleUrls: [],
+											requestSandboxBypass: true,
 										} as PermissionRequest,
 										{ sessionId: "session-1" },
 									);
@@ -881,7 +912,7 @@ describe("runCopilotReview", () => {
 											error: { message: "Permission denied" },
 										},
 									} as never);
-									await recordCleanReview(configArg);
+									await recordCleanSummary(configArg);
 									return { data: { content: "Looks good." } };
 								},
 								async disconnect() {},
@@ -895,7 +926,42 @@ describe("runCopilotReview", () => {
 			},
 		);
 
-		assert.equal(outcome.findings.length, 0);
+		await assert.rejects(review, /no shell inspection completed successfully/);
+	});
+
+	it("fails closed when no shell inspection is attempted", async () => {
+		const review = runCopilotReview(
+			config,
+			createReviewContext(),
+			{} as never,
+			createLoggerSpy().logger,
+			{
+				...TEST_SANDBOX_DEPENDENCY,
+				createCopilotClient() {
+					return {
+						async start() {},
+						async createSession(configArg: SessionConfig) {
+							return {
+								rpc: createSandboxRpc(),
+								on() {
+									return () => {};
+								},
+								async sendAndWait() {
+									await recordCleanSummary(configArg);
+									return { data: { content: "Looks good." } };
+								},
+								async disconnect() {},
+							} as never;
+						},
+						async stop() {
+							return [];
+						},
+					};
+				},
+			},
+		);
+
+		await assert.rejects(review, /no shell inspection completed successfully/);
 	});
 
 	it("configures the sandbox and restricts shell permissions", async () => {
@@ -1000,7 +1066,7 @@ describe("runCopilotReview", () => {
 		);
 		assert.deepEqual(allowedErrorSuppression, { kind: "approve-once" });
 
-		const deniedNetwork = await permissionHandler(
+		const sandboxedNetwork = await permissionHandler(
 			{
 				canOfferSessionApproval: false,
 				kind: "shell",
@@ -1013,12 +1079,9 @@ describe("runCopilotReview", () => {
 			} as PermissionRequest,
 			{ sessionId: "session-1" },
 		);
-		assert.deepEqual(deniedNetwork, {
-			kind: "reject",
-			feedback: "Readonly review mode does not allow shell network access.",
-		});
+		assert.deepEqual(sandboxedNetwork, { kind: "approve-once" });
 
-		const deniedWrite = await permissionHandler(
+		const sandboxedWrite = await permissionHandler(
 			{
 				canOfferSessionApproval: false,
 				kind: "shell",
@@ -1031,10 +1094,21 @@ describe("runCopilotReview", () => {
 			} as PermissionRequest,
 			{ sessionId: "session-1" },
 		);
-		assert.deepEqual(deniedWrite, {
-			kind: "reject",
-			feedback: "Readonly review mode allows only read-only shell commands.",
-		});
+		assert.deepEqual(sandboxedWrite, { kind: "approve-once" });
+		const unclassifiedRead = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [],
+				fullCommandText: "git show HEAD:src/example.ts",
+				intention: "Read a changed file",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/tmp/repo/src/example.ts"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(unclassifiedRead, { kind: "approve-once" });
 
 		const deniedOutsidePath = await permissionHandler(
 			{
@@ -1088,6 +1162,23 @@ describe("runCopilotReview", () => {
 			{ sessionId: "session-1" },
 		);
 		assert.deepEqual(deniedRedirection, {
+			kind: "reject",
+			feedback: "Readonly review mode does not allow shell output redirection.",
+		});
+		const deniedWindowsNullRedirection = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git diff > NUL",
+				intention: "Discard the diff",
+				hasWriteFileRedirection: true,
+				possiblePaths: ["NUL"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedWindowsNullRedirection, {
 			kind: "reject",
 			feedback: "Readonly review mode does not allow shell output redirection.",
 		});

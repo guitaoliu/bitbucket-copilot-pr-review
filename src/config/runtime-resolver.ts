@@ -147,18 +147,6 @@ const RUNTIME_FIELD_RESOLVERS = [
 		envSource("reviewMinConfidence"),
 		defaultSource(),
 	]),
-	runtimeFieldResolver("reviewMaxPatchChars", [
-		envSource("reviewMaxPatchChars"),
-		defaultSource(),
-	]),
-	runtimeFieldResolver("reviewDefaultFileSliceLines", [
-		envSource("reviewDefaultFileSliceLines"),
-		defaultSource(),
-	]),
-	runtimeFieldResolver("reviewMaxFileSliceLines", [
-		envSource("reviewMaxFileSliceLines"),
-		defaultSource(),
-	]),
 	runtimeFieldResolver("reviewIgnorePaths", [
 		envSource("reviewIgnorePaths"),
 		defaultSource(),
@@ -282,9 +270,6 @@ function assertRuntimeGroupObjects(
 		!hasBoolean(groups.review.forceReview) ||
 		!hasBoolean(groups.review.confirmRerun) ||
 		!hasString(groups.review.minConfidence) ||
-		!hasNumber(groups.review.maxPatchChars) ||
-		!hasNumber(groups.review.defaultFileSliceLines) ||
-		!hasNumber(groups.review.maxFileSliceLines) ||
 		!hasStringArray(groups.review.ignorePaths) ||
 		!hasStringArray(groups.review.skipBranchPrefixes)
 	) {

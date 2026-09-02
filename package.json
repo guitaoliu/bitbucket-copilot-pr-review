@@ -38,7 +38,7 @@
 		"test": "pnpm test:build && node --test \".test-dist/**/*.test.mjs\" \"scripts/**/*.test.mjs\""
 	},
 	"dependencies": {
-		"@github/copilot": "1.0.80",
+		"@github/copilot": "1.0.82",
 		"@github/copilot-sdk": "1.0.11",
 		"pino": "10.3.1",
 		"pino-pretty": "13.1.3",

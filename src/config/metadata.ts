@@ -343,30 +343,6 @@ export const CONFIG_FIELD_METADATA = {
 		...repoOverride(),
 		...envDoc(28, { defaultValuePath: ["review", "minConfidence"] }),
 	},
-	reviewMaxPatchChars: {
-		path: "review.maxPatchChars",
-		env: "REVIEW_MAX_PATCH_CHARS",
-		description: "Maximum diff size sent to Copilot per file.",
-		...envParser({ kind: "positiveInteger" }),
-		...repoOverride(),
-		...envDoc(29, { defaultValuePath: ["review", "maxPatchChars"] }),
-	},
-	reviewDefaultFileSliceLines: {
-		path: "review.defaultFileSliceLines",
-		env: "REVIEW_DEFAULT_FILE_SLICE_LINES",
-		description: "Default line window when reading file slices.",
-		...envParser({ kind: "positiveInteger" }),
-		...repoOverride(),
-		...envDoc(30, { defaultValuePath: ["review", "defaultFileSliceLines"] }),
-	},
-	reviewMaxFileSliceLines: {
-		path: "review.maxFileSliceLines",
-		env: "REVIEW_MAX_FILE_SLICE_LINES",
-		description: "Maximum line window for file slices.",
-		...envParser({ kind: "positiveInteger" }),
-		...repoOverride(),
-		...envDoc(31, { defaultValuePath: ["review", "maxFileSliceLines"] }),
-	},
 	reviewIgnorePaths: {
 		path: "review.ignorePaths",
 		env: "REVIEW_IGNORE_PATHS",
@@ -374,7 +350,7 @@ export const CONFIG_FIELD_METADATA = {
 			"Comma-separated repo-relative glob patterns excluded from reportable finding scope.",
 		...envParser({ kind: "stringArray" }),
 		...repoOverride(),
-		...envDoc(32, { defaultValuePath: ["review", "ignorePaths"] }),
+		...envDoc(29, { defaultValuePath: ["review", "ignorePaths"] }),
 	},
 	reviewSkipBranchPrefixes: {
 		path: "review.skipBranchPrefixes",
@@ -383,7 +359,7 @@ export const CONFIG_FIELD_METADATA = {
 			"Comma-separated source branch prefixes that should be skipped.",
 		...envParser({ kind: "stringArray" }),
 		...repoOverride(),
-		...envDoc(33, { defaultValuePath: ["review", "skipBranchPrefixes"] }),
+		...envDoc(30, { defaultValuePath: ["review", "skipBranchPrefixes"] }),
 	},
 	ciSummaryPath: {
 		path: "ciSummaryPath",

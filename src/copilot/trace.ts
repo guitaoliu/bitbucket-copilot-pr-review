@@ -19,6 +19,19 @@ function getEventData(event: SessionEvent): Record<string, unknown> {
 	return (event as SessionEventWithData).data ?? {};
 }
 
+function getBashCommand(argumentsValue: unknown): string | undefined {
+	if (
+		typeof argumentsValue !== "object" ||
+		argumentsValue === null ||
+		Array.isArray(argumentsValue)
+	) {
+		return undefined;
+	}
+
+	const command = (argumentsValue as Record<string, unknown>).command;
+	return typeof command === "string" ? command : undefined;
+}
+
 export function createSessionEventTracer(
 	logger: Logger,
 ): CopilotSessionEventTracer {
@@ -73,7 +86,10 @@ export function createSessionEventTracer(
 					startedAtMs: new Date(event.timestamp).getTime(),
 				});
 				if (toolName === "bash") {
-					logger.info("Copilot bash call", { toolCallId });
+					logger.info("Copilot bash call", {
+						toolCallId,
+						command: getBashCommand(event.data.arguments),
+					});
 				}
 				return;
 			}

@@ -21,8 +21,6 @@
 - Report only actionable defects the author would fix. State triggering inputs, environment, or state, concrete impact, and condition-dependent severity.
 - Exclude intentional behavior and claims based on unstated assumptions; prove affected callers, contracts, or runtime paths.
 - Prefer no finding over a weak, ambiguous, or preference-only finding.
-- Start from the diff; inspect head, base, relevant callers, callees, or tests only as needed to validate a concern.
-- Follow plausible concerns with targeted reads until validated or disproven; before emitting, re-read the target hunk and rule out guards, null or empty checks, early returns, and caller invariants.
 - Treat CI as a clue, not proof.
 - No question-shaped or speculative findings: investigate the code path until you can verify the concern or rule it out.
 
@@ -44,9 +42,11 @@
 - Emit every distinct finding at {{minConfidence}} confidence or better. If none qualify, emit none. Do not stop early; list all qualifying findings.
 
 ## Recommended workflow
-1. Trust review_scope and reviewable_files. Do not rerun name-status, numstat, dirstat, or a full diff. Batch targeted diffs and related symbol/call-site searches.
-2. Read the smallest relevant ranges once the path or hypothesis is known. Prefer the concrete `recommended_diff_command` and `recommended_head_read_command` from the pull request context.
-3. Validate concerns, emit qualifying findings, record change areas, then call record_pr_summary. Do not describe unmade tool calls.
+1. Trust review_scope and reviewable_files. Use one broad batch of targeted diffs and searches; never run name-status, numstat, dirstat, or a full diff.
+2. Then read only candidate ranges and direct callers. Never reread a complete diff or file unless prior output failed or was incomplete. Prefer the supplied commands.
+3. Aim for three inspection batches; exceed this only for a concrete unresolved candidate.
+4. Before emitting, re-read only the target hunk and supporting lines. Rule out guards and caller invariants. Copy cited constants, limits, versions, and configuration values exactly from this final read, not from memory or earlier reasoning.
+5. Emit validated findings, record change areas, then call record_pr_summary. Do not describe unmade tool calls.
 
 ## Final response
 - Return 2-4 plain-text sentences, not JSON.

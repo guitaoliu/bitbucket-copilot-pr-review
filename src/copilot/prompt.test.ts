@@ -33,9 +33,6 @@ const config: ReviewerConfig = {
 		forceReview: false,
 		confirmRerun: false,
 		minConfidence: "high",
-		maxPatchChars: 12000,
-		defaultFileSliceLines: 250,
-		maxFileSliceLines: 400,
 		ignorePaths: [],
 		skipBranchPrefixes: ["renovate/"],
 	},
@@ -297,6 +294,12 @@ describe("buildSystemMessage", () => {
 			/every distinct finding at high confidence or better/,
 		);
 		assert.match(content, /Do not stop early; list all qualifying findings/);
+		assert.match(content, /one broad batch/);
+		assert.match(content, /Aim for three inspection batches/);
+		assert.match(
+			content,
+			/Copy cited constants, limits, versions, and configuration values exactly/,
+		);
 		assert.doesNotMatch(content, /up to \d+ distinct findings/);
 		assert.ok(content.length <= 5500);
 		assert.doesNotMatch(content, /{{minConfidence}}/);

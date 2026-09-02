@@ -93,9 +93,6 @@ export async function buildReviewContext(
 			},
 			reviewConfig: {
 				minConfidence: config.review.minConfidence,
-				maxPatchChars: config.review.maxPatchChars,
-				defaultFileSliceLines: config.review.defaultFileSliceLines,
-				maxFileSliceLines: config.review.maxFileSliceLines,
 				ignorePaths: [...config.review.ignorePaths],
 				skipBranchPrefixes: [...config.review.skipBranchPrefixes],
 			},

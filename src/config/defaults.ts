@@ -6,7 +6,7 @@ import type {
 } from "./types.ts";
 
 const DEFAULT_LOG_LEVEL: LogLevel = "info";
-const DEFAULT_REASONING_EFFORT: ReasoningEffort = "xhigh";
+const DEFAULT_REASONING_EFFORT: ReasoningEffort = "medium";
 const DEFAULT_COMMENT_STRATEGY: PullRequestCommentStrategy = "recreate";
 const DEFAULT_MIN_CONFIDENCE: Confidence = "medium";
 const DEFAULT_IGNORE_PATHS: string[] = [];
@@ -21,7 +21,7 @@ export const REVIEWER_CONFIG_DEFAULTS = {
 		},
 	},
 	copilot: {
-		model: "gpt-5.6-terra",
+		model: "gpt-5.6-sol",
 		reasoningEffort: DEFAULT_REASONING_EFFORT,
 		timeoutMs: 1_800_000,
 	},
@@ -37,9 +37,6 @@ export const REVIEWER_CONFIG_DEFAULTS = {
 		forceReview: false,
 		confirmRerun: false,
 		minConfidence: DEFAULT_MIN_CONFIDENCE,
-		maxPatchChars: 12_000,
-		defaultFileSliceLines: 250,
-		maxFileSliceLines: 400,
 		ignorePaths: DEFAULT_IGNORE_PATHS,
 		skipBranchPrefixes: DEFAULT_SKIP_BRANCH_PREFIXES,
 	},

@@ -110,8 +110,8 @@ Expanded example:
 {
   "$schema": "./schemas/copilot-code-review.schema.json",
   "copilot": {
-    "model": "gpt-5.6-terra",
-    "reasoningEffort": "xhigh"
+    "model": "gpt-5.6-sol",
+    "reasoningEffort": "medium"
   },
   "report": {
     "title": "Copilot Review",
@@ -120,9 +120,6 @@ Expanded example:
   "review": {
     "ignorePaths": ["i18n/locales/**/*.json", "docs/generated/**"],
     "minConfidence": "medium",
-    "maxPatchChars": 12000,
-    "defaultFileSliceLines": 250,
-    "maxFileSliceLines": 400,
     "skipBranchPrefixes": ["renovate/", "deps/"]
   }
 }

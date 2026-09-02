@@ -130,9 +130,6 @@ const reviewerConfigSchema = z
 				forceReview: z.boolean(),
 				confirmRerun: z.boolean(),
 				minConfidence: z.enum(CONFIDENCE_VALUES),
-				maxPatchChars: z.number().int().positive(),
-				defaultFileSliceLines: z.number().int().positive(),
-				maxFileSliceLines: z.number().int().positive(),
 				ignorePaths: z.array(z.string().min(1)),
 				skipBranchPrefixes: z.array(z.string().min(1)),
 			})
@@ -152,17 +149,7 @@ const reviewerConfigSchema = z
 			.strict()
 			.optional(),
 	})
-	.strict()
-	.superRefine((config, ctx) => {
-		if (config.review.defaultFileSliceLines > config.review.maxFileSliceLines) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				path: ["review", "defaultFileSliceLines"],
-				message:
-					"review.defaultFileSliceLines must be less than or equal to review.maxFileSliceLines.",
-			});
-		}
-	});
+	.strict();
 
 function formatReviewerConfigError(error: z.ZodError): string {
 	return error.issues

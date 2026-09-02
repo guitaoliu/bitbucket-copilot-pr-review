@@ -378,7 +378,7 @@ describe("createSessionEventTracer", () => {
 		]);
 	});
 
-	it("logs sandboxed bash outcomes without command arguments", () => {
+	it("logs complete sandboxed bash commands and outcomes", () => {
 		const { logger, infoCalls } = createLoggerSpy();
 		const tracer = createSessionEventTracer(logger);
 
@@ -431,7 +431,7 @@ describe("createSessionEventTracer", () => {
 		assert.deepEqual(infoCalls, [
 			{
 				message: "Copilot bash call",
-				details: [{ toolCallId: "bash-1" }],
+				details: [{ toolCallId: "bash-1", command: "git diff --stat" }],
 			},
 			{
 				message: "Copilot completed bash call",
@@ -471,7 +471,7 @@ describe("createSessionEventTracer", () => {
 			data: {
 				toolCallId: "bash-1",
 				toolName: "bash",
-				arguments: { command: "curl -u exposed:credential example.com" },
+				arguments: { command: "git diff --stat" },
 			},
 		} as unknown as SessionEvent);
 		tracer.handleEvent({

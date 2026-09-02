@@ -11,9 +11,6 @@ export const REPO_CONFIG_LIMITS = {
 	modelMaxLength: 120,
 	reportTitleMaxLength: 120,
 	timeoutMs: { min: 60_000, max: 7_200_000 },
-	maxPatchChars: { min: 500, max: 50_000 },
-	defaultFileSliceLines: { min: 1, max: 500 },
-	maxFileSliceLines: { min: 1, max: 1_000 },
 	ignorePaths: { maxItems: 200, maxPatternLength: 512 },
 	skipBranchPrefixes: { maxItems: 50, maxPrefixLength: 128 },
 } as const;
@@ -119,24 +116,6 @@ export function createReviewOverrideSchema(options?: {
 				.enum(CONFIDENCE_VALUES)
 				.describe("Minimum confidence threshold for reportable findings.")
 				.optional(),
-			maxPatchChars: boundedInteger(
-				"review.maxPatchChars",
-				REPO_CONFIG_LIMITS.maxPatchChars,
-			)
-				.describe("Maximum diff characters to send for a reviewed file.")
-				.optional(),
-			defaultFileSliceLines: boundedInteger(
-				"review.defaultFileSliceLines",
-				REPO_CONFIG_LIMITS.defaultFileSliceLines,
-			)
-				.describe("Default line window when reading file content slices.")
-				.optional(),
-			maxFileSliceLines: boundedInteger(
-				"review.maxFileSliceLines",
-				REPO_CONFIG_LIMITS.maxFileSliceLines,
-			)
-				.describe("Maximum line window allowed for file content slices.")
-				.optional(),
 			ignorePaths: boundedStringArray({
 				fieldName: "review.ignorePaths",
 				maxItems: REPO_CONFIG_LIMITS.ignorePaths.maxItems,
@@ -166,19 +145,5 @@ export function createReviewOverrideSchema(options?: {
 				)
 				.optional(),
 		})
-		.strict()
-		.superRefine((review, ctx) => {
-			if (
-				review.defaultFileSliceLines !== undefined &&
-				review.maxFileSliceLines !== undefined &&
-				review.defaultFileSliceLines > review.maxFileSliceLines
-			) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					path: ["defaultFileSliceLines"],
-					message:
-						"review.defaultFileSliceLines must be less than or equal to review.maxFileSliceLines.",
-				});
-			}
-		});
+		.strict();
 }

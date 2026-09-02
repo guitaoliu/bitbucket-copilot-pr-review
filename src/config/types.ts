@@ -17,9 +17,6 @@ export interface ReviewerConfigRepoOverrides {
 	};
 	review: {
 		minConfidence?: Confidence | undefined;
-		maxPatchChars?: number | undefined;
-		defaultFileSliceLines?: number | undefined;
-		maxFileSliceLines?: number | undefined;
 		ignorePaths?: string[] | undefined;
 		skipBranchPrefixes?: string[] | undefined;
 	};
@@ -82,9 +79,6 @@ export interface ReviewerConfig {
 		forceReview: boolean;
 		confirmRerun: boolean;
 		minConfidence: Confidence;
-		maxPatchChars: number;
-		defaultFileSliceLines: number;
-		maxFileSliceLines: number;
 		ignorePaths: string[];
 		skipBranchPrefixes: string[];
 	};

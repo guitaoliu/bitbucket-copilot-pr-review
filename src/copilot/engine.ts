@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 
 import type {
@@ -44,6 +45,8 @@ import {
 } from "./trace.ts";
 
 const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
+const copilotCliPath = require.resolve("@github/copilot/npm-loader.js");
 
 const SAFE_SHELL_ENVIRONMENT_NAMES = new Set([
 	"COLORTERM",
@@ -291,6 +294,7 @@ function buildCopilotClientOptions(
 		...new Set([
 			"BITBUCKET_TOKEN",
 			"COPILOT_GITHUB_TOKEN",
+			"COPILOT_SDK_AUTH_TOKEN",
 			"GH_TOKEN",
 			"GITHUB_TOKEN",
 			...Object.keys(process.env).filter(
@@ -306,7 +310,7 @@ function buildCopilotClientOptions(
 		"--no-remote-export",
 		"--disable-builtin-mcps",
 		"--no-auto-update",
-		`--log-dir=${reviewSandbox.scratchDirectory}`,
+		`--log-dir=${reviewSandbox.logDirectory}`,
 		...(hiddenShellEnvironmentNames.length > 0
 			? [`--secret-env-vars=${hiddenShellEnvironmentNames.join(",")}`]
 			: []),
@@ -315,7 +319,10 @@ function buildCopilotClientOptions(
 	return omitUndefined({
 		workingDirectory: config.repoRoot,
 		mode: "copilot-cli",
-		connection: RuntimeConnection.forStdio({ args: runtimeArgs }),
+		connection: RuntimeConnection.forStdio({
+			path: copilotCliPath,
+			args: runtimeArgs,
+		}),
 		logLevel: clientLogLevel,
 		env: copilotEnvironment,
 		gitHubToken,
@@ -527,14 +534,14 @@ function buildProgressFields(
 
 function hasOnlyDiscardRedirections(command: string): boolean {
 	const withoutDiscardRedirections = command.replace(
-		/(?:\d*|&)>{1,2}\s*(?:\/dev\/null|NUL)\b/gi,
+		/(?:\d*|&)>{1,2}\s*\/dev\/null\b/g,
 		"",
 	);
 	return !/[<>]/.test(withoutDiscardRedirections);
 }
 
 function isDiscardPath(filePath: string): boolean {
-	return filePath === "/dev/null" || filePath.toUpperCase() === "NUL";
+	return filePath === "/dev/null";
 }
 
 async function buildReadonlyPermissionDecision(
@@ -571,15 +578,6 @@ async function buildReadonlyPermissionDecision(
 		return reject(
 			"Readonly review mode does not allow shell output redirection.",
 		);
-	}
-	if (request.possibleUrls.length > 0) {
-		return reject("Readonly review mode does not allow shell network access.");
-	}
-	if (
-		request.commands.length === 0 ||
-		request.commands.some((command) => !command.readOnly)
-	) {
-		return reject("Readonly review mode allows only read-only shell commands.");
 	}
 	const pathDecisions = await Promise.all(
 		request.possiblePaths.map((filePath) =>
@@ -883,6 +881,16 @@ function assertSandboxedShellExecution(
 	}
 }
 
+function assertSuccessfulReviewInspection(
+	toolTelemetry: ReviewToolTelemetry,
+): void {
+	if ((toolTelemetry.byTool.bash?.resultCounts.success ?? 0) === 0) {
+		throw new Error(
+			"Copilot review stopped because no shell inspection completed successfully.",
+		);
+	}
+}
+
 export async function runCopilotReview(
 	config: ReviewerConfig,
 	context: ReviewContext,
@@ -1024,6 +1032,7 @@ export async function runCopilotReview(
 			throw wrapCopilotSessionStageError(error, config, "review request");
 		}
 		assertSandboxedShellExecution(sessionEventTracer);
+		assertSuccessfulReviewInspection(toolTelemetry);
 		const reasoningStatus = sessionEventTracer.getReasoningStatus();
 		if (reasoningStatus !== "content") {
 			logger.info(

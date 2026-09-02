@@ -19,9 +19,6 @@ export function buildReviewRevision(input: {
 	};
 	reviewConfig?: {
 		minConfidence: string;
-		maxPatchChars: number;
-		defaultFileSliceLines: number;
-		maxFileSliceLines: number;
 		ignorePaths: readonly string[];
 		skipBranchPrefixes: readonly string[];
 	};

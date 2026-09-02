@@ -57,9 +57,6 @@ const baseConfig: ReviewerConfig = {
 		forceReview: false,
 		confirmRerun: false,
 		minConfidence: "medium",
-		maxPatchChars: 12000,
-		defaultFileSliceLines: 250,
-		maxFileSliceLines: 400,
 		ignorePaths: [],
 		skipBranchPrefixes: ["renovate/"],
 	},
@@ -107,31 +104,24 @@ describe("parseRepoReviewConfig", () => {
 		assert.equal("maxFiles" in merged.review, false);
 	});
 
-	it("rejects the removed review maxFindings field", () => {
-		assert.throws(
-			() => parseRepoReviewConfig('{"review":{"maxFindings":10}}'),
-			/unrecognized key/i,
-		);
+	it("rejects removed review limit fields", () => {
+		for (const field of [
+			"maxFindings",
+			"maxPatchChars",
+			"defaultFileSliceLines",
+			"maxFileSliceLines",
+		]) {
+			assert.throws(
+				() => parseRepoReviewConfig(`{"review":{"${field}":10}}`),
+				/unrecognized key/i,
+			);
+		}
 	});
 
 	it("rejects unreasonable numeric values", () => {
 		assert.throws(
 			() => parseRepoReviewConfig('{"copilot":{"timeoutMs":999999999}}'),
 			/at most 7200000/,
-		);
-		assert.throws(
-			() => parseRepoReviewConfig('{"review":{"maxPatchChars":10}}'),
-			/at least 500/,
-		);
-	});
-
-	it("rejects inconsistent file slice settings", () => {
-		assert.throws(
-			() =>
-				parseRepoReviewConfig(
-					'{"review":{"defaultFileSliceLines":500,"maxFileSliceLines":100}}',
-				),
-			/defaultFileSliceLines must be less than or equal to review\.maxFileSliceLines/,
 		);
 	});
 

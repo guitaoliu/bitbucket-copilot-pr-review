@@ -63,24 +63,6 @@
 					"enum": ["low", "medium", "high"],
 					"description": "Minimum confidence threshold for reportable findings."
 				},
-				"maxPatchChars": {
-					"type": "integer",
-					"minimum": 500,
-					"maximum": 50000,
-					"description": "Maximum diff characters to send for a reviewed file."
-				},
-				"defaultFileSliceLines": {
-					"type": "integer",
-					"minimum": 1,
-					"maximum": 500,
-					"description": "Default line window when reading file content slices."
-				},
-				"maxFileSliceLines": {
-					"type": "integer",
-					"minimum": 1,
-					"maximum": 1000,
-					"description": "Maximum line window allowed for file content slices."
-				},
 				"ignorePaths": {
 					"maxItems": 200,
 					"type": "array",

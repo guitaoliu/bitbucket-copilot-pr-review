@@ -62,7 +62,7 @@ Usage: `bitbucket-copilot-pr-review review <pull-request-url> [options]`
 | --- | --- |
 | `--dry-run` | Run without publishing results to Bitbucket |
 | `--force-review` | Re-run even if the current PR revision already has published results |
-| `--confirm-rerun` | Ask before rerunning an incomplete publication for an unchanged PR revision |
+| `--confirm-rerun` | Ask before rerunning unusable cached artifacts for an unchanged PR revision |
 | `--repo-root <path>` | Use a different local checkout as the repository root |
 | `-h`, `--help` | Show this help text |
 
@@ -84,8 +84,8 @@ Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pu
 | `BITBUCKET_AUTH_TYPE` | auto-detected from provided credentials | Bitbucket authentication strategy. |
 | `BITBUCKET_CA_CERT_PATH` | - | PEM CA bundle path for Bitbucket TLS. |
 | `BITBUCKET_INSECURE_TLS` | `false` | Disable TLS certificate verification for Bitbucket (not recommended). |
-| `COPILOT_MODEL` | `gpt-5.6-terra` | Copilot model override. |
-| `COPILOT_REASONING_EFFORT` | `xhigh` | Copilot reasoning effort. |
+| `COPILOT_MODEL` | `gpt-5.6-sol` | Copilot model override. |
+| `COPILOT_REASONING_EFFORT` | `medium` | Copilot reasoning effort. |
 | `COPILOT_TIMEOUT_MS` | `1800000` | Copilot timeout in milliseconds. |
 | `CI_SUMMARY_PATH` | - | Path to a CI summary file included in review context. |
 | `REPORT_KEY` | `copilot-pr-review` | Code Insights report key. |
@@ -97,9 +97,6 @@ Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pu
 | `BUILD_URL` | used when `REPORT_LINK` is unset | Fallback report link from CI build URL. |
 | `REVIEW_FORCE` | `false` | Force review even when the revision was already published. |
 | `REVIEW_MIN_CONFIDENCE` | `medium` | Minimum confidence threshold for findings. |
-| `REVIEW_MAX_PATCH_CHARS` | `12000` | Maximum diff size sent to Copilot per file. |
-| `REVIEW_DEFAULT_FILE_SLICE_LINES` | `250` | Default line window when reading file slices. |
-| `REVIEW_MAX_FILE_SLICE_LINES` | `400` | Maximum line window for file slices. |
 | `REVIEW_IGNORE_PATHS` | [] | Comma-separated repo-relative glob patterns excluded from reportable finding scope. |
 | `REVIEW_SKIP_BRANCH_PREFIXES` | `renovate/` | Comma-separated source branch prefixes that should be skipped. |
 
@@ -145,7 +142,7 @@ scripts/run-local-review.sh /path/to/local/my-repo \
   https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
-The helper script reads credentials from your environment, inherits the application's `gpt-5.6-terra` with `xhigh` reasoning defaults unless you override them, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and accepts either `FORCE_REVIEW=1` or `REVIEW_FORCE=1` to bypass a published revision skip.
+The helper script reads credentials from your environment, inherits the application's `gpt-5.6-sol` with `medium` reasoning defaults unless you override them, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and accepts either `FORCE_REVIEW=1` or `REVIEW_FORCE=1` to bypass a published revision skip.
 
 The review JSON output includes `metrics.toolTelemetry` so you can inspect which Copilot tools were requested, allowed, denied, and completed.
 
@@ -197,11 +194,8 @@ Example with common repo-specific customizations:
   },
 	"review": {
 		"ignorePaths": ["i18n/locales/**/*.json", "docs/generated/**"],
-    "minConfidence": "medium",
-    "maxPatchChars": 12000,
-    "defaultFileSliceLines": 250,
-    "maxFileSliceLines": 400
-  }
+		"minConfidence": "medium"
+	}
 }
 ```
 

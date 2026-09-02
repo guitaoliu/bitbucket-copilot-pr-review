@@ -16,9 +16,6 @@ describe("buildReviewRevision", () => {
 			},
 			reviewConfig: {
 				minConfidence: "high",
-				maxPatchChars: 12_000,
-				defaultFileSliceLines: 250,
-				maxFileSliceLines: 400,
 				ignorePaths: [],
 				skipBranchPrefixes: ["renovate/"],
 			},
@@ -48,9 +45,6 @@ describe("buildReviewRevision", () => {
 			},
 			reviewConfig: {
 				minConfidence: "high",
-				maxPatchChars: 12_000,
-				defaultFileSliceLines: 250,
-				maxFileSliceLines: 400,
 				ignorePaths: [],
 				skipBranchPrefixes: ["renovate/"],
 			},
@@ -66,9 +60,6 @@ describe("buildReviewRevision", () => {
 			},
 			reviewConfig: {
 				minConfidence: "medium",
-				maxPatchChars: 12_000,
-				defaultFileSliceLines: 250,
-				maxFileSliceLines: 400,
 				ignorePaths: [],
 				skipBranchPrefixes: ["renovate/"],
 			},

@@ -15,6 +15,7 @@ export type ReviewSandboxConfig = NonNullable<
 export interface ReviewSandbox {
 	config: ReviewSandboxConfig;
 	allowedPaths: string[];
+	logDirectory: string;
 	scratchDirectory: string;
 	cleanup(): Promise<void>;
 }
@@ -160,16 +161,22 @@ export async function createReviewSandbox(
 	const sandboxRoot = await mkdtemp(
 		path.join(tmpdir(), "bitbucket-copilot-shell-"),
 	);
+	const logDirectory = path.join(sandboxRoot, "logs");
 	const scratchDirectory = path.join(sandboxRoot, "scratch");
-	await mkdir(scratchDirectory);
+	await Promise.all([mkdir(logDirectory), mkdir(scratchDirectory)]);
 
 	try {
-		const [gitDirectory, gitCommonDirectory, canonicalScratchDirectory] =
-			await Promise.all([
-				resolveGitPath(repoRoot, "--absolute-git-dir"),
-				resolveGitPath(repoRoot, "--git-common-dir"),
-				realpath(scratchDirectory),
-			]);
+		const [
+			gitDirectory,
+			gitCommonDirectory,
+			canonicalLogDirectory,
+			canonicalScratchDirectory,
+		] = await Promise.all([
+			resolveGitPath(repoRoot, "--absolute-git-dir"),
+			resolveGitPath(repoRoot, "--git-common-dir"),
+			realpath(logDirectory),
+			realpath(scratchDirectory),
+		]);
 		const readonlyPaths = [
 			...new Set(
 				await Promise.all(
@@ -187,6 +194,7 @@ export async function createReviewSandbox(
 				canonicalScratchDirectory,
 			),
 			allowedPaths,
+			logDirectory: canonicalLogDirectory,
 			scratchDirectory: canonicalScratchDirectory,
 			async cleanup() {
 				await rm(sandboxRoot, { recursive: true, force: true });
