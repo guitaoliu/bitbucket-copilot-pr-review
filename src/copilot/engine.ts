@@ -10,7 +10,7 @@ import type {
 	SessionEvent,
 	ToolResultObject,
 } from "@github/copilot-sdk";
-import { CopilotClient, ToolSet } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection, ToolSet } from "@github/copilot-sdk";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import { finalizeFindings } from "../policy/findings.ts";
@@ -32,10 +32,29 @@ import {
 	buildReviewScopeLines,
 	buildSystemMessage,
 } from "./prompt.ts";
+import {
+	createReviewSandbox,
+	isSandboxPathAllowed,
+	type ReviewSandbox,
+} from "./sandbox.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
-import { createSessionEventTracer } from "./trace.ts";
+import {
+	type CopilotSessionEventTracer,
+	createSessionEventTracer,
+} from "./trace.ts";
 
 const execFileAsync = promisify(execFile);
+
+const SAFE_SHELL_ENVIRONMENT_NAMES = new Set([
+	"COLORTERM",
+	"LANG",
+	"LC_ALL",
+	"LC_CTYPE",
+	"NO_COLOR",
+	"PATH",
+	"SHELL",
+	"TERM",
+]);
 
 type ReviewToolName = (typeof REVIEW_TOOL_NAMES)[number];
 
@@ -66,7 +85,8 @@ type CopilotClientLike = Pick<
 
 interface CopilotSessionLike {
 	rpc?: {
-		usage: Pick<CopilotSession["rpc"]["usage"], "getMetrics">;
+		usage?: Pick<CopilotSession["rpc"]["usage"], "getMetrics">;
+		options?: Pick<CopilotSession["rpc"]["options"], "update">;
 	};
 	sendAndWait(
 		options: Parameters<CopilotSession["sendAndWait"]>[0],
@@ -88,6 +108,7 @@ type ReviewProgressState = {
 
 export interface RunCopilotReviewDependencies {
 	createCopilotClient?: (options: CopilotClientOptions) => CopilotClientLike;
+	createReviewSandbox?: (repoRoot: string) => Promise<ReviewSandbox>;
 	resolveGitHubToken?: (
 		config: ReviewerConfig,
 		logger: Logger,
@@ -252,6 +273,7 @@ async function resolveCopilotGitHubToken(
 
 function buildCopilotClientOptions(
 	config: ReviewerConfig,
+	reviewSandbox: ReviewSandbox,
 	gitHubToken?: string,
 ): CopilotClientOptions {
 	const clientLogLevel: CopilotClientOptions["logLevel"] =
@@ -265,9 +287,35 @@ function buildCopilotClientOptions(
 				}
 			: undefined;
 
+	const hiddenShellEnvironmentNames = [
+		...new Set([
+			"BITBUCKET_TOKEN",
+			"COPILOT_GITHUB_TOKEN",
+			"GH_TOKEN",
+			"GITHUB_TOKEN",
+			...Object.keys(process.env).filter(
+				(name) => !SAFE_SHELL_ENVIRONMENT_NAMES.has(name),
+			),
+		]),
+	];
+	const runtimeArgs = [
+		"--experimental",
+		"--sandbox",
+		"--disallow-temp-dir",
+		"--no-remote",
+		"--no-remote-export",
+		"--disable-builtin-mcps",
+		"--no-auto-update",
+		`--log-dir=${reviewSandbox.scratchDirectory}`,
+		...(hiddenShellEnvironmentNames.length > 0
+			? [`--secret-env-vars=${hiddenShellEnvironmentNames.join(",")}`]
+			: []),
+	];
+
 	return omitUndefined({
 		workingDirectory: config.repoRoot,
 		mode: "copilot-cli",
+		connection: RuntimeConnection.forStdio({ args: runtimeArgs }),
 		logLevel: clientLogLevel,
 		env: copilotEnvironment,
 		gitHubToken,
@@ -461,12 +509,6 @@ function buildToolLogFields(toolName: string, toolArgs: unknown): string[] {
 				(entry): entry is string => entry !== undefined,
 			);
 		default:
-			if (toolName === "bash") {
-				return [field("command", record.command)].filter(
-					(entry): entry is string => entry !== undefined,
-				);
-			}
-
 			return [];
 	}
 }
@@ -483,16 +525,76 @@ function buildProgressFields(
 	];
 }
 
-function buildReadonlyPermissionDecision(
+function hasOnlyDiscardRedirections(command: string): boolean {
+	const withoutDiscardRedirections = command.replace(
+		/(?:\d*|&)>{1,2}\s*(?:\/dev\/null|NUL)\b/gi,
+		"",
+	);
+	return !/[<>]/.test(withoutDiscardRedirections);
+}
+
+function isDiscardPath(filePath: string): boolean {
+	return filePath === "/dev/null" || filePath.toUpperCase() === "NUL";
+}
+
+async function buildReadonlyPermissionDecision(
 	request: PermissionRequest,
-): PermissionRequestResult {
-	return request.kind === "shell" ||
-		(request.kind === "custom-tool" && isReviewToolName(request.toolName))
-		? { kind: "approve-once" }
-		: {
-				kind: "reject",
-				feedback: `Readonly review mode does not allow ${request.kind} permissions.`,
-			};
+	repoRoot: string,
+	allowedPaths: string[],
+): Promise<PermissionRequestResult> {
+	if (request.kind === "custom-tool" && isReviewToolName(request.toolName)) {
+		return { kind: "approve-once" };
+	}
+
+	const reject = (feedback: string): PermissionRequestResult => ({
+		kind: "reject",
+		feedback,
+	});
+	if (request.kind !== "shell") {
+		return reject(
+			`Readonly review mode does not allow ${request.kind} permissions.`,
+		);
+	}
+
+	if (request.managedApprovalRequired) {
+		return reject(
+			"Readonly review mode cannot request managed shell approval.",
+		);
+	}
+	if (request.requestSandboxBypass) {
+		return reject("Readonly review mode does not allow sandbox bypass.");
+	}
+	if (
+		request.hasWriteFileRedirection &&
+		!hasOnlyDiscardRedirections(request.fullCommandText)
+	) {
+		return reject(
+			"Readonly review mode does not allow shell output redirection.",
+		);
+	}
+	if (request.possibleUrls.length > 0) {
+		return reject("Readonly review mode does not allow shell network access.");
+	}
+	if (
+		request.commands.length === 0 ||
+		request.commands.some((command) => !command.readOnly)
+	) {
+		return reject("Readonly review mode allows only read-only shell commands.");
+	}
+	const pathDecisions = await Promise.all(
+		request.possiblePaths.map((filePath) =>
+			isDiscardPath(filePath)
+				? true
+				: isSandboxPathAllowed(filePath, repoRoot, allowedPaths),
+		),
+	);
+	if (pathDecisions.some((allowed) => !allowed)) {
+		return reject(
+			"Readonly review mode does not allow shell access outside the review workspace.",
+		);
+	}
+
+	return { kind: "approve-once" };
 }
 
 function getToolResultDurationMs(
@@ -771,6 +873,16 @@ function assertReviewCompletion(
 	}
 }
 
+function assertSandboxedShellExecution(
+	sessionEventTracer: CopilotSessionEventTracer,
+): void {
+	if (sessionEventTracer.getUnsandboxedShellCount() > 0) {
+		throw new Error(
+			"Copilot review stopped because a shell command was not confirmed as sandboxed.",
+		);
+	}
+}
+
 export async function runCopilotReview(
 	config: ReviewerConfig,
 	context: ReviewContext,
@@ -798,47 +910,71 @@ export async function runCopilotReview(
 		config,
 		logger,
 	) ?? resolveCopilotGitHubToken(config, logger));
-	const clientOptions = buildCopilotClientOptions(config, gitHubToken);
-	const sessionEventTracer = createSessionEventTracer(logger);
-
-	const client =
-		dependencies.createCopilotClient?.(clientOptions) ??
-		new CopilotClient(clientOptions);
+	const reviewSandbox = await (dependencies.createReviewSandbox?.(
+		config.repoRoot,
+	) ?? createReviewSandbox(config.repoRoot));
+	let client: CopilotClientLike | undefined;
 	let clientStarted = false;
 	let session: CopilotSessionLike | undefined;
 	let unsubscribeSessionEvents = (): void => {};
-	const sessionConfig = {
-		clientName: "bitbucket-copilot-pr-review",
-		model: config.copilot.model,
-		reasoningEffort: config.copilot.reasoningEffort,
-		reasoningSummary: "concise",
-		systemMessage: buildSystemMessage(config),
-		streaming: true,
-		tools: createReviewTools(context, git, drafts, summaryDrafts),
-		availableTools: buildReviewAvailableTools(),
-		onPermissionRequest: (request: PermissionRequest) => {
-			const decision = buildReadonlyPermissionDecision(request);
-			if (decision.kind === "reject") {
-				logger.warn("Copilot permission rejected", {
-					kind: request.kind,
-					...(request.kind === "custom-tool"
-						? {
-								toolName: request.toolName,
-								toolCallId: request.toolCallId,
-							}
-						: {}),
-					feedback: decision.feedback,
-				});
-			}
-			return decision;
-		},
-		hooks: createReviewSessionHooks(logger, drafts, progressState),
-		workingDirectory: config.repoRoot,
-		includeSubAgentStreamingEvents: true,
-		infiniteSessions: { enabled: false },
-	} satisfies SessionConfig;
 
 	try {
+		const clientOptions = buildCopilotClientOptions(
+			config,
+			reviewSandbox,
+			gitHubToken,
+		);
+		const sessionEventTracer = createSessionEventTracer(logger);
+		client =
+			dependencies.createCopilotClient?.(clientOptions) ??
+			new CopilotClient(clientOptions);
+		const sessionConfig = {
+			clientName: "bitbucket-copilot-pr-review",
+			model: config.copilot.model,
+			reasoningEffort: config.copilot.reasoningEffort,
+			reasoningSummary: "concise",
+			enableExperimentalMode: true,
+			systemMessage: buildSystemMessage(config),
+			streaming: true,
+			largeOutput: {
+				enabled: true,
+				outputDirectory: reviewSandbox.scratchDirectory,
+			},
+			enableFileHooks: false,
+			enableHostGitOperations: false,
+			enableSessionStore: false,
+			memory: { enabled: false },
+			tools: createReviewTools(context, git, drafts, summaryDrafts),
+			availableTools: buildReviewAvailableTools(),
+			onPermissionRequest: async (request: PermissionRequest) => {
+				const decision = await buildReadonlyPermissionDecision(
+					request,
+					config.repoRoot,
+					reviewSandbox.allowedPaths,
+				);
+				if (decision.kind === "reject") {
+					if (request.kind === "shell") {
+						sessionEventTracer.markRejectedShellCall(request.toolCallId);
+					}
+					logger.warn("Copilot permission rejected", {
+						kind: request.kind,
+						...(request.kind === "custom-tool"
+							? {
+									toolName: request.toolName,
+									toolCallId: request.toolCallId,
+								}
+							: {}),
+						feedback: decision.feedback,
+					});
+				}
+				return decision;
+			},
+			hooks: createReviewSessionHooks(logger, drafts, progressState),
+			workingDirectory: config.repoRoot,
+			includeSubAgentStreamingEvents: true,
+			infiniteSessions: { enabled: false },
+		} satisfies SessionConfig;
+
 		try {
 			await client.start();
 			clientStarted = true;
@@ -851,6 +987,25 @@ export async function runCopilotReview(
 		} catch (error) {
 			throw wrapCopilotSessionStageError(error, config, "session creation");
 		}
+		if (!session.rpc?.options) {
+			throw new Error(
+				"Copilot session does not expose sandbox configuration support.",
+			);
+		}
+		const sandboxResult = await session.rpc.options.update({
+			sandboxConfig: reviewSandbox.config,
+			shell: { initProfile: "none", initScripts: [] },
+		});
+		if (!sandboxResult.success) {
+			throw new Error(
+				"Copilot session rejected the shell sandbox configuration.",
+			);
+		}
+		logger.info("Configured Copilot shell sandbox", {
+			workspace: config.repoRoot,
+			network: "disabled",
+			workspaceAccess: "read-only",
+		});
 
 		unsubscribeSessionEvents = session.on((event) => {
 			sessionEventTracer.handleEvent(event);
@@ -868,6 +1023,7 @@ export async function runCopilotReview(
 		} catch (error) {
 			throw wrapCopilotSessionStageError(error, config, "review request");
 		}
+		assertSandboxedShellExecution(sessionEventTracer);
 		const reasoningStatus = sessionEventTracer.getReasoningStatus();
 		if (reasoningStatus !== "content") {
 			logger.info(
@@ -908,6 +1064,7 @@ export async function runCopilotReview(
 				config.review.minConfidence,
 			);
 		}
+		assertSandboxedShellExecution(sessionEventTracer);
 		const reviewSummary = finalizeReviewSummary(context, summaryDrafts);
 		const assistantMessage = response?.data.content;
 		toolTelemetry.sessionDurationMs = Date.now() - reviewStartedAt;
@@ -948,16 +1105,20 @@ export async function runCopilotReview(
 			stale: false,
 		}) satisfies ReviewOutcome;
 	} finally {
-		unsubscribeSessionEvents();
-		if (session && typeof session.disconnect === "function") {
-			await session.disconnect();
-		}
-		if (clientStarted) {
-			const errors = await client.stop();
-			toolTelemetry.errorCount += errors.length;
-			for (const error of errors) {
-				logger.warn("Copilot client cleanup reported an error", error);
+		try {
+			unsubscribeSessionEvents();
+			if (session && typeof session.disconnect === "function") {
+				await session.disconnect();
 			}
+			if (clientStarted && client) {
+				const errors = await client.stop();
+				toolTelemetry.errorCount += errors.length;
+				for (const error of errors) {
+					logger.warn("Copilot client cleanup reported an error", error);
+				}
+			}
+		} finally {
+			await reviewSandbox.cleanup();
 		}
 	}
 }

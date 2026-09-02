@@ -6,8 +6,11 @@ This guide collects the implementation and operator detail that is intentionally
 
 - Node.js 24.12+
 - pnpm 10+
+- OS sandbox support: macOS `sandbox-exec` or Linux `bwrap` 0.5.0+
 - `@github/copilot` is installed with this package so the reviewer can resolve and launch the bundled Copilot CLI runtime from `node_modules`
 - a GitHub Copilot-enabled account
+
+The reviewer fails closed when the local shell sandbox is unavailable or a shell execution is not confirmed as sandboxed. It configures read-only access for the detached review workspace and Git metadata, write access for an ephemeral scratch directory, and no outbound or local network access. A permission gate separately rejects declared paths outside those locations. Sandbox bypass, developer-tool access, shell profiles, and git or GitHub CLI credential injection are disabled.
 
 ## Authentication
 

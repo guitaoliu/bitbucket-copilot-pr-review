@@ -15,6 +15,7 @@ This project computes a PR diff locally, gives Copilot a tightly scoped read-onl
 
 - Node.js 24.12+
 - pnpm 11.24.0 installed directly, without Corepack
+- OS sandbox support: macOS `sandbox-exec` or Linux `bwrap` 0.5.0+
 - Bitbucket Data Center API access
 - a GitHub Copilot-enabled account
 

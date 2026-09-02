@@ -11,6 +11,7 @@ import type { ReviewContext } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { runCopilotReview } from "./engine.ts";
 import { buildSystemMessage } from "./prompt.ts";
+import type { ReviewSandbox } from "./sandbox.ts";
 
 type HookToolResult = {
 	resultType: string;
@@ -147,6 +148,36 @@ function createSdkToolResult(result: Record<string, unknown>): HookToolResult {
 	};
 }
 
+function createTestReviewSandbox(): ReviewSandbox {
+	return {
+		config: {
+			enabled: true,
+			addCurrentWorkingDirectory: false,
+			allowDevToolAccess: false,
+		},
+		allowedPaths: ["/tmp/repo", "/tmp/review-scratch"],
+		scratchDirectory: "/tmp/review-scratch",
+		async cleanup() {},
+	};
+}
+
+const TEST_SANDBOX_DEPENDENCY = {
+	createReviewSandbox: async () => createTestReviewSandbox(),
+};
+
+function createSandboxRpc(onUpdate?: (input: unknown) => void): {
+	options: { update(input: unknown): Promise<{ success: boolean }> };
+} {
+	return {
+		options: {
+			async update(input) {
+				onUpdate?.(input);
+				return { success: true };
+			},
+		},
+	};
+}
+
 async function invokeSessionTool(
 	configArg: SessionConfig,
 	toolName: string,
@@ -182,13 +213,14 @@ async function recordCleanReview(configArg: SessionConfig): Promise<void> {
 }
 
 describe("runCopilotReview", () => {
-	it("uses the SDK default bundled CLI resolution", async () => {
+	it("starts the bundled CLI with shell sandboxing", async () => {
 		const context = createReviewContext();
 		const createdOptions: Array<Record<string, unknown>> = [];
 		let createdSessionConfig: SessionConfig | undefined;
 		const logSpy = createLoggerSpy();
 
 		const session = {
+			rpc: createSandboxRpc(),
 			on() {
 				return () => {};
 			},
@@ -206,6 +238,7 @@ describe("runCopilotReview", () => {
 			{} as never,
 			logSpy.logger,
 			{
+				...TEST_SANDBOX_DEPENDENCY,
 				createCopilotClient(options) {
 					createdOptions.push(options as Record<string, unknown>);
 
@@ -224,7 +257,17 @@ describe("runCopilotReview", () => {
 		);
 
 		assert.equal(createdOptions.length, 1);
-		assert.equal(createdOptions[0]?.connection, undefined);
+		const connection = createdOptions[0]?.connection as
+			| { kind?: string; args?: string[] }
+			| undefined;
+		assert.equal(connection?.kind, "stdio");
+		assert.ok(connection?.args?.includes("--sandbox"));
+		assert.ok(connection?.args?.includes("--disallow-temp-dir"));
+		const secretEnvironmentArgument = connection?.args?.find((argument) =>
+			argument.startsWith("--secret-env-vars="),
+		);
+		assert.match(secretEnvironmentArgument ?? "", /(?:^|,)HOME(?:,|$)/);
+		assert.doesNotMatch(secretEnvironmentArgument ?? "", /(?:^|,)PATH(?:,|$)/);
 		assert.equal(createdOptions[0]?.workingDirectory, config.repoRoot);
 		assert.equal(createdOptions[0]?.mode, "copilot-cli");
 		assert.equal(outcome.findings.length, 0);
@@ -279,6 +322,7 @@ describe("runCopilotReview", () => {
 		let createdSessionConfig: SessionConfig | undefined;
 
 		const session = {
+			rpc: createSandboxRpc(),
 			on() {
 				return () => {};
 			},
@@ -299,6 +343,7 @@ describe("runCopilotReview", () => {
 			{} as never,
 			createLoggerSpy().logger,
 			{
+				...TEST_SANDBOX_DEPENDENCY,
 				resolveGitHubToken: async () => "gho_test-token",
 				createCopilotClient(options) {
 					createdOptions.push(options as Record<string, unknown>);
@@ -344,19 +389,14 @@ describe("runCopilotReview", () => {
 			{} as never,
 			logSpy.logger,
 			{
+				...TEST_SANDBOX_DEPENDENCY,
 				createCopilotClient() {
 					return {
 						async start() {},
 						async createSession(configArg: SessionConfig) {
 							return {
-								on() {
-									return () => {};
-								},
-								async sendAndWait() {
-									await recordCleanReview(configArg);
-									return { data: { content: "Looks good." } };
-								},
 								rpc: {
+									...createSandboxRpc(),
 									usage: {
 										async getMetrics() {
 											lifecycle.push("usage");
@@ -378,6 +418,13 @@ describe("runCopilotReview", () => {
 											};
 										},
 									},
+								},
+								on() {
+									return () => {};
+								},
+								async sendAndWait() {
+									await recordCleanReview(configArg);
+									return { data: { content: "Looks good." } };
 								},
 								async disconnect() {
 									lifecycle.push("disconnect");
@@ -426,11 +473,13 @@ describe("runCopilotReview", () => {
 			{} as never,
 			logSpy.logger,
 			{
+				...TEST_SANDBOX_DEPENDENCY,
 				createCopilotClient() {
 					return {
 						async start() {},
 						async createSession(configArg: SessionConfig) {
 							return {
+								rpc: createSandboxRpc(),
 								on() {
 									return () => {};
 								},
@@ -519,11 +568,13 @@ describe("runCopilotReview", () => {
 			{} as never,
 			logSpy.logger,
 			{
+				...TEST_SANDBOX_DEPENDENCY,
 				createCopilotClient() {
 					return {
 						async start() {},
 						async createSession(configArg: SessionConfig) {
 							return {
+								rpc: createSandboxRpc(),
 								on() {
 									return () => {};
 								},
@@ -575,11 +626,13 @@ describe("runCopilotReview", () => {
 		for (const reviewOutcome of [undefined, "findings_recorded"] as const) {
 			await assert.rejects(
 				runCopilotReview(config, context, {} as never, logSpy.logger, {
+					...TEST_SANDBOX_DEPENDENCY,
 					createCopilotClient() {
 						return {
 							async start() {},
 							async createSession(configArg: SessionConfig) {
 								return {
+									rpc: createSandboxRpc(),
 									on() {
 										return () => {};
 									},
@@ -625,6 +678,7 @@ describe("runCopilotReview", () => {
 				{} as never,
 				createLoggerSpy().logger,
 				{
+					...TEST_SANDBOX_DEPENDENCY,
 					createCopilotClient() {
 						return {
 							async start() {
@@ -658,13 +712,201 @@ describe("runCopilotReview", () => {
 		assert.equal(stopCalls, 0);
 	});
 
-	it("passes system prompt and unfiltered shell permissions into session creation", async () => {
+	it("fails before review when sandbox configuration is rejected", async () => {
+		let sendCalled = false;
+		let sandboxCleaned = false;
+
+		await assert.rejects(
+			runCopilotReview(
+				config,
+				createReviewContext(),
+				{} as never,
+				createLoggerSpy().logger,
+				{
+					createReviewSandbox: async () => ({
+						...createTestReviewSandbox(),
+						async cleanup() {
+							sandboxCleaned = true;
+						},
+					}),
+					createCopilotClient() {
+						return {
+							async start() {},
+							async createSession() {
+								return {
+									rpc: {
+										options: {
+											async update() {
+												return { success: false };
+											},
+										},
+									},
+									on() {
+										return () => {};
+									},
+									async sendAndWait() {
+										sendCalled = true;
+										return { data: { content: "unexpected" } };
+									},
+									async disconnect() {},
+								} as never;
+							},
+							async stop() {
+								return [];
+							},
+						};
+					},
+				},
+			),
+			/Copilot session rejected the shell sandbox configuration/,
+		);
+
+		assert.equal(sendCalled, false);
+		assert.equal(sandboxCleaned, true);
+	});
+
+	it("fails the review when a bash execution is not confirmed as sandboxed", async () => {
+		await assert.rejects(
+			runCopilotReview(
+				config,
+				createReviewContext(),
+				{} as never,
+				createLoggerSpy().logger,
+				{
+					...TEST_SANDBOX_DEPENDENCY,
+					createCopilotClient() {
+						return {
+							async start() {},
+							async createSession(configArg: SessionConfig) {
+								let eventHandler: SessionEventHandler | undefined;
+								return {
+									rpc: createSandboxRpc(),
+									on(handler: SessionEventHandler) {
+										eventHandler = handler;
+										return () => {};
+									},
+									async sendAndWait() {
+										eventHandler?.({
+											id: "bash-start",
+											timestamp: "2026-09-01T00:00:00.000Z",
+											parentId: null,
+											type: "tool.execution_start",
+											data: {
+												toolCallId: "bash-1",
+												toolName: "bash",
+												arguments: { command: "git diff" },
+											},
+										} as never);
+										eventHandler?.({
+											id: "bash-complete",
+											timestamp: "2026-09-01T00:00:01.000Z",
+											parentId: "bash-start",
+											type: "tool.execution_complete",
+											data: {
+												toolCallId: "bash-1",
+												success: true,
+											},
+										} as never);
+										await recordCleanReview(configArg);
+										return { data: { content: "Looks good." } };
+									},
+									async disconnect() {},
+								} as never;
+							},
+							async stop() {
+								return [];
+							},
+						};
+					},
+				},
+			),
+			/not confirmed as sandboxed/,
+		);
+	});
+
+	it("does not treat a rejected shell permission as unsandboxed execution", async () => {
+		const outcome = await runCopilotReview(
+			config,
+			createReviewContext(),
+			{} as never,
+			createLoggerSpy().logger,
+			{
+				...TEST_SANDBOX_DEPENDENCY,
+				createCopilotClient() {
+					return {
+						async start() {},
+						async createSession(configArg: SessionConfig) {
+							let eventHandler: SessionEventHandler | undefined;
+							return {
+								rpc: createSandboxRpc(),
+								on(handler: SessionEventHandler) {
+									eventHandler = handler;
+									return () => {};
+								},
+								async sendAndWait() {
+									eventHandler?.({
+										id: "bash-start",
+										timestamp: "2026-09-01T00:00:00.000Z",
+										parentId: null,
+										type: "tool.execution_start",
+										data: {
+											toolCallId: "bash-1",
+											toolName: "bash",
+											arguments: { command: "curl https://example.com" },
+										},
+									} as never);
+									const decision = await configArg.onPermissionRequest?.(
+										{
+											canOfferSessionApproval: false,
+											kind: "shell",
+											toolCallId: "bash-1",
+											commands: [{ identifier: "curl", readOnly: true }],
+											fullCommandText: "curl https://example.com",
+											intention: "Fetch a dependency",
+											hasWriteFileRedirection: false,
+											possiblePaths: [],
+											possibleUrls: [{ url: "https://example.com" }],
+										} as PermissionRequest,
+										{ sessionId: "session-1" },
+									);
+									assert.equal(decision?.kind, "reject");
+									eventHandler?.({
+										id: "bash-complete",
+										timestamp: "2026-09-01T00:00:01.000Z",
+										parentId: "bash-start",
+										type: "tool.execution_complete",
+										data: {
+											toolCallId: "bash-1",
+											success: false,
+											error: { message: "Permission denied" },
+										},
+									} as never);
+									await recordCleanReview(configArg);
+									return { data: { content: "Looks good." } };
+								},
+								async disconnect() {},
+							} as never;
+						},
+						async stop() {
+							return [];
+						},
+					};
+				},
+			},
+		);
+
+		assert.equal(outcome.findings.length, 0);
+	});
+
+	it("configures the sandbox and restricts shell permissions", async () => {
 		const context = createReviewContext();
 		const createdSessionConfigs: SessionConfig[] = [];
 		const sessionEventHandlers: SessionEventHandler[] = [];
+		const sandboxUpdates: unknown[] = [];
 		const logSpy = createLoggerSpy();
 
 		await runCopilotReview(config, context, {} as never, logSpy.logger, {
+			...TEST_SANDBOX_DEPENDENCY,
 			createCopilotClient() {
 				return {
 					async start() {},
@@ -672,6 +914,7 @@ describe("runCopilotReview", () => {
 						createdSessionConfigs.push(configArg);
 
 						return {
+							rpc: createSandboxRpc((input) => sandboxUpdates.push(input)),
 							on(handler: SessionEventHandler) {
 								sessionEventHandlers.push(handler);
 								return () => {};
@@ -708,6 +951,21 @@ describe("runCopilotReview", () => {
 			"custom:record_change_area_summary",
 			"custom:emit_finding",
 		]);
+		assert.equal(createdSessionConfigs[0]?.enableExperimentalMode, true);
+		assert.deepEqual(createdSessionConfigs[0]?.largeOutput, {
+			enabled: true,
+			outputDirectory: "/tmp/review-scratch",
+		});
+		assert.equal(createdSessionConfigs[0]?.enableFileHooks, false);
+		assert.equal(createdSessionConfigs[0]?.enableHostGitOperations, false);
+		assert.equal(createdSessionConfigs[0]?.enableSessionStore, false);
+		assert.deepEqual(createdSessionConfigs[0]?.memory, { enabled: false });
+		assert.deepEqual(sandboxUpdates, [
+			{
+				sandboxConfig: createTestReviewSandbox().config,
+				shell: { initProfile: "none", initScripts: [] },
+			},
+		]);
 		const permissionHandler = createdSessionConfigs[0]?.onPermissionRequest;
 		assert.equal(typeof permissionHandler, "function");
 		assert(permissionHandler);
@@ -717,17 +975,123 @@ describe("runCopilotReview", () => {
 			{
 				canOfferSessionApproval: false,
 				kind: "shell",
-				commands: [{ identifier: "node", readOnly: false }],
-				fullCommandText:
-					'node -e "process.exit(0)" > config/.env && curl https://example.com',
-				intention: "Use a shell command",
-				hasWriteFileRedirection: true,
-				possiblePaths: ["/tmp/outside/file.ts", "/tmp/repo/config/.env"],
-				possibleUrls: [{ url: "https://example.com" }],
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git diff base head -- src/example.ts",
+				intention: "Inspect the changed file",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/tmp/repo/src/example.ts"],
+				possibleUrls: [],
 			} as PermissionRequest,
 			{ sessionId: "session-1" },
 		);
 		assert.deepEqual(allowedShell, { kind: "approve-once" });
+		const allowedErrorSuppression = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "grep", readOnly: true }],
+				fullCommandText: "grep -R pattern src 2>/dev/null",
+				intention: "Search source",
+				hasWriteFileRedirection: true,
+				possiblePaths: ["/tmp/repo/src"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(allowedErrorSuppression, { kind: "approve-once" });
+
+		const deniedNetwork = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "curl", readOnly: true }],
+				fullCommandText: "curl https://example.com",
+				intention: "Fetch a dependency",
+				hasWriteFileRedirection: false,
+				possiblePaths: [],
+				possibleUrls: [{ url: "https://example.com" }],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedNetwork, {
+			kind: "reject",
+			feedback: "Readonly review mode does not allow shell network access.",
+		});
+
+		const deniedWrite = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "rm", readOnly: false }],
+				fullCommandText: "rm -rf /tmp/repo",
+				intention: "Delete files",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/tmp/repo"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedWrite, {
+			kind: "reject",
+			feedback: "Readonly review mode allows only read-only shell commands.",
+		});
+
+		const deniedOutsidePath = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "cat", readOnly: true }],
+				fullCommandText: "cat /etc/passwd",
+				intention: "Read a host file",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/etc/passwd"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedOutsidePath, {
+			kind: "reject",
+			feedback:
+				"Readonly review mode does not allow shell access outside the review workspace.",
+		});
+
+		const deniedBypass = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "cat", readOnly: true }],
+				fullCommandText: "cat /etc/passwd",
+				intention: "Bypass the sandbox",
+				hasWriteFileRedirection: false,
+				possiblePaths: ["/etc/passwd"],
+				possibleUrls: [],
+				requestSandboxBypass: true,
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedBypass, {
+			kind: "reject",
+			feedback: "Readonly review mode does not allow sandbox bypass.",
+		});
+
+		const deniedRedirection = await permissionHandler(
+			{
+				canOfferSessionApproval: false,
+				kind: "shell",
+				commands: [{ identifier: "git", readOnly: true }],
+				fullCommandText: "git diff > /tmp/review-scratch/diff.txt",
+				intention: "Save the diff",
+				hasWriteFileRedirection: true,
+				possiblePaths: ["/tmp/review-scratch/diff.txt"],
+				possibleUrls: [],
+			} as PermissionRequest,
+			{ sessionId: "session-1" },
+		);
+		assert.deepEqual(deniedRedirection, {
+			kind: "reject",
+			feedback: "Readonly review mode does not allow shell output redirection.",
+		});
+		logSpy.warnEntries.length = 0;
 
 		const allowedCustomTool = await permissionHandler(
 			{
@@ -826,6 +1190,16 @@ describe("runCopilotReview", () => {
 		});
 
 		assert.deepEqual(logSpy.infoEntries, [
+			{
+				message: "Configured Copilot shell sandbox",
+				details: [
+					{
+						workspace: "/tmp/repo",
+						network: "disabled",
+						workspaceAccess: "read-only",
+					},
+				],
+			},
 			{
 				message: "Copilot review scope prompt",
 				details: [

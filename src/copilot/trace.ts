@@ -5,8 +5,10 @@ import { REVIEW_TOOL_NAMES } from "./tools/index.ts";
 
 export type CopilotSessionEventTracer = {
 	handleEvent(event: SessionEvent): void;
+	markRejectedShellCall(toolCallId: string | undefined): void;
 	getReasoningStatus(): "content" | "empty" | "missing";
 	getFailedBackgroundShellCount(): number;
+	getUnsandboxedShellCount(): number;
 };
 
 const REVIEW_TOOL_NAME_SET: ReadonlySet<string> = new Set(REVIEW_TOOL_NAMES);
@@ -25,9 +27,11 @@ export function createSessionEventTracer(
 		string,
 		{ toolName: string; startedAtMs: number }
 	>();
+	const rejectedShellToolCallIds = new Set<string>();
 	let reasoningContentObserved = false;
 	let reasoningEventObserved = false;
 	let failedBackgroundShellCount = 0;
+	let unsandboxedShellCount = 0;
 
 	const appendContent = (reasoningId: string, content: string): void => {
 		if (!content) {
@@ -56,24 +60,26 @@ export function createSessionEventTracer(
 	};
 
 	return {
+		markRejectedShellCall(toolCallId) {
+			if (toolCallId) {
+				rejectedShellToolCallIds.add(toolCallId);
+			}
+		},
 		handleEvent(event) {
 			if (event.type === "tool.execution_start") {
-				const { arguments: toolArguments, toolCallId, toolName } = event.data;
+				const { toolCallId, toolName } = event.data;
 				startedToolsById.set(toolCallId, {
 					toolName,
 					startedAtMs: new Date(event.timestamp).getTime(),
 				});
 				if (toolName === "bash") {
-					logger.info("Copilot bash call", {
-						toolCallId,
-						arguments: toolArguments,
-					});
+					logger.info("Copilot bash call", { toolCallId });
 				}
 				return;
 			}
 
 			if (event.type === "tool.execution_complete") {
-				const { error, result, success, toolCallId } = event.data;
+				const { error, result, sandboxed, success, toolCallId } = event.data;
 				const startedTool = startedToolsById.get(toolCallId);
 				startedToolsById.delete(toolCallId);
 				if (!startedTool) {
@@ -85,11 +91,16 @@ export function createSessionEventTracer(
 				);
 
 				if (startedTool.toolName === "bash") {
+					const rejectedBeforeExecution =
+						rejectedShellToolCallIds.delete(toolCallId);
+					if (!rejectedBeforeExecution && sandboxed !== true) {
+						unsandboxedShellCount += 1;
+					}
 					logger.info("Copilot completed bash call", {
 						toolCallId,
 						success,
+						sandboxed,
 						durationMs,
-						...(error ? { error: error.message } : {}),
 					});
 					return;
 				}
@@ -342,6 +353,9 @@ export function createSessionEventTracer(
 		},
 		getFailedBackgroundShellCount() {
 			return failedBackgroundShellCount;
+		},
+		getUnsandboxedShellCount() {
+			return unsandboxedShellCount;
 		},
 	};
 }
