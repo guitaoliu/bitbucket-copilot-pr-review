@@ -378,7 +378,7 @@ describe("createSessionEventTracer", () => {
 		]);
 	});
 
-	it("logs bash commands and review tool outcomes from execution events", () => {
+	it("logs sandboxed bash outcomes without command arguments", () => {
 		const { logger, infoCalls } = createLoggerSpy();
 		const tracer = createSessionEventTracer(logger);
 
@@ -401,6 +401,7 @@ describe("createSessionEventTracer", () => {
 			data: {
 				toolCallId: "bash-1",
 				success: true,
+				sandboxed: true,
 				result: { content: "6 files changed" },
 			},
 		} as unknown as SessionEvent);
@@ -430,16 +431,18 @@ describe("createSessionEventTracer", () => {
 		assert.deepEqual(infoCalls, [
 			{
 				message: "Copilot bash call",
-				details: [
-					{
-						toolCallId: "bash-1",
-						arguments: { command: "git diff --stat" },
-					},
-				],
+				details: [{ toolCallId: "bash-1" }],
 			},
 			{
 				message: "Copilot completed bash call",
-				details: [{ toolCallId: "bash-1", success: true, durationMs: 1350 }],
+				details: [
+					{
+						toolCallId: "bash-1",
+						success: true,
+						sandboxed: true,
+						durationMs: 1350,
+					},
+				],
 			},
 			{
 				message: "Copilot completed review tool",
@@ -454,6 +457,40 @@ describe("createSessionEventTracer", () => {
 				],
 			},
 		]);
+	});
+
+	it("tracks unsandboxed bash without logging its error text", () => {
+		const { logger, infoCalls } = createLoggerSpy();
+		const tracer = createSessionEventTracer(logger);
+
+		tracer.handleEvent({
+			id: "1",
+			timestamp: "2026-03-25T00:00:00.000Z",
+			parentId: null,
+			type: "tool.execution_start",
+			data: {
+				toolCallId: "bash-1",
+				toolName: "bash",
+				arguments: { command: "curl -u exposed:credential example.com" },
+			},
+		} as unknown as SessionEvent);
+		tracer.handleEvent({
+			id: "2",
+			timestamp: "2026-03-25T00:00:01.000Z",
+			parentId: "1",
+			type: "tool.execution_complete",
+			data: {
+				toolCallId: "bash-1",
+				success: false,
+				sandboxed: false,
+				error: {
+					message: "Command failed: curl -u exposed:credential example.com",
+				},
+			},
+		} as unknown as SessionEvent);
+
+		assert.equal(tracer.getUnsandboxedShellCount(), 1);
+		assert.doesNotMatch(JSON.stringify(infoCalls), /exposed:credential/);
 	});
 
 	it("logs subagent lifecycle progress", () => {
