@@ -74,7 +74,7 @@ try {
 	);
 	runStep(
 		"pnpm",
-		["add", "--offline", "--ignore-scripts", `file:${tarballPath}`],
+		["add", "--ignore-scripts", `file:${tarballPath}`],
 		"Install packed CLI with pnpm",
 		{ cwd: smokeRoot },
 	);
