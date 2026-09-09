@@ -14,6 +14,12 @@ const logger: Logger = {
 };
 
 type TestableGitRepository = {
+	diffPaths(
+		baseCommit: string,
+		headCommit: string,
+		paths: readonly string[],
+		contextLines: number,
+	): Promise<string>;
 	ensureCommitAvailable(
 		commit: string,
 		refId: string,
@@ -30,6 +36,14 @@ type TestableGitRepository = {
 		| { status: "not_file" }
 		| { status: "not_text" }
 	>;
+	searchTextAtCommit(
+		commit: string,
+		patterns: readonly string[],
+		patternType: "literal" | "regex",
+		paths: readonly string[],
+		contextLines: number,
+	): Promise<string>;
+	listFilesAtCommit(commit: string, paths: readonly string[]): Promise<string>;
 	runGit(args: string[]): Promise<string>;
 	runGitDetailed(args: string[]): Promise<{
 		stdout: string;
@@ -99,5 +113,117 @@ describe("GitRepository.ensureCommitAvailable", () => {
 		const result = await repo.readTextFileAtCommit("base-123", "src");
 
 		assert.deepEqual(result, { status: "not_file" });
+	});
+
+	it("constructs revision-scoped diff and search commands", async () => {
+		const calls: string[][] = [];
+		const repo = new GitRepository(
+			"/tmp/repo",
+			logger,
+			"origin",
+		) as unknown as TestableGitRepository;
+
+		repo.runGit = async (args) => {
+			calls.push(args);
+			return "diff";
+		};
+		repo.runGitDetailed = async (args) => {
+			calls.push(args);
+			return { stdout: "match", stderr: "", exitCode: 0 };
+		};
+
+		await repo.diffPaths("base", "head", ["src/example[1].ts"], 12);
+		await repo.searchTextAtCommit(
+			"head",
+			["needle", "second"],
+			"literal",
+			["src/**"],
+			3,
+		);
+
+		assert.deepEqual(calls, [
+			[
+				"diff",
+				"--no-color",
+				"--no-ext-diff",
+				"--no-textconv",
+				"--find-renames",
+				"--find-copies",
+				"--unified=12",
+				"base",
+				"head",
+				"--",
+				":(literal)src/example[1].ts",
+			],
+			[
+				"grep",
+				"-n",
+				"-I",
+				"-F",
+				"-C",
+				"3",
+				"-e",
+				"needle",
+				"-e",
+				"second",
+				"head",
+				"--",
+				"src/**",
+			],
+		]);
+	});
+
+	it("includes search scope in Git failures", async () => {
+		const repo = new GitRepository(
+			"/tmp/repo",
+			logger,
+			"origin",
+		) as unknown as TestableGitRepository;
+		repo.runGitDetailed = async () => ({
+			stdout: "",
+			stderr: "invalid regular expression",
+			exitCode: 2,
+		});
+
+		await assert.rejects(
+			repo.searchTextAtCommit("head-123", ["["], "regex", ["src/**"], 3),
+			/Git search failed at head-123 using 1 regex patterns across 1 pathspecs: invalid regular expression/,
+		);
+	});
+
+	it("filters listed files with globs and directory prefixes", async () => {
+		const calls: string[][] = [];
+		const repo = new GitRepository(
+			"/tmp/repo",
+			logger,
+			"origin",
+		) as unknown as TestableGitRepository;
+		repo.runGit = async (args) => {
+			calls.push(args);
+			return [
+				"AGENTS.md",
+				"src/AGENTS.md",
+				"src/example.ts",
+				"test/example.test.ts",
+			].join("\n");
+		};
+
+		assert.equal(
+			await repo.listFilesAtCommit("base-123", ["**/AGENTS.md"]),
+			"AGENTS.md\nsrc/AGENTS.md",
+		);
+		assert.equal(
+			await repo.listFilesAtCommit("base-123", ["src"]),
+			"src/AGENTS.md\nsrc/example.ts",
+		);
+		assert.equal(
+			await repo.listFilesAtCommit("base-123", ["**/*.ts"]),
+			"src/example.ts\ntest/example.test.ts",
+		);
+		assert.deepEqual(calls, [
+			["ls-tree", "-r", "--name-only", "base-123"],
+			["ls-tree", "-r", "--name-only", "base-123"],
+			["ls-tree", "-r", "--name-only", "base-123"],
+		]);
 	});
 });

@@ -8,6 +8,7 @@ import {
 	createPullRequest,
 } from "../test-support/review-fixtures.ts";
 import { buildReviewContext } from "./context.ts";
+import { buildReviewRevision } from "./revision.ts";
 
 const logger: Logger = {
 	debug() {},
@@ -39,7 +40,7 @@ function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 }
 
 describe("buildReviewContext", () => {
-	it("does not read AGENTS instructions because the Copilot CLI uses the trusted base checkout", async () => {
+	it("leaves trusted-base instruction reads to review tools", async () => {
 		let readTextFileAtCommitCalls = 0;
 		const git = createGitStub({
 			readTextFileAtCommit: async () => {
@@ -60,5 +61,23 @@ describe("buildReviewContext", () => {
 
 		assert.equal(readTextFileAtCommitCalls, 0);
 		assert.equal(context.reviewableFiles[0]?.path, "src/example.ts");
+		assert.equal(
+			context.reviewRevision,
+			buildReviewRevision({
+				baseCommit: "base-123",
+				headCommit: "head-123",
+				mergeBaseCommit: "merge-base-123",
+				promptVersion: "2026-09-review-pages-1",
+				copilot: {
+					model: baseReviewerConfig.copilot.model,
+					reasoningEffort: baseReviewerConfig.copilot.reasoningEffort,
+				},
+				reviewConfig: {
+					minConfidence: baseReviewerConfig.review.minConfidence,
+					ignorePaths: [],
+					skipBranchPrefixes: ["renovate/"],
+				},
+			}),
+		);
 	});
 });

@@ -11,6 +11,12 @@ import {
 import reviewPromptTemplate from "./review-prompt.md";
 
 const MAX_CI_SUMMARY_CHARS = 2000;
+const TOOL_EFFICIENCY_INSTRUCTIONS = [
+	"Optimize for defect recall and non-redundant context, not a fixed turn or query count.",
+	"Read review_changes page 1, then request every remaining page; independent pages may run in parallel.",
+	"For read_file, search_repo, and find_files, request page 1 before pages confirmed by totalPages.",
+	"Repeat covered context only for final validation.",
+].join(" ");
 
 const FILE_STATUS_CODES = {
 	added: "A",
@@ -72,6 +78,13 @@ export function buildSystemMessage(
 	config: ReviewerConfig,
 ): SystemMessageConfig {
 	return {
+		mode: "customize",
+		sections: {
+			tool_efficiency: {
+				action: "replace",
+				content: TOOL_EFFICIENCY_INSTRUCTIONS,
+			},
+		},
 		content: reviewPromptTemplate
 			.replace("{{minConfidence}}", config.review.minConfidence)
 			.trim(),
@@ -82,8 +95,6 @@ export function buildPrompt(
 	context: ReviewContext,
 	ignorePaths: readonly string[] = [],
 ): string {
-	const shortHeadCommit = context.headCommit.slice(0, 12);
-	const shortMergeBaseCommit = context.mergeBaseCommit.slice(0, 12);
 	const pullRequestTitle = escapePromptMarkupText(context.pr.title);
 	const sourceBranch = escapePromptMarkupText(context.pr.source.displayId);
 	const targetBranch = escapePromptMarkupText(context.pr.target.displayId);
@@ -113,8 +124,6 @@ export function buildPrompt(
 		`target_branch: ${targetBranch}`,
 		`head_commit: ${context.headCommit}`,
 		`merge_base_commit: ${context.mergeBaseCommit}`,
-		`recommended_diff_command: git diff ${shortMergeBaseCommit} ${shortHeadCommit} -- <path>`,
-		`recommended_head_read_command: git show ${shortHeadCommit}:<path>`,
 		...buildReviewScopeLines(context),
 		...ignoredPathPatterns,
 		"</pull_request_context>",

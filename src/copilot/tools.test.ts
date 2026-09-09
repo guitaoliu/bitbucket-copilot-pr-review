@@ -8,11 +8,22 @@ import type {
 	ReviewContext,
 	ReviewSummaryDrafts,
 } from "../review/types.ts";
-import { createReviewToolContext } from "./tools/context.ts";
+import type { Logger } from "../shared/logger.ts";
+import { ReviewBundle } from "./review-bundle.ts";
+import {
+	createReviewToolContext,
+	type ReviewInspectionState,
+} from "./tools/context.ts";
 import { createEmitFindingTool } from "./tools/emit-finding.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
 import { createRecordChangeAreaSummaryTool } from "./tools/record-change-area-summary.ts";
 import { createRecordPrSummaryTool } from "./tools/record-pr-summary.ts";
+import {
+	createFindFilesTool,
+	createReadFileTool,
+	createSearchRepoTool,
+} from "./tools/repository-context.ts";
+import { createReviewChangesTool } from "./tools/review-changes.ts";
 
 const reviewContext: ReviewContext = {
 	repoRoot: "/tmp/repo",
@@ -110,7 +121,10 @@ const reviewContext: ReviewContext = {
 
 function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 	return {
+		diffPaths: async () => "",
+		listFilesAtCommit: async () => "",
 		readTextFileAtCommit: async () => ({ status: "not_found" as const }),
+		searchTextAtCommit: async () => "",
 		...overrides,
 	} as GitRepository;
 }
@@ -131,6 +145,15 @@ function getHandler<TArgs, TResult>(tool: Tool<TArgs>) {
 	) => Promise<TResult>;
 }
 
+function toolInvocation(toolName: string) {
+	return {
+		sessionId: "session",
+		toolCallId: "tool",
+		toolName,
+		arguments: {},
+	};
+}
+
 describe("Copilot tools", () => {
 	it("creates only the active review tools in the published order", () => {
 		const tools = createReviewTools(
@@ -142,13 +165,242 @@ describe("Copilot tools", () => {
 
 		assert.deepEqual(
 			tools.map((tool) => tool.name),
-			["record_pr_summary", "record_change_area_summary", "emit_finding"],
+			[
+				"review_changes",
+				"read_file",
+				"search_repo",
+				"find_files",
+				"record_pr_summary",
+				"record_change_area_summary",
+				"emit_finding",
+			],
 		);
 		assert.deepEqual(REVIEW_TOOL_NAMES, [
+			"review_changes",
+			"read_file",
+			"search_repo",
+			"find_files",
 			"record_pr_summary",
 			"record_change_area_summary",
 			"emit_finding",
 		]);
+		assert.equal(
+			tools.find((tool) => tool.name === "read_file")?.overridesBuiltInTool,
+			true,
+		);
+	});
+
+	it("pages trusted guidance, skill metadata, and the complete diff", async () => {
+		const git = createGitStub({
+			listFilesAtCommit: async () =>
+				"AGENTS.md\nsrc/AGENTS.md\n.agents/skills/review/SKILL.md\n",
+			readTextFileAtCommit: async (_commit, filePath) => ({
+				status: "ok" as const,
+				content: filePath.endsWith("/SKILL.md")
+					? "---\nname: review\ndescription: Use for reviewing risky changes.\n---\nBody"
+					: `instructions for ${filePath}`,
+			}),
+			diffPaths: async (_base, _head, paths) =>
+				`diff for ${paths.join(",")}\n${"x".repeat(45_000)}`,
+		});
+		const reviewBundle = new ReviewBundle(reviewContext, git);
+		const inspectionState: ReviewInspectionState = {};
+		const tool = createReviewChangesTool(
+			createReviewToolContext(
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+				inspectionState,
+				undefined,
+				reviewBundle,
+			),
+		);
+		type PageResult = Awaited<ReturnType<ReviewBundle["getPage"]>>;
+		const handler = getHandler<{ page: number }, PageResult>(tool);
+
+		const first = await handler({ page: 1 }, toolInvocation("review_changes"));
+		const content = [first.content];
+		for (let page = 2; page <= first.totalPages; page += 1) {
+			content.push(
+				(await handler({ page }, toolInvocation("review_changes"))).content,
+			);
+		}
+		const result = content.join("");
+
+		assert.match(result, /trusted guidance: AGENTS\.md/);
+		assert.match(result, /trusted guidance: src\/AGENTS\.md/);
+		assert.match(result, /\.agents\/skills\/review\/SKILL\.md/);
+		assert.match(result, /description: Use for reviewing risky changes\./);
+		assert.match(result, /src\/new-name\.ts/);
+		assert.match(result, /src\/multi-hunk\.ts/);
+		assert.deepEqual(reviewBundle.getCoverage(), {
+			deliveredPages: first.totalPages,
+			totalPages: first.totalPages,
+			complete: true,
+		});
+		assert.ok(first.totalPages > 1);
+		assert.ok(Buffer.byteLength(first.content) <= 40_000);
+	});
+
+	it("rejects the summary until every review page is delivered", async () => {
+		const git = createGitStub({
+			listFilesAtCommit: async () => "",
+			diffPaths: async (_base, _head, paths) =>
+				`${paths.at(-1)}\n${"x".repeat(70_000)}`,
+		});
+		const reviewBundle = new ReviewBundle(reviewContext, git);
+		const summaryDrafts = createSummaryDrafts();
+		const toolContext = createReviewToolContext(
+			reviewContext,
+			git,
+			[],
+			summaryDrafts,
+			{},
+			undefined,
+			reviewBundle,
+		);
+		type PageResult = Awaited<ReturnType<ReviewBundle["getPage"]>>;
+		const inspect = getHandler<{ page: number }, PageResult>(
+			createReviewChangesTool(toolContext),
+		);
+		const summarize = getHandler<
+			{
+				summary: string;
+				reviewOutcome: "clean" | "findings_recorded";
+			},
+			string | { resultType: string; textResultForLlm: string }
+		>(createRecordPrSummaryTool(toolContext));
+
+		const first = await inspect({ page: 1 }, toolInvocation("review_changes"));
+		const rejected = await summarize(
+			{ summary: "Summary", reviewOutcome: "clean" },
+			toolInvocation("record_pr_summary"),
+		);
+		assert.equal(
+			typeof rejected === "string" ? rejected : rejected.resultType,
+			"rejected",
+		);
+		assert.match(JSON.stringify(rejected), /review_changes pages: 2/);
+
+		for (let page = 2; page <= first.totalPages; page += 1) {
+			await inspect({ page }, toolInvocation("review_changes"));
+		}
+
+		assert.deepEqual(reviewBundle.getCoverage(), {
+			deliveredPages: first.totalPages,
+			totalPages: first.totalPages,
+			complete: true,
+		});
+		assert.equal(
+			await summarize(
+				{ summary: "Summary", reviewOutcome: "clean" },
+				toolInvocation("record_pr_summary"),
+			),
+			"Recorded the pull request summary.",
+		);
+	});
+
+	it("pages search queries, forwards patterns, and clamps context", async () => {
+		const infoEntries: Array<{ message: string; details: unknown[] }> = [];
+		const contextLines: number[] = [];
+		const requestedPatterns: string[][] = [];
+		const logger: Logger = {
+			debug() {},
+			info(message, ...details) {
+				infoEntries.push({ message, details });
+			},
+			warn() {},
+			error() {},
+			trace() {},
+			json() {},
+		};
+		const git = createGitStub({
+			searchTextAtCommit: async (
+				_commit,
+				patterns,
+				_patternType,
+				_paths,
+				requestedContextLines,
+			) => {
+				requestedPatterns.push([...patterns]);
+				contextLines.push(requestedContextLines);
+				return "match\n".repeat(30_000);
+			},
+		});
+		const tool = createSearchRepoTool(
+			createReviewToolContext(
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+				{},
+				logger,
+			),
+		);
+		type PageResult = {
+			page: number;
+			totalPages: number;
+			content: string;
+		};
+		const handler = getHandler<Record<string, unknown>, PageResult>(
+			tool as unknown as Tool<Record<string, unknown>>,
+		);
+		const patterns = ["proprietary-pattern", "second-pattern"];
+
+		const first = await handler(
+			{
+				revision: "head",
+				patterns,
+				paths: ["src/**"],
+			},
+			toolInvocation("search_repo"),
+		);
+
+		assert.ok(first.totalPages > 1);
+		assert.ok(Buffer.byteLength(first.content) <= 16_000);
+		const second = await handler(
+			{
+				revision: "head",
+				patterns,
+				paths: ["src/**"],
+				contextLines: 99,
+				page: 2,
+			},
+			toolInvocation("search_repo"),
+		);
+		assert.equal(second.page, 2);
+		assert.deepEqual(contextLines, [0, 12]);
+		assert.deepEqual(requestedPatterns, [patterns, patterns]);
+		assert.match(JSON.stringify(infoEntries), /proprietary-pattern/);
+	});
+
+	it("rejects read_file paths that escape the repository", async () => {
+		const git = createGitStub();
+		const tool = createReadFileTool(
+			createReviewToolContext(
+				reviewContext,
+				git,
+				[],
+				createSummaryDrafts(),
+				{},
+			),
+		);
+		const handler = getHandler<
+			Record<string, unknown>,
+			{ resultType: string; textResultForLlm: string }
+		>(tool as unknown as Tool<Record<string, unknown>>);
+
+		const result = await handler(
+			{
+				revision: "head",
+				path: "../secrets",
+			},
+			toolInvocation("read_file"),
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.match(result.textResultForLlm, /relative repository path/);
 	});
 
 	it("rejects emit_finding when the line is not changed", async () => {
@@ -539,10 +791,45 @@ describe("Copilot tools", () => {
 			minLength?: number;
 			maxLength?: number;
 			minItems?: number;
-			items?: { minLength?: number };
+			maxItems?: number;
+			items?: { minLength?: number; maxLength?: number };
 		};
 		const properties = <TArgs>(tool: Tool<TArgs>) =>
 			(tool.parameters as { properties?: Record<string, Property> }).properties;
+		const schemaObjects = [
+			createReviewChangesTool(toolContext),
+			createReadFileTool(toolContext),
+			createSearchRepoTool(toolContext),
+			createFindFilesTool(toolContext),
+		].map((tool) =>
+			(tool.parameters as { toJSONSchema(): unknown }).toJSONSchema(),
+		);
+		const schemas = schemaObjects.map((schema) => JSON.stringify(schema));
+		assert.match(schemas[0] ?? "", /"page"/);
+		assert.match(schemas[1] ?? "", /"ranges"/);
+		assert.match(schemas[2] ?? "", /"patternType"/);
+		const searchRepoSchema = schemaObjects[2] as {
+			properties?: Record<
+				string,
+				{
+					default?: unknown;
+					minimum?: number;
+					maximum?: number;
+					minItems?: number;
+					maxItems?: number;
+					items?: { minLength?: number; maxLength?: number };
+				}
+			>;
+		};
+		assert.equal(searchRepoSchema.properties?.contextLines?.default, 0);
+		assert.equal(searchRepoSchema.properties?.contextLines?.minimum, 0);
+		assert.equal(searchRepoSchema.properties?.contextLines?.maximum, 12);
+		assert.equal(searchRepoSchema.properties?.patterns?.minItems, 1);
+		assert.equal(searchRepoSchema.properties?.patterns?.maxItems, 8);
+		assert.equal(searchRepoSchema.properties?.patterns?.items?.minLength, 1);
+		assert.equal(searchRepoSchema.properties?.patterns?.items?.maxLength, 500);
+		assert.match(schemas[3] ?? "", /"paths"/);
+		assert.doesNotMatch(schemas.join(""), /"cursor"/);
 
 		const prSummary = properties(createRecordPrSummaryTool(toolContext));
 		assert.equal(prSummary?.summary?.minLength, 1);

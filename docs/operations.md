@@ -6,18 +6,18 @@ This guide collects the implementation and operator detail that is intentionally
 
 - Node.js 24.12+
 - pnpm 10+
-- OS sandbox support: macOS `sandbox-exec` or Linux `bwrap` 0.5.0+
+- Git available on `PATH`; Copilot reads repository content only through the read-only `review_changes`, `read_file`, `search_repo`, and `find_files` tools
 - `@github/copilot` is installed with this package so the reviewer can resolve and launch the bundled Copilot CLI runtime from `node_modules`
 - a GitHub Copilot-enabled account
 
-The reviewer fails closed when the local shell sandbox is unavailable or a shell execution is not confirmed as sandboxed. It configures read-only access for the detached review workspace and Git metadata, write access for an ephemeral scratch directory, and no outbound or local network access. A permission gate separately rejects declared paths outside those locations. Sandbox bypass, developer-tool access, shell profiles, and git or GitHub CLI credential injection are disabled.
+The reviewer does not expose a shell. `review_changes` pages trusted guidance and the complete reviewable merge-base-to-head diff, and completion fails closed until every page is delivered. `read_file`, `search_repo`, and `find_files` provide paged context against fixed merge-base, base, and head revisions.
 
 ## Authentication
 
 - `BITBUCKET_TOKEN` is the default Bitbucket Data Center credential
 - if your Bitbucket environment requires basic auth, set `BITBUCKET_USERNAME`, `BITBUCKET_PASSWORD`, and `BITBUCKET_AUTH_TYPE=basic`
 - Copilot authentication is resolved by the GitHub Copilot SDK; you can rely on an existing `copilot` CLI login, `gh auth` credentials, or any supported GitHub token environment variable already understood by the SDK
-- Copilot repo context and instruction discovery are handled by the standard Copilot CLI harness running in a detached trusted-base checkout; this tool adds the Bitbucket PR review prompt, scoped output tools, and publishing flow
+- Copilot repository context and trusted-base instruction discovery are provided through revision-scoped structured tools; the Copilot CLI receives no general shell or file tools
 - for GitHub Enterprise Cloud data residency hosts (`*.ghe.com`), set `GH_HOST` to the GitHub hostname you authenticate against, for example `tenant.ghe.com`
 - if you need to create or refresh a Copilot login for that host, run `copilot login --host https://tenant.ghe.com` before running the reviewer
 
@@ -152,7 +152,7 @@ If your Bitbucket Data Center uses an internal or self-signed certificate, prefe
 
 For local helper-script runs, Node system CA loading is enabled by default with `NODE_USE_SYSTEM_CA=1`. Set `NODE_USE_SYSTEM_CA=0` if you need to disable that behavior for troubleshooting.
 
-Target repository instructions and broader project context are discovered by the standard Copilot CLI harness from a detached checkout at the pull request base commit. The reviewer no longer reads or injects `AGENTS.md` files itself, and instruction files added or changed by the pull request are reviewed as untrusted PR content rather than followed as review instructions.
+The Copilot CLI's automatic custom-instruction loading is disabled. `review_changes` delivers applicable `AGENTS.md` files and the `.agents/skills/*/SKILL.md` catalog from the trusted base commit; the agent reads selected skills through `read_file`. Instruction or skill files added or changed by the pull request remain untrusted PR content.
 
 When the target repository contains a root-level `copilot-code-review.json`, the reviewer loads it from the trusted base commit and uses it for repo-scoped review configuration such as ignored paths, review limits, and selected Copilot or report overrides. Environment variables and CLI flags still take precedence. The JSON schema is published at `schemas/copilot-code-review.schema.json`.
 

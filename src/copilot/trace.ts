@@ -5,31 +5,22 @@ import { REVIEW_TOOL_NAMES } from "./tools/index.ts";
 
 export type CopilotSessionEventTracer = {
 	handleEvent(event: SessionEvent): void;
-	markRejectedShellCall(toolCallId: string | undefined): void;
 	getReasoningStatus(): "content" | "empty" | "missing";
-	getFailedBackgroundShellCount(): number;
-	getUnsandboxedShellCount(): number;
+	getFailedReviewToolCounts(): Record<string, number>;
 };
 
 const REVIEW_TOOL_NAME_SET: ReadonlySet<string> = new Set(REVIEW_TOOL_NAMES);
+const REPOSITORY_INSPECTION_TOOL_NAMES = new Set([
+	"review_changes",
+	"read_file",
+	"search_repo",
+	"find_files",
+]);
 
 type SessionEventWithData = SessionEvent & { data?: Record<string, unknown> };
 
 function getEventData(event: SessionEvent): Record<string, unknown> {
 	return (event as SessionEventWithData).data ?? {};
-}
-
-function getBashCommand(argumentsValue: unknown): string | undefined {
-	if (
-		typeof argumentsValue !== "object" ||
-		argumentsValue === null ||
-		Array.isArray(argumentsValue)
-	) {
-		return undefined;
-	}
-
-	const command = (argumentsValue as Record<string, unknown>).command;
-	return typeof command === "string" ? command : undefined;
 }
 
 export function createSessionEventTracer(
@@ -40,11 +31,9 @@ export function createSessionEventTracer(
 		string,
 		{ toolName: string; startedAtMs: number }
 	>();
-	const rejectedShellToolCallIds = new Set<string>();
 	let reasoningContentObserved = false;
 	let reasoningEventObserved = false;
-	let failedBackgroundShellCount = 0;
-	let unsandboxedShellCount = 0;
+	const failedReviewToolCounts = new Map<string, number>();
 
 	const appendContent = (reasoningId: string, content: string): void => {
 		if (!content) {
@@ -73,11 +62,6 @@ export function createSessionEventTracer(
 	};
 
 	return {
-		markRejectedShellCall(toolCallId) {
-			if (toolCallId) {
-				rejectedShellToolCallIds.add(toolCallId);
-			}
-		},
 		handleEvent(event) {
 			if (event.type === "tool.execution_start") {
 				const { toolCallId, toolName } = event.data;
@@ -85,17 +69,11 @@ export function createSessionEventTracer(
 					toolName,
 					startedAtMs: new Date(event.timestamp).getTime(),
 				});
-				if (toolName === "bash") {
-					logger.info("Copilot bash call", {
-						toolCallId,
-						command: getBashCommand(event.data.arguments),
-					});
-				}
 				return;
 			}
 
 			if (event.type === "tool.execution_complete") {
-				const { error, result, sandboxed, success, toolCallId } = event.data;
+				const { error, result, success, toolCallId } = event.data;
 				const startedTool = startedToolsById.get(toolCallId);
 				startedToolsById.delete(toolCallId);
 				if (!startedTool) {
@@ -106,28 +84,22 @@ export function createSessionEventTracer(
 					new Date(event.timestamp).getTime() - startedTool.startedAtMs,
 				);
 
-				if (startedTool.toolName === "bash") {
-					const rejectedBeforeExecution =
-						rejectedShellToolCallIds.delete(toolCallId);
-					if (!rejectedBeforeExecution && sandboxed !== true) {
-						unsandboxedShellCount += 1;
-					}
-					logger.info("Copilot completed bash call", {
-						toolCallId,
-						success,
-						sandboxed,
-						durationMs,
-					});
-					return;
-				}
-
 				if (REVIEW_TOOL_NAME_SET.has(startedTool.toolName)) {
+					if (success === false) {
+						failedReviewToolCounts.set(
+							startedTool.toolName,
+							(failedReviewToolCounts.get(startedTool.toolName) ?? 0) + 1,
+						);
+					}
 					logger.info("Copilot completed review tool", {
 						toolCallId,
 						toolName: startedTool.toolName,
 						success,
 						durationMs,
-						...(result?.content ? { result: result.content } : {}),
+						...(!REPOSITORY_INSPECTION_TOOL_NAMES.has(startedTool.toolName) &&
+						result?.content
+							? { result: result.content }
+							: {}),
 						...(error ? { error: error.message } : {}),
 					});
 				}
@@ -340,20 +312,6 @@ export function createSessionEventTracer(
 					data.kind && typeof data.kind === "object"
 						? (data.kind as Record<string, unknown>)
 						: undefined;
-				if (
-					kind?.type === "shell_completed" &&
-					typeof kind.exitCode === "number" &&
-					kind.exitCode !== 0
-				) {
-					failedBackgroundShellCount += 1;
-					logger.warn("Copilot background shell failed", {
-						shellId: kind.shellId,
-						exitCode: kind.exitCode,
-						description: kind.description,
-						content,
-					});
-					return;
-				}
 				logger.info("Copilot system notification", {
 					kind: typeof kind?.type === "string" ? kind.type : undefined,
 					status: typeof kind?.status === "string" ? kind.status : undefined,
@@ -367,11 +325,8 @@ export function createSessionEventTracer(
 			}
 			return reasoningEventObserved ? "empty" : "missing";
 		},
-		getFailedBackgroundShellCount() {
-			return failedBackgroundShellCount;
-		},
-		getUnsandboxedShellCount() {
-			return unsandboxedShellCount;
+		getFailedReviewToolCounts() {
+			return Object.fromEntries(failedReviewToolCounts);
 		},
 	};
 }

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 
 import type { PullRequestInfo } from "../bitbucket/types.ts";
@@ -17,6 +18,8 @@ export type GitReadTextFileResult =
 	| { status: "not_found" }
 	| { status: "not_file" }
 	| { status: "not_text" };
+
+export type GitSearchPatternType = "literal" | "regex";
 
 interface GitCommandOptions {
 	allowFailure?: boolean;
@@ -318,8 +321,87 @@ export class GitRepository {
 			baseCommit,
 			headCommit,
 			"--",
-			...pathspecs,
+			...pathspecs.map((pathspec) => `:(literal)${pathspec}`),
 		]);
+	}
+
+	async diffPaths(
+		baseCommit: string,
+		headCommit: string,
+		paths: readonly string[],
+		contextLines: number,
+	): Promise<string> {
+		return this.runGit([
+			"diff",
+			"--no-color",
+			"--no-ext-diff",
+			"--no-textconv",
+			"--find-renames",
+			"--find-copies",
+			`--unified=${contextLines}`,
+			baseCommit,
+			headCommit,
+			"--",
+			...paths.map((filePath) => `:(literal)${filePath}`),
+		]);
+	}
+
+	async searchTextAtCommit(
+		commit: string,
+		patterns: readonly string[],
+		patternType: GitSearchPatternType,
+		paths: readonly string[],
+		contextLines: number,
+	): Promise<string> {
+		const result = await this.runGitDetailed([
+			"grep",
+			"-n",
+			"-I",
+			patternType === "literal" ? "-F" : "-E",
+			"-C",
+			String(contextLines),
+			...patterns.flatMap((pattern) => ["-e", pattern]),
+			commit,
+			"--",
+			...paths,
+		]);
+		if (result.exitCode === 0) {
+			return result.stdout;
+		}
+		if (result.exitCode === 1) {
+			return "";
+		}
+
+		throw new Error(
+			`Git search failed at ${commit} using ${patterns.length} ${patternType} patterns across ${paths.length || "all"} pathspecs: ${result.stderr || `exit code ${result.exitCode}`}`,
+		);
+	}
+
+	async listFilesAtCommit(
+		commit: string,
+		paths: readonly string[],
+	): Promise<string> {
+		const content = await this.runGit(["ls-tree", "-r", "--name-only", commit]);
+		if (paths.length === 0) {
+			return content;
+		}
+
+		return content
+			.split("\n")
+			.filter(
+				(filePath) =>
+					filePath &&
+					paths.some((pattern) => {
+						const normalizedPattern = pattern.replace(/\/+$/, "");
+						return (
+							normalizedPattern === "." ||
+							filePath === normalizedPattern ||
+							filePath.startsWith(`${normalizedPattern}/`) ||
+							path.posix.matchesGlob(filePath, normalizedPattern)
+						);
+					}),
+			)
+			.join("\n");
 	}
 
 	async readTextFileAtCommit(

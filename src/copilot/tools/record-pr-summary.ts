@@ -44,6 +44,17 @@ export function createRecordPrSummaryTool(toolContext: ReviewToolContext) {
 					`Invalid PR summary payload: ${parsed.error.message}`,
 				);
 			}
+			const reviewBundle = toolContext.reviewBundle;
+			if (reviewBundle && !reviewBundle.getCoverage().complete) {
+				const missingPages = await reviewBundle.getMissingPages();
+				const coverage = reviewBundle.getCoverage();
+				const missing = missingPages ?? [];
+				const preview = missing.slice(0, 20).join(", ");
+				const remainder = Math.max(0, missing.length - 20);
+				return toRejectedResult(
+					`Review coverage is incomplete: ${coverage.deliveredPages}/${coverage.totalPages ?? "?"} pages delivered. Read missing review_changes pages: ${preview || "start with page 1"}${remainder > 0 ? ` (+${remainder} more)` : ""}.`,
+				);
+			}
 
 			summaryDrafts.prSummary = parsed.data.summary;
 			summaryDrafts.reviewOutcome = parsed.data.reviewOutcome;

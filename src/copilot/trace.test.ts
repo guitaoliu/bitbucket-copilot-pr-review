@@ -214,44 +214,6 @@ describe("createSessionEventTracer", () => {
 		]);
 	});
 
-	it("records non-zero background shell exits as failures", () => {
-		const { infoCalls, logger, warnCalls } = createLoggerSpy();
-		const tracer = createSessionEventTracer(logger);
-
-		tracer.handleEvent({
-			id: "1",
-			timestamp: "2026-03-25T00:00:00.000Z",
-			parentId: null,
-			ephemeral: true,
-			type: "system.notification",
-			data: {
-				content: "<system_notification>Shell failed</system_notification>",
-				kind: {
-					type: "shell_completed",
-					shellId: "shell-1",
-					exitCode: 128,
-					description: "Inspect the diff",
-				},
-			},
-		} as SessionEvent);
-
-		assert.equal(tracer.getFailedBackgroundShellCount(), 1);
-		assert.deepEqual(infoCalls, []);
-		assert.deepEqual(warnCalls, [
-			{
-				message: "Copilot background shell failed",
-				details: [
-					{
-						shellId: "shell-1",
-						exitCode: 128,
-						description: "Inspect the diff",
-						content: "<system_notification>Shell failed</system_notification>",
-					},
-				],
-			},
-		]);
-	});
-
 	it("logs assistant intent as visible progress", () => {
 		const { logger, infoCalls } = createLoggerSpy();
 		const tracer = createSessionEventTracer(logger);
@@ -349,7 +311,7 @@ describe("createSessionEventTracer", () => {
 				toolRequests: [
 					{
 						toolCallId: "tool-1",
-						name: "bash",
+						name: "search_repo",
 						arguments: {},
 						intentionSummary: "Inspect the diff first",
 					},
@@ -370,7 +332,7 @@ describe("createSessionEventTracer", () => {
 					{
 						phase: "tool_planning",
 						toolCount: 2,
-						toolNames: ["bash", "emit_finding"],
+						toolNames: ["search_repo", "emit_finding"],
 						intentionSummaries: ["Inspect the diff first"],
 					},
 				],
@@ -378,7 +340,7 @@ describe("createSessionEventTracer", () => {
 		]);
 	});
 
-	it("logs complete sandboxed bash commands and outcomes", () => {
+	it("logs completed review tools", () => {
 		const { logger, infoCalls } = createLoggerSpy();
 		const tracer = createSessionEventTracer(logger);
 
@@ -388,9 +350,9 @@ describe("createSessionEventTracer", () => {
 			parentId: null,
 			type: "tool.execution_start",
 			data: {
-				toolCallId: "bash-1",
-				toolName: "bash",
-				arguments: { command: "git diff --stat" },
+				toolCallId: "query-1",
+				toolName: "search_repo",
+				arguments: { operations: [] },
 			},
 		} as unknown as SessionEvent);
 		tracer.handleEvent({
@@ -399,10 +361,9 @@ describe("createSessionEventTracer", () => {
 			parentId: "1",
 			type: "tool.execution_complete",
 			data: {
-				toolCallId: "bash-1",
+				toolCallId: "query-1",
 				success: true,
-				sandboxed: true,
-				result: { content: "6 files changed" },
+				result: { content: "Reviewed the requested repository content." },
 			},
 		} as unknown as SessionEvent);
 		tracer.handleEvent({
@@ -430,16 +391,12 @@ describe("createSessionEventTracer", () => {
 
 		assert.deepEqual(infoCalls, [
 			{
-				message: "Copilot bash call",
-				details: [{ toolCallId: "bash-1", command: "git diff --stat" }],
-			},
-			{
-				message: "Copilot completed bash call",
+				message: "Copilot completed review tool",
 				details: [
 					{
-						toolCallId: "bash-1",
+						toolCallId: "query-1",
+						toolName: "search_repo",
 						success: true,
-						sandboxed: true,
 						durationMs: 1350,
 					},
 				],
@@ -459,8 +416,8 @@ describe("createSessionEventTracer", () => {
 		]);
 	});
 
-	it("tracks unsandboxed bash without logging its error text", () => {
-		const { logger, infoCalls } = createLoggerSpy();
+	it("counts failed review tool executions", () => {
+		const { logger } = createLoggerSpy();
 		const tracer = createSessionEventTracer(logger);
 
 		tracer.handleEvent({
@@ -469,28 +426,24 @@ describe("createSessionEventTracer", () => {
 			parentId: null,
 			type: "tool.execution_start",
 			data: {
-				toolCallId: "bash-1",
-				toolName: "bash",
-				arguments: { command: "git diff --stat" },
+				toolCallId: "query-1",
+				toolName: "search_repo",
+				arguments: { operations: [] },
 			},
-		} as unknown as SessionEvent);
+		} as SessionEvent);
 		tracer.handleEvent({
 			id: "2",
 			timestamp: "2026-03-25T00:00:01.000Z",
 			parentId: "1",
 			type: "tool.execution_complete",
 			data: {
-				toolCallId: "bash-1",
+				toolCallId: "query-1",
 				success: false,
-				sandboxed: false,
-				error: {
-					message: "Command failed: curl -u exposed:credential example.com",
-				},
+				error: { message: "Invalid repo query" },
 			},
-		} as unknown as SessionEvent);
+		} as SessionEvent);
 
-		assert.equal(tracer.getUnsandboxedShellCount(), 1);
-		assert.doesNotMatch(JSON.stringify(infoCalls), /exposed:credential/);
+		assert.deepEqual(tracer.getFailedReviewToolCounts(), { search_repo: 1 });
 	});
 
 	it("logs subagent lifecycle progress", () => {

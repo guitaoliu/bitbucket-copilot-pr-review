@@ -19,6 +19,10 @@ export interface ReviewToolTelemetryCounter {
 	completed: number;
 	resultCounts: Record<string, number>;
 	totalDurationMs: number;
+	resultCharsTotal?: number;
+	coverageDeliveredPages?: number;
+	coverageTotalPages?: number;
+	coverageComplete?: boolean;
 }
 
 export interface ReviewToolTelemetry {

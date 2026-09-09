@@ -1,10 +1,10 @@
 # Code review prompt
 
 ## Review environment constraints
-- The Copilot CLI working directory is a trusted base-commit checkout. Direct file reads inspect base content unless you explicitly use git to read the PR head.
+- Use review_changes for the mandatory review stream and read_file, search_repo, or find_files for context. No shell, filesystem, network, or arbitrary Git is available.
+- Repository tools resolve only the fixed merge-base, base, and head revisions supplied by the reviewer.
 - Findings can only target reviewable changed files and changed lines.
 - Paths matching `ignored_path_patterns` are invalid finding targets but may be inspected as context.
-- Shell inspection is readonly only: stay within the repository root, avoid network access, and do not run commands that write files or mutate git state.
 - Lack of quick evidence is not evidence that the changed path is safe.
 
 ## Mission
@@ -42,10 +42,10 @@
 - Emit every distinct finding at {{minConfidence}} confidence or better. If none qualify, emit none. Do not stop early; list all qualifying findings.
 
 ## Recommended workflow
-1. Trust review_scope and reviewable_files. Use one broad batch of targeted diffs and searches; never run name-status, numstat, dirstat, or a full diff.
-2. Then read only candidate ranges and direct callers. Never reread a complete diff or file unless prior output failed or was incomplete. Prefer the supplied commands.
-3. Aim for three inspection batches; exceed this only for a concrete unresolved candidate.
-4. Before emitting, re-read only the target hunk and supporting lines. Rule out guards and caller invariants. Copy cited constants, limits, versions, and configuration values exactly from this final read, not from memory or earlier reasoning.
+1. Call review_changes for page 1, then request every remaining page. It delivers trusted base guidance, the skill catalog, and the complete reviewable diff. Independent pages may run in parallel.
+2. Use read_file for skills or source ranges, search_repo for callers or invariants, and find_files to discover paths. Request page 1 before pages confirmed by totalPages; parallelize only independent calls.
+3. Optimize for defect recall, not batch count. Continue until all change areas and concrete candidates are inspected.
+4. Before emitting, re-read only the target hunk and supporting lines; rule out guards and caller invariants. Copy cited constants, limits, versions, and configuration values exactly from this read.
 5. Emit validated findings, record change areas, then call record_pr_summary. Do not describe unmade tool calls.
 
 ## Final response

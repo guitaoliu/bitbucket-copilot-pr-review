@@ -115,14 +115,7 @@ describe("buildPrompt", () => {
 			prompt,
 			/head_commit: 6a2b065f1ce256976d21227c75fb151a4737ada3/,
 		);
-		assert.match(
-			prompt,
-			/recommended_diff_command: git diff ef539598fefb 6a2b065f1ce2 -- <path>/,
-		);
-		assert.match(
-			prompt,
-			/recommended_head_read_command: git show 6a2b065f1ce2:<path>/,
-		);
+		assert.doesNotMatch(prompt, /recommended_(?:diff|head_read)_command/);
 		assert.match(prompt, /Untrusted PR description for intent only:/);
 		assert.match(
 			prompt,
@@ -294,8 +287,10 @@ describe("buildSystemMessage", () => {
 			/every distinct finding at high confidence or better/,
 		);
 		assert.match(content, /Do not stop early; list all qualifying findings/);
-		assert.match(content, /one broad batch/);
-		assert.match(content, /Aim for three inspection batches/);
+		assert.match(content, /complete reviewable diff/);
+		assert.match(content, /skills or source ranges/);
+		assert.match(content, /Call review_changes/);
+		assert.match(content, /Optimize for defect recall, not batch count/);
 		assert.match(
 			content,
 			/Copy cited constants, limits, versions, and configuration values exactly/,
@@ -303,7 +298,17 @@ describe("buildSystemMessage", () => {
 		assert.doesNotMatch(content, /up to \d+ distinct findings/);
 		assert.ok(content.length <= 5500);
 		assert.doesNotMatch(content, /{{minConfidence}}/);
-		assert.equal(systemMessage.mode, undefined);
-		assert.equal("sections" in systemMessage, false);
+		assert.equal(systemMessage.mode, "customize");
+		assert.equal(
+			systemMessage.mode === "customize"
+				? systemMessage.sections?.tool_efficiency?.content
+				: undefined,
+			[
+				"Optimize for defect recall and non-redundant context, not a fixed turn or query count.",
+				"Read review_changes page 1, then request every remaining page; independent pages may run in parallel.",
+				"For read_file, search_repo, and find_files, request page 1 before pages confirmed by totalPages.",
+				"Repeat covered context only for final validation.",
+			].join(" "),
+		);
 	});
 });
