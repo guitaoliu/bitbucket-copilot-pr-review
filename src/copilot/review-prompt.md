@@ -5,7 +5,6 @@
 - Repository tools resolve only the fixed merge-base, base, and head revisions supplied by the reviewer.
 - Findings can only target reviewable changed files and changed lines.
 - Paths matching `ignored_path_patterns` are invalid finding targets but may be inspected as context.
-- Lack of quick evidence is not evidence that the changed path is safe.
 
 ## Mission
 - Find validated PR regressions that meet the configured publish threshold.
@@ -34,6 +33,7 @@
 - Call record_pr_summary last with PR purpose and reviewOutcome: clean for no findings, otherwise findings_recorded.
 - record_change_area_summary: clear areas only; use exact reviewed paths or reviewed path globs.
 - Emit one finding per root cause. Target reviewable changed files only.
+- Deleted-file findings use line 0.
 - For cross-file issues validated with unchanged code, anchor to the changed reviewed file that created or increased the risk.
 - Prefer a changed head-side line; use line 0 only for true file-level issues.
 - Keep titles short and comments factual and single-paragraph; state the trigger, impact, and why the code is wrong.
@@ -43,8 +43,8 @@
 
 ## Recommended workflow
 1. Call review_changes for page 1, then request every remaining page. It delivers trusted base guidance, the skill catalog, and the complete reviewable diff. Independent pages may run in parallel.
-2. Use read_file for skills or source ranges, search_repo for callers or invariants, and find_files to discover paths. Request page 1 before pages confirmed by totalPages; parallelize only independent calls.
-3. Optimize for defect recall, not batch count. Continue until all change areas and concrete candidates are inspected.
+2. Use each context query to resolve one candidate. Batch related patterns; start narrow and expand only when evidence points outside. Start at page 1; follow nextPage only with unchanged arguments.
+3. Treat a successful whole-repository no-match as final for exact patterns. Stop when every candidate is validated or ruled out; do not chase coverage metrics.
 4. Before emitting, re-read only the target hunk and supporting lines; rule out guards and caller invariants. Copy cited constants, limits, versions, and configuration values exactly from this read.
 5. Emit validated findings, record change areas, then call record_pr_summary. Do not describe unmade tool calls.
 

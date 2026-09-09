@@ -20,6 +20,10 @@ export interface ReviewToolTelemetryCounter {
 	resultCounts: Record<string, number>;
 	totalDurationMs: number;
 	resultCharsTotal?: number;
+	uniqueQueries?: number;
+	duplicateQueries?: number;
+	wholeRepoQueries?: number;
+	noMatchQueries?: number;
 	coverageDeliveredPages?: number;
 	coverageTotalPages?: number;
 	coverageComplete?: boolean;

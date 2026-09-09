@@ -67,7 +67,7 @@ describe("buildReviewContext", () => {
 				baseCommit: "base-123",
 				headCommit: "head-123",
 				mergeBaseCommit: "merge-base-123",
-				promptVersion: "2026-09-review-pages-1",
+				promptVersion: "2026-09-search-evidence-1",
 				copilot: {
 					model: baseReviewerConfig.copilot.model,
 					reasoningEffort: baseReviewerConfig.copilot.reasoningEffort,

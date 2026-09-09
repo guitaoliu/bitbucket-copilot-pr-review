@@ -655,6 +655,10 @@ function applyInspectionResultTelemetry(
 		}
 		reviewCounter.coverageComplete = coverage.complete;
 	}
+	const searchCounter = toolTelemetry.byTool.search_repo;
+	if (searchCounter && inspectionState.searchRepoMetrics) {
+		Object.assign(searchCounter, inspectionState.searchRepoMetrics);
+	}
 }
 
 function buildPreToolLogMessage(input: PreToolUseInput): string {
@@ -836,6 +840,27 @@ function assertSuccessfulReviewInspection(reviewBundle: ReviewBundle): void {
 	}
 }
 
+function assertSuccessfulContextInspection(
+	toolTelemetry: ReviewToolTelemetry,
+): void {
+	const failedTools = ["read_file", "search_repo", "find_files"].filter(
+		(toolName) => {
+			const resultCounts = toolTelemetry.byTool[toolName]?.resultCounts;
+			return (
+				resultCounts !== undefined &&
+				Object.entries(resultCounts).some(
+					([resultType, count]) => resultType !== "success" && count > 0,
+				)
+			);
+		},
+	);
+	if (failedTools.length > 0) {
+		throw new Error(
+			`Copilot review stopped because repository context tools failed: ${failedTools.join(", ")}.`,
+		);
+	}
+}
+
 export async function runCopilotReview(
 	config: ReviewerConfig,
 	context: ReviewContext,
@@ -998,6 +1023,7 @@ export async function runCopilotReview(
 			inspectionState,
 			reviewBundle,
 		);
+		assertSuccessfulContextInspection(toolTelemetry);
 		const reviewSummary = finalizeReviewSummary(context, summaryDrafts);
 		const assistantMessage = response?.data.content;
 		toolTelemetry.sessionDurationMs = Date.now() - reviewStartedAt;

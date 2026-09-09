@@ -9,7 +9,7 @@ import type {
 	ReviewSummaryDrafts,
 } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
-import { ReviewBundle } from "./review-bundle.ts";
+import { ReviewBundle, selectPage } from "./review-bundle.ts";
 import {
 	createReviewToolContext,
 	type ReviewInspectionState,
@@ -306,12 +306,16 @@ describe("Copilot tools", () => {
 		const contextLines: number[] = [];
 		const requestedPatterns: string[][] = [];
 		const requestedPaths: string[][] = [];
+		const warnings: unknown[][] = [];
+		const inspectionState: ReviewInspectionState = {};
 		const logger: Logger = {
 			debug() {},
 			info(message, ...details) {
 				infoEntries.push({ message, details });
 			},
-			warn() {},
+			warn(...details) {
+				warnings.push(details);
+			},
 			error() {},
 			trace() {},
 			json() {},
@@ -327,7 +331,9 @@ describe("Copilot tools", () => {
 				requestedPatterns.push([...patterns]);
 				requestedPaths.push([...paths]);
 				contextLines.push(requestedContextLines);
-				return "match\n".repeat(30_000);
+				return patterns.includes("missing-pattern")
+					? ""
+					: "head:src/example.ts:10:match\n".repeat(3_000);
 			},
 		});
 		const tool = createSearchRepoTool(
@@ -336,7 +342,7 @@ describe("Copilot tools", () => {
 				git,
 				[],
 				createSummaryDrafts(),
-				{},
+				inspectionState,
 				logger,
 			),
 		);
@@ -344,6 +350,16 @@ describe("Copilot tools", () => {
 			page: number;
 			totalPages: number;
 			content: string;
+			nextPage?: number;
+			outOfRange?: true;
+			requestedPage?: number;
+			paginationReset?: true;
+			searchedRevision: string;
+			searchScope: string;
+			patternType: string;
+			patternCount: number;
+			matchingLineCount: number;
+			matchedFileCount: number;
 		};
 		const handler = getHandler<Record<string, unknown>, PageResult>(
 			tool as unknown as Tool<Record<string, unknown>>,
@@ -360,7 +376,26 @@ describe("Copilot tools", () => {
 		);
 
 		assert.ok(first.totalPages > 1);
+		assert.equal(first.nextPage, 2);
 		assert.ok(Buffer.byteLength(first.content) <= 16_000);
+		assert.deepEqual(
+			{
+				searchedRevision: first.searchedRevision,
+				searchScope: first.searchScope,
+				patternType: first.patternType,
+				patternCount: first.patternCount,
+				matchingLineCount: first.matchingLineCount,
+				matchedFileCount: first.matchedFileCount,
+			},
+			{
+				searchedRevision: "head",
+				searchScope: "entire repository",
+				patternType: "literal",
+				patternCount: 2,
+				matchingLineCount: 3_000,
+				matchedFileCount: 1,
+			},
+		);
 		const second = await handler(
 			{
 				revision: "head",
@@ -371,11 +406,68 @@ describe("Copilot tools", () => {
 			},
 			toolInvocation("search_repo"),
 		);
-		assert.equal(second.page, 2);
-		assert.deepEqual(contextLines, [0, 12]);
-		assert.deepEqual(requestedPatterns, [patterns, patterns]);
-		assert.deepEqual(requestedPaths, [[], ["src/**"]]);
+		assert.equal(second.page, 1);
+		assert.equal(second.requestedPage, 2);
+		assert.equal(second.paginationReset, true);
+		const continued = await handler(
+			{
+				revision: "head",
+				patterns,
+				paths: ["src/**"],
+				contextLines: 99,
+				page: 2,
+			},
+			toolInvocation("search_repo"),
+		);
+		assert.equal(continued.page, 2);
+		const duplicate = await handler(
+			{
+				revision: "head",
+				patterns,
+				paths: ["src/**"],
+				contextLines: 99,
+				page: 2,
+			},
+			toolInvocation("search_repo"),
+		);
+		assert.equal(duplicate.page, 2);
+		assert.deepEqual(contextLines, [0, 12, 12, 12]);
+		assert.deepEqual(requestedPatterns, [
+			patterns,
+			patterns,
+			patterns,
+			patterns,
+		]);
+		assert.deepEqual(requestedPaths, [[], ["src/**"], ["src/**"], ["src/**"]]);
 		assert.match(JSON.stringify(infoEntries), /proprietary-pattern/);
+		assert.match(JSON.stringify(warnings), /pagination/);
+		const noMatches = await handler(
+			{
+				revision: "head",
+				patterns: ["missing-pattern"],
+				paths: [],
+			},
+			toolInvocation("search_repo"),
+		);
+		assert.equal(noMatches.matchingLineCount, 0);
+		assert.equal(noMatches.matchedFileCount, 0);
+		assert.match(
+			noMatches.content,
+			/No matches at head across entire repository for 1 literal pattern/,
+		);
+		assert.deepEqual(inspectionState.searchRepoMetrics, {
+			uniqueQueries: 3,
+			duplicateQueries: 1,
+			wholeRepoQueries: 2,
+			noMatchQueries: 1,
+		});
+
+		assert.deepEqual(selectPage("one page", 2), {
+			page: 2,
+			totalPages: 1,
+			content: "",
+			outOfRange: true,
+		});
 	});
 
 	it("rejects read_file paths that escape the repository", async () => {
@@ -682,6 +774,50 @@ describe("Copilot tools", () => {
 
 		assert.equal(result, "Recorded finding 1 for src/service.ts:file.");
 		assert.equal(patchLoads, 0);
+	});
+
+	it("records file-level findings for deleted files", async () => {
+		const drafts: FindingDraft[] = [];
+		const deletedContext: ReviewContext = {
+			...reviewContext,
+			reviewableFiles: [
+				{
+					path: "src/removed.ts",
+					status: "deleted",
+					additions: 0,
+					deletions: 10,
+					isBinary: false,
+				},
+			],
+		};
+		const handler = getHandler<FindingDraft, string>(
+			createEmitFindingTool(
+				createReviewToolContext(
+					deletedContext,
+					createGitStub(),
+					drafts,
+					createSummaryDrafts(),
+				),
+			),
+		);
+
+		assert.equal(
+			await handler(
+				{
+					path: "src/removed.ts",
+					line: 0,
+					severity: "HIGH",
+					type: "BUG",
+					confidence: "high",
+					title: "Required implementation removed",
+					details:
+						"The deletion leaves a required caller without an implementation.",
+				},
+				toolInvocation("emit_finding"),
+			),
+			"Recorded finding 1 for src/removed.ts:file.",
+		);
+		assert.equal(drafts[0]?.path, "src/removed.ts");
 	});
 
 	it("rejects copied-file findings addressed by the source path", async () => {

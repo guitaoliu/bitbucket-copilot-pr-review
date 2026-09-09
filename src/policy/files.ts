@@ -44,10 +44,6 @@ function shouldReviewFile(
 	file: ChangedFile,
 	ignorePaths: string[] = [],
 ): { include: boolean; reason?: string } {
-	if (file.status === "deleted") {
-		return { include: false, reason: "deleted file" };
-	}
-
 	if (file.isBinary) {
 		return { include: false, reason: "binary diff" };
 	}

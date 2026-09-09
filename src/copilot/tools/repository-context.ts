@@ -1,7 +1,7 @@
 import { defineTool } from "@github/copilot-sdk";
 import { z } from "zod";
 
-import { selectPage } from "../review-bundle.ts";
+import { type PagedContent, selectPage } from "../review-bundle.ts";
 import { toRejectedResult } from "./common.ts";
 import { type ReviewToolContext, recordInspectionResult } from "./context.ts";
 
@@ -81,6 +81,17 @@ function recordResult(
 	toolName: "read_file" | "search_repo" | "find_files",
 	result: unknown,
 ): void {
+	if (result && typeof result === "object") {
+		const page = result as Partial<PagedContent>;
+		if (page.paginationReset || page.outOfRange) {
+			toolContext.logger?.warn("Recovered invalid context pagination", {
+				toolName,
+				requestedPage: page.requestedPage ?? page.page,
+				returnedPage: page.outOfRange ? undefined : page.page,
+				totalPages: page.totalPages,
+			});
+		}
+	}
 	recordInspectionResult(
 		toolContext.inspectionState,
 		toolName,
@@ -88,7 +99,54 @@ function recordResult(
 	);
 }
 
+function selectQueryPage(
+	content: string,
+	requestedPage: number,
+	queryKey: string,
+	deliveredPagesByQuery: Map<string, Set<number>>,
+	maxBytes?: number,
+): PagedContent {
+	const deliveredPages =
+		deliveredPagesByQuery.get(queryKey) ?? new Set<number>();
+	const requested = selectPage(content, requestedPage, maxBytes);
+	const firstMissingPage = Array.from(
+		{ length: Math.min(requestedPage - 1, requested.totalPages) },
+		(_value, index) => index + 1,
+	).find((page) => !deliveredPages.has(page));
+	const result =
+		firstMissingPage === undefined
+			? requested
+			: {
+					...selectPage(content, firstMissingPage, maxBytes),
+					requestedPage,
+					paginationReset: true as const,
+				};
+	if (!result.outOfRange) {
+		deliveredPages.add(result.page);
+		deliveredPagesByQuery.set(queryKey, deliveredPages);
+	}
+	return result;
+}
+
+function summarizeSearchMatches(content: string): {
+	matchingLineCount: number;
+	matchedFileCount: number;
+} {
+	const matchedFiles = new Set<string>();
+	let matchingLineCount = 0;
+	for (const line of content.split("\n")) {
+		const match = line.match(/^[^:]+:(.+):\d+:/);
+		if (!match?.[1]) {
+			continue;
+		}
+		matchingLineCount += 1;
+		matchedFiles.add(match[1]);
+	}
+	return { matchingLineCount, matchedFileCount: matchedFiles.size };
+}
+
 export function createReadFileTool(toolContext: ReviewToolContext) {
+	const deliveredPagesByQuery = new Map<string, Set<number>>();
 	const schema = z.object({
 		revision: revisionSchema,
 		path: pathSchema,
@@ -109,11 +167,13 @@ export function createReadFileTool(toolContext: ReviewToolContext) {
 				resolveRevision(parsed.data.revision, toolContext),
 				parsed.data.path,
 			);
-			const page = selectPage(
+			const page = selectQueryPage(
 				result.status === "ok"
 					? formatRanges(result.content, parsed.data.ranges)
 					: `[${result.status}]`,
 				parsed.data.page,
+				JSON.stringify({ ...parsed.data, page: undefined }),
+				deliveredPagesByQuery,
 			);
 			const output = { ...page, path: parsed.data.path };
 			recordResult(toolContext, "read_file", output);
@@ -123,6 +183,9 @@ export function createReadFileTool(toolContext: ReviewToolContext) {
 }
 
 export function createSearchRepoTool(toolContext: ReviewToolContext) {
+	const deliveredPagesByQuery = new Map<string, Set<number>>();
+	const uniqueQueryKeys = new Set<string>();
+	const noMatchQueryKeys = new Set<string>();
 	const schema = z.object({
 		revision: revisionSchema,
 		patterns: z
@@ -141,7 +204,7 @@ export function createSearchRepoTool(toolContext: ReviewToolContext) {
 	});
 	return defineTool("search_repo", {
 		description:
-			"Search repository text at a fixed review revision for 1 to 8 patterns. Returns matching lines with up to 12 lines of surrounding context. Start with page 1 and request later pages only when totalPages confirms they exist; use read_file for larger ranges.",
+			"Search repository text at a fixed review revision for 1 to 8 patterns. Returns matching lines with up to 12 lines of surrounding context. Start with page 1 and continue only with nextPage from that exact query; use read_file for larger ranges.",
 		parameters: schema,
 		handler: async (args) => {
 			const rawArgs =
@@ -180,11 +243,49 @@ export function createSearchRepoTool(toolContext: ReviewToolContext) {
 				parsed.data.paths,
 				parsed.data.contextLines,
 			);
-			const output = selectPage(
-				content || "No matches.",
-				parsed.data.page,
-				SEARCH_PAGE_CONTENT_BYTES,
-			);
+			const queryKey = JSON.stringify({ ...parsed.data, page: undefined });
+			toolContext.inspectionState.searchRepoMetrics ??= {
+				uniqueQueries: 0,
+				duplicateQueries: 0,
+				wholeRepoQueries: 0,
+				noMatchQueries: 0,
+			};
+			const metrics = toolContext.inspectionState.searchRepoMetrics;
+			if (deliveredPagesByQuery.get(queryKey)?.has(parsed.data.page)) {
+				metrics.duplicateQueries += 1;
+			}
+			if (!uniqueQueryKeys.has(queryKey)) {
+				uniqueQueryKeys.add(queryKey);
+				metrics.uniqueQueries += 1;
+				if (parsed.data.paths.length === 0) {
+					metrics.wholeRepoQueries += 1;
+				}
+			}
+			if (!content && !noMatchQueryKeys.has(queryKey)) {
+				noMatchQueryKeys.add(queryKey);
+				metrics.noMatchQueries += 1;
+			}
+			const scope =
+				parsed.data.paths.length === 0
+					? "entire repository"
+					: `${parsed.data.paths.length} pathspec${parsed.data.paths.length === 1 ? "" : "s"}`;
+			const matchSummary = summarizeSearchMatches(content);
+			const patternLabel = `${parsed.data.patterns.length} ${parsed.data.patternType} pattern${parsed.data.patterns.length === 1 ? "" : "s"}`;
+			const output = {
+				...selectQueryPage(
+					content ||
+						`No matches at ${parsed.data.revision} across ${scope} for ${patternLabel}.`,
+					parsed.data.page,
+					queryKey,
+					deliveredPagesByQuery,
+					SEARCH_PAGE_CONTENT_BYTES,
+				),
+				searchedRevision: parsed.data.revision,
+				searchScope: scope,
+				patternType: parsed.data.patternType,
+				patternCount: parsed.data.patterns.length,
+				...matchSummary,
+			};
 			recordResult(toolContext, "search_repo", output);
 			return output;
 		},
@@ -192,6 +293,7 @@ export function createSearchRepoTool(toolContext: ReviewToolContext) {
 }
 
 export function createFindFilesTool(toolContext: ReviewToolContext) {
+	const deliveredPagesByQuery = new Map<string, Set<number>>();
 	const schema = z.object({
 		revision: revisionSchema,
 		paths: pathsSchema,
@@ -212,9 +314,11 @@ export function createFindFilesTool(toolContext: ReviewToolContext) {
 				resolveRevision(parsed.data.revision, toolContext),
 				parsed.data.paths,
 			);
-			const output = selectPage(
+			const output = selectQueryPage(
 				content || "No matching files.",
 				parsed.data.page,
+				JSON.stringify({ ...parsed.data, page: undefined }),
+				deliveredPagesByQuery,
 			);
 			recordResult(toolContext, "find_files", output);
 			return output;

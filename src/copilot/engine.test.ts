@@ -153,6 +153,7 @@ function createGitStub(): GitRepository {
 			"diff --git a/src/example.ts b/src/example.ts\n+const changed = true;",
 		listFilesAtCommit: async () => "",
 		readTextFileAtCommit: async () => ({ status: "not_found" as const }),
+		searchTextAtCommit: async () => "",
 	} as unknown as GitRepository;
 }
 
@@ -244,7 +245,32 @@ describe("runCopilotReview", () => {
 			},
 			async sendAndWait() {
 				assert.ok(createdSessionConfig);
-				await recordCleanReview(createdSessionConfig);
+				await recordSuccessfulInspection(createdSessionConfig);
+				const searchArgs = {
+					revision: "head",
+					patterns: ["missing"],
+					paths: [],
+				};
+				await createdSessionConfig.hooks?.onPreToolUse?.(
+					{ toolName: "search_repo", toolArgs: searchArgs } as never,
+					{ sessionId: "session-1" } as never,
+				);
+				const searchResult = await invokeSessionTool(
+					createdSessionConfig,
+					"search_repo",
+					searchArgs,
+				);
+				await createdSessionConfig.hooks?.onPostToolUse?.(
+					{
+						toolName: "search_repo",
+						toolArgs: searchArgs,
+						toolResult: createSdkToolResult(
+							searchResult as Record<string, unknown>,
+						),
+					} as never,
+					{ sessionId: "session-1" } as never,
+				);
+				await recordCleanSummary(createdSessionConfig);
 				return { data: { content: "Looks good." } };
 			},
 			async disconnect() {},
@@ -306,6 +332,23 @@ describe("runCopilotReview", () => {
 		assert.equal(
 			outcome.toolTelemetry?.byTool.review_changes?.coverageDeliveredPages,
 			1,
+		);
+		assert.deepEqual(
+			{
+				uniqueQueries: outcome.toolTelemetry?.byTool.search_repo?.uniqueQueries,
+				duplicateQueries:
+					outcome.toolTelemetry?.byTool.search_repo?.duplicateQueries,
+				wholeRepoQueries:
+					outcome.toolTelemetry?.byTool.search_repo?.wholeRepoQueries,
+				noMatchQueries:
+					outcome.toolTelemetry?.byTool.search_repo?.noMatchQueries,
+			},
+			{
+				uniqueQueries: 1,
+				duplicateQueries: 0,
+				wholeRepoQueries: 1,
+				noMatchQueries: 1,
+			},
 		);
 		assert.ok(
 			logSpy.infoEntries.some(
@@ -771,81 +814,69 @@ describe("runCopilotReview", () => {
 		);
 	});
 
-	it("reconciles search_repo schema validation failures into telemetry", async () => {
-		const outcome = await runCopilotReview(
-			config,
-			createReviewContext(),
-			createGitStub(),
-			createLoggerSpy().logger,
-			{
-				createCopilotClient() {
-					return {
-						async start() {},
-						async createSession(configArg: SessionConfig) {
-							let eventHandler: SessionEventHandler | undefined;
-							return {
-								on(handler: SessionEventHandler) {
-									eventHandler = handler;
-									return () => {};
-								},
-								async sendAndWait() {
-									const invalidArgs = { page: 0 };
-									await configArg.hooks?.onPreToolUse?.(
-										{
-											toolName: "search_repo",
-											toolArgs: invalidArgs,
-										} as never,
-										{ sessionId: "session-1" } as never,
-									);
-									eventHandler?.({
-										id: "query-start",
-										timestamp: "2026-09-02T00:00:00.000Z",
-										parentId: null,
-										type: "tool.execution_start",
-										data: {
-											toolCallId: "query-1",
-											toolName: "search_repo",
-											arguments: invalidArgs,
-										},
-									} as never);
-									eventHandler?.({
-										id: "query-complete",
-										timestamp: "2026-09-02T00:00:00.100Z",
-										parentId: "query-start",
-										type: "tool.execution_complete",
-										data: {
-											toolCallId: "query-1",
-											success: false,
-											error: { message: "Invalid repository search" },
-										},
-									} as never);
-									await recordCleanReview(configArg);
-									return { data: { content: "Looks good." } };
-								},
-								async disconnect() {},
-							} as never;
-						},
-						async stop() {
-							return [];
-						},
-					};
+	it("fails closed after a repository context tool failure", async () => {
+		await assert.rejects(
+			runCopilotReview(
+				config,
+				createReviewContext(),
+				createGitStub(),
+				createLoggerSpy().logger,
+				{
+					createCopilotClient() {
+						return {
+							async start() {},
+							async createSession(configArg: SessionConfig) {
+								let eventHandler: SessionEventHandler | undefined;
+								return {
+									on(handler: SessionEventHandler) {
+										eventHandler = handler;
+										return () => {};
+									},
+									async sendAndWait() {
+										const invalidArgs = { page: 0 };
+										await configArg.hooks?.onPreToolUse?.(
+											{
+												toolName: "search_repo",
+												toolArgs: invalidArgs,
+											} as never,
+											{ sessionId: "session-1" } as never,
+										);
+										eventHandler?.({
+											id: "query-start",
+											timestamp: "2026-09-02T00:00:00.000Z",
+											parentId: null,
+											type: "tool.execution_start",
+											data: {
+												toolCallId: "query-1",
+												toolName: "search_repo",
+												arguments: invalidArgs,
+											},
+										} as never);
+										eventHandler?.({
+											id: "query-complete",
+											timestamp: "2026-09-02T00:00:00.100Z",
+											parentId: "query-start",
+											type: "tool.execution_complete",
+											data: {
+												toolCallId: "query-1",
+												success: false,
+												error: { message: "Invalid repository search" },
+											},
+										} as never);
+										await recordCleanReview(configArg);
+										return { data: { content: "Looks good." } };
+									},
+									async disconnect() {},
+								} as never;
+							},
+							async stop() {
+								return [];
+							},
+						};
+					},
 				},
-			},
-		);
-
-		assert.equal(outcome.toolTelemetry?.errorCount, 1);
-		assert.deepEqual(outcome.toolTelemetry?.byTool.search_repo, {
-			requested: 1,
-			allowed: 1,
-			denied: 0,
-			completed: 1,
-			resultCounts: { failure: 1 },
-			totalDurationMs:
-				outcome.toolTelemetry.byTool.search_repo?.totalDurationMs,
-		});
-		assert.equal(
-			outcome.toolTelemetry?.byTool.review_changes?.resultCounts.success,
-			1,
+			),
+			/repository context tools failed: search_repo/,
 		);
 	});
 

@@ -10,6 +10,10 @@ export interface PagedContent {
 	page: number;
 	totalPages: number;
 	content: string;
+	nextPage?: number;
+	outOfRange?: true;
+	requestedPage?: number;
+	paginationReset?: true;
 }
 
 export interface ReviewCoverage {
@@ -66,12 +70,18 @@ export function selectPage(
 ): PagedContent {
 	const pages = paginateContent(content, maxBytes);
 	if (page > pages.length) {
-		throw new Error(`Page ${page} exceeds total pages ${pages.length}.`);
+		return {
+			page,
+			totalPages: pages.length,
+			content: "",
+			outOfRange: true,
+		};
 	}
 	return {
 		page,
 		totalPages: pages.length,
 		content: pages[page - 1] ?? "",
+		...(page < pages.length ? { nextPage: page + 1 } : {}),
 	};
 }
 

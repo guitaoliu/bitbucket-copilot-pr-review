@@ -28,7 +28,7 @@ const reviewedFile: ChangedFile = {
 };
 
 describe("filterChangedFiles", () => {
-	it("skips generated and deleted files", () => {
+	it("skips generated files but reviews deletions", () => {
 		const result = filterChangedFiles([
 			reviewedFile,
 			{
@@ -47,7 +47,7 @@ describe("filterChangedFiles", () => {
 
 		assert.deepEqual(
 			result.map((file) => file.path),
-			["src/service.ts"],
+			["src/service.ts", "src/removed.ts"],
 		);
 	});
 

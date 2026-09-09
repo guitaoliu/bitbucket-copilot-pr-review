@@ -32,6 +32,12 @@ export interface ReviewInspectionState {
 			number
 		>
 	>;
+	searchRepoMetrics?: {
+		uniqueQueries: number;
+		duplicateQueries: number;
+		wholeRepoQueries: number;
+		noMatchQueries: number;
+	};
 }
 
 export function createReviewToolContext(

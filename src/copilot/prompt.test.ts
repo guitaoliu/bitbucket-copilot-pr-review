@@ -288,9 +288,10 @@ describe("buildSystemMessage", () => {
 		);
 		assert.match(content, /Do not stop early; list all qualifying findings/);
 		assert.match(content, /complete reviewable diff/);
-		assert.match(content, /skills or source ranges/);
+		assert.match(content, /Batch related patterns/);
 		assert.match(content, /Call review_changes/);
-		assert.match(content, /Optimize for defect recall, not batch count/);
+		assert.match(content, /every candidate is validated or ruled out/);
+		assert.match(content, /successful whole-repository no-match/);
 		assert.match(
 			content,
 			/Copy cited constants, limits, versions, and configuration values exactly/,
@@ -304,10 +305,10 @@ describe("buildSystemMessage", () => {
 				? systemMessage.sections?.tool_efficiency?.content
 				: undefined,
 			[
-				"Optimize for defect recall and non-redundant context, not a fixed turn or query count.",
 				"Read review_changes page 1, then request every remaining page; independent pages may run in parallel.",
-				"For read_file, search_repo, and find_files, request page 1 before pages confirmed by totalPages.",
-				"Repeat covered context only for final validation.",
+				"Use each context query to resolve a concrete defect candidate; batch related patterns and start with the narrowest sufficient scope.",
+				"Treat a successful whole-repository no-match as final for those exact patterns; retry variants only when code evidence shows the original query could not match.",
+				"Stop when every candidate is validated or ruled out; do not search to satisfy file, area, turn, or query-count coverage.",
 			].join(" "),
 		);
 	});
