@@ -305,6 +305,7 @@ describe("Copilot tools", () => {
 		const infoEntries: Array<{ message: string; details: unknown[] }> = [];
 		const contextLines: number[] = [];
 		const requestedPatterns: string[][] = [];
+		const requestedPaths: string[][] = [];
 		const logger: Logger = {
 			debug() {},
 			info(message, ...details) {
@@ -320,10 +321,11 @@ describe("Copilot tools", () => {
 				_commit,
 				patterns,
 				_patternType,
-				_paths,
+				paths,
 				requestedContextLines,
 			) => {
 				requestedPatterns.push([...patterns]);
+				requestedPaths.push([...paths]);
 				contextLines.push(requestedContextLines);
 				return "match\n".repeat(30_000);
 			},
@@ -352,7 +354,7 @@ describe("Copilot tools", () => {
 			{
 				revision: "head",
 				patterns,
-				paths: ["src/**"],
+				paths: [""],
 			},
 			toolInvocation("search_repo"),
 		);
@@ -372,6 +374,7 @@ describe("Copilot tools", () => {
 		assert.equal(second.page, 2);
 		assert.deepEqual(contextLines, [0, 12]);
 		assert.deepEqual(requestedPatterns, [patterns, patterns]);
+		assert.deepEqual(requestedPaths, [[], ["src/**"]]);
 		assert.match(JSON.stringify(infoEntries), /proprietary-pattern/);
 	});
 
@@ -817,6 +820,7 @@ describe("Copilot tools", () => {
 					maximum?: number;
 					minItems?: number;
 					maxItems?: number;
+					description?: string;
 					items?: { minLength?: number; maxLength?: number };
 				}
 			>;
@@ -828,6 +832,10 @@ describe("Copilot tools", () => {
 		assert.equal(searchRepoSchema.properties?.patterns?.maxItems, 8);
 		assert.equal(searchRepoSchema.properties?.patterns?.items?.minLength, 1);
 		assert.equal(searchRepoSchema.properties?.patterns?.items?.maxLength, 500);
+		assert.match(
+			searchRepoSchema.properties?.paths?.description ?? "",
+			/empty array for the whole repository/,
+		);
 		assert.match(schemas[3] ?? "", /"paths"/);
 		assert.doesNotMatch(schemas.join(""), /"cursor"/);
 

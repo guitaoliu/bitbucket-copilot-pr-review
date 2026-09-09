@@ -17,7 +17,13 @@ const pathSchema = z
 	.min(1)
 	.max(500)
 	.refine(isSafeRepoPath, "must be a relative repository path");
-const pathsSchema = z.array(pathSchema).max(MAX_PATHS).default([]);
+const pathsSchema = z
+	.array(pathSchema)
+	.max(MAX_PATHS)
+	.default([])
+	.describe(
+		"Repository paths to search, or an empty array for the whole repository.",
+	);
 const rangeSchema = z
 	.object({
 		start: z.number().int().min(1),
@@ -138,13 +144,24 @@ export function createSearchRepoTool(toolContext: ReviewToolContext) {
 			"Search repository text at a fixed review revision for 1 to 8 patterns. Returns matching lines with up to 12 lines of surrounding context. Start with page 1 and request later pages only when totalPages confirms they exist; use read_file for larger ranges.",
 		parameters: schema,
 		handler: async (args) => {
-			const requestedContextLines = (args as { contextLines?: unknown } | null)
-				?.contextLines;
+			const rawArgs =
+				typeof args === "object" && args !== null
+					? (args as Record<string, unknown>)
+					: undefined;
+			const requestedContextLines = rawArgs?.contextLines;
 			const parsed = schema.safeParse(
-				typeof requestedContextLines === "number" &&
-					Number.isInteger(requestedContextLines) &&
-					requestedContextLines > MAX_SEARCH_CONTEXT_LINES
-					? { ...args, contextLines: MAX_SEARCH_CONTEXT_LINES }
+				rawArgs
+					? {
+							...rawArgs,
+							...(Array.isArray(rawArgs.paths)
+								? { paths: rawArgs.paths.filter((path) => path !== "") }
+								: {}),
+							...(typeof requestedContextLines === "number" &&
+							Number.isInteger(requestedContextLines) &&
+							requestedContextLines > MAX_SEARCH_CONTEXT_LINES
+								? { contextLines: MAX_SEARCH_CONTEXT_LINES }
+								: {}),
+						}
 					: args,
 			);
 			if (!parsed.success) {
