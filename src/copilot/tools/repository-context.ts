@@ -1,6 +1,7 @@
 import { defineTool } from "@github/copilot-sdk";
 import { z } from "zod";
 
+import { GitInvalidSearchPatternError } from "../../git/repo.ts";
 import { type PagedContent, selectPage } from "../review-bundle.ts";
 import { toRejectedResult } from "./common.ts";
 import { type ReviewToolContext, recordInspectionResult } from "./context.ts";
@@ -186,47 +187,48 @@ export function createSearchRepoTool(toolContext: ReviewToolContext) {
 	const deliveredPagesByQuery = new Map<string, Set<number>>();
 	const uniqueQueryKeys = new Set<string>();
 	const noMatchQueryKeys = new Set<string>();
-	const schema = z.object({
-		revision: revisionSchema,
-		patterns: z
-			.array(z.string().min(1).max(500))
-			.min(1)
-			.max(MAX_SEARCH_PATTERNS),
-		patternType: z.enum(["literal", "regex"]).default("literal"),
-		paths: pathsSchema,
-		contextLines: z
-			.number()
-			.int()
-			.min(0)
-			.max(MAX_SEARCH_CONTEXT_LINES)
-			.default(0),
-		page: pageSchema,
-	});
+	const schema = z.preprocess(
+		(args) => {
+			if (typeof args !== "object" || args === null) {
+				return args;
+			}
+			const rawArgs = args as Record<string, unknown>;
+			const requestedContextLines = rawArgs.contextLines;
+			return {
+				...rawArgs,
+				...(Array.isArray(rawArgs.paths)
+					? { paths: rawArgs.paths.filter((path) => path !== "") }
+					: {}),
+				...(typeof requestedContextLines === "number" &&
+				Number.isInteger(requestedContextLines) &&
+				requestedContextLines > MAX_SEARCH_CONTEXT_LINES
+					? { contextLines: MAX_SEARCH_CONTEXT_LINES }
+					: {}),
+			};
+		},
+		z.object({
+			revision: revisionSchema,
+			patterns: z
+				.array(z.string().min(1).max(500))
+				.min(1)
+				.max(MAX_SEARCH_PATTERNS),
+			patternType: z.enum(["literal", "regex"]).default("literal"),
+			paths: pathsSchema,
+			contextLines: z
+				.number()
+				.int()
+				.min(0)
+				.max(MAX_SEARCH_CONTEXT_LINES)
+				.default(0),
+			page: pageSchema,
+		}),
+	);
 	return defineTool("search_repo", {
 		description:
 			"Search repository text at a fixed review revision for 1 to 8 patterns. Returns matching lines with up to 12 lines of surrounding context. Start with page 1 and continue only with nextPage from that exact query; use read_file for larger ranges.",
 		parameters: schema,
 		handler: async (args) => {
-			const rawArgs =
-				typeof args === "object" && args !== null
-					? (args as Record<string, unknown>)
-					: undefined;
-			const requestedContextLines = rawArgs?.contextLines;
-			const parsed = schema.safeParse(
-				rawArgs
-					? {
-							...rawArgs,
-							...(Array.isArray(rawArgs.paths)
-								? { paths: rawArgs.paths.filter((path) => path !== "") }
-								: {}),
-							...(typeof requestedContextLines === "number" &&
-							Number.isInteger(requestedContextLines) &&
-							requestedContextLines > MAX_SEARCH_CONTEXT_LINES
-								? { contextLines: MAX_SEARCH_CONTEXT_LINES }
-								: {}),
-						}
-					: args,
-			);
+			const parsed = schema.safeParse(args);
 			if (!parsed.success) {
 				return toRejectedResult(
 					`Invalid repository search: ${parsed.error.message}`,
@@ -236,13 +238,23 @@ export function createSearchRepoTool(toolContext: ReviewToolContext) {
 				"Copilot repository search request",
 				parsed.data,
 			);
-			const content = await toolContext.git.searchTextAtCommit(
-				resolveRevision(parsed.data.revision, toolContext),
-				parsed.data.patterns,
-				parsed.data.patternType,
-				parsed.data.paths,
-				parsed.data.contextLines,
-			);
+			let content: string;
+			try {
+				content = await toolContext.git.searchTextAtCommit(
+					resolveRevision(parsed.data.revision, toolContext),
+					parsed.data.patterns,
+					parsed.data.patternType,
+					parsed.data.paths,
+					parsed.data.contextLines,
+				);
+			} catch (error) {
+				if (error instanceof GitInvalidSearchPatternError) {
+					return toRejectedResult(
+						"Invalid repository search regex. Use a valid extended regular expression or retry with patternType literal.",
+					);
+				}
+				throw error;
+			}
 			const queryKey = JSON.stringify({ ...parsed.data, page: undefined });
 			toolContext.inspectionState.searchRepoMetrics ??= {
 				uniqueQueries: 0,

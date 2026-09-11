@@ -34,6 +34,7 @@ import {
 	buildSystemMessage,
 } from "./prompt.ts";
 import { ReviewBundle } from "./review-bundle.ts";
+import { createReviewToolExecutionTracker } from "./tool-execution.ts";
 import type { ReviewInspectionState } from "./tools/context.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
 import { createSessionEventTracer } from "./trace.ts";
@@ -609,27 +610,29 @@ function getToolTelemetryCounter(
 	return created;
 }
 
-function reconcileFailedReviewToolCounts(
+function reconcileReviewToolResultCounts(
 	toolTelemetry: ReviewToolTelemetry,
-	failedToolCounts: Record<string, number>,
+	trackedResultCounts: Record<string, Record<string, number>>,
 ): void {
-	for (const [toolName, failedCount] of Object.entries(failedToolCounts)) {
+	for (const [toolName, resultCounts] of Object.entries(trackedResultCounts)) {
 		const counter = getToolTelemetryCounter(toolTelemetry, toolName);
-		const recordedFailureCount = Object.entries(counter.resultCounts).reduce(
-			(total, [resultType, count]) =>
-				resultType === "success" ? total : total + count,
-			0,
-		);
-		const missingFailureCount = Math.max(0, failedCount - recordedFailureCount);
-		if (missingFailureCount === 0) {
-			continue;
-		}
+		for (const [resultType, trackedCount] of Object.entries(resultCounts)) {
+			const missingCount = Math.max(
+				0,
+				trackedCount - (counter.resultCounts[resultType] ?? 0),
+			);
+			if (missingCount === 0) {
+				continue;
+			}
 
-		counter.completed += missingFailureCount;
-		counter.resultCounts.failure =
-			(counter.resultCounts.failure ?? 0) + missingFailureCount;
-		toolTelemetry.totalCompleted += missingFailureCount;
-		toolTelemetry.errorCount += missingFailureCount;
+			counter.completed += missingCount;
+			counter.resultCounts[resultType] =
+				(counter.resultCounts[resultType] ?? 0) + missingCount;
+			toolTelemetry.totalCompleted += missingCount;
+			if (resultType !== "success") {
+				toolTelemetry.errorCount += missingCount;
+			}
+		}
 	}
 }
 
@@ -840,27 +843,6 @@ function assertSuccessfulReviewInspection(reviewBundle: ReviewBundle): void {
 	}
 }
 
-function assertSuccessfulContextInspection(
-	toolTelemetry: ReviewToolTelemetry,
-): void {
-	const failedTools = ["read_file", "search_repo", "find_files"].filter(
-		(toolName) => {
-			const resultCounts = toolTelemetry.byTool[toolName]?.resultCounts;
-			return (
-				resultCounts !== undefined &&
-				Object.entries(resultCounts).some(
-					([resultType, count]) => resultType !== "success" && count > 0,
-				)
-			);
-		},
-	);
-	if (failedTools.length > 0) {
-		throw new Error(
-			`Copilot review stopped because repository context tools failed: ${failedTools.join(", ")}.`,
-		);
-	}
-}
-
 export async function runCopilotReview(
 	config: ReviewerConfig,
 	context: ReviewContext,
@@ -898,6 +880,7 @@ export async function runCopilotReview(
 	try {
 		const clientOptions = buildCopilotClientOptions(config, gitHubToken);
 		const sessionEventTracer = createSessionEventTracer(logger);
+		const toolExecutionTracker = createReviewToolExecutionTracker();
 		client =
 			dependencies.createCopilotClient?.(clientOptions) ??
 			new CopilotClient(clientOptions);
@@ -914,14 +897,16 @@ export async function runCopilotReview(
 			enableSessionStore: false,
 			memory: { enabled: false },
 			largeOutput: { enabled: false },
-			tools: createReviewTools(
-				context,
-				git,
-				drafts,
-				summaryDrafts,
-				inspectionState,
-				logger,
-				reviewBundle,
+			tools: toolExecutionTracker.trackTools(
+				createReviewTools(
+					context,
+					git,
+					drafts,
+					summaryDrafts,
+					inspectionState,
+					logger,
+					reviewBundle,
+				),
 			),
 			availableTools: buildReviewAvailableTools(),
 			onPermissionRequest: (request: PermissionRequest) => {
@@ -959,6 +944,7 @@ export async function runCopilotReview(
 			throw wrapCopilotSessionStageError(error, config, "session creation");
 		}
 		unsubscribeSessionEvents = session.on((event) => {
+			toolExecutionTracker.handleEvent(event);
 			sessionEventTracer.handleEvent(event);
 		});
 
@@ -1014,17 +1000,15 @@ export async function runCopilotReview(
 				config.review.minConfidence,
 			);
 		}
-		reconcileFailedReviewToolCounts(
+		reconcileReviewToolResultCounts(
 			toolTelemetry,
-			sessionEventTracer.getFailedReviewToolCounts(),
+			toolExecutionTracker.getResultCounts(),
 		);
 		applyInspectionResultTelemetry(
 			toolTelemetry,
 			inspectionState,
 			reviewBundle,
 		);
-		assertSuccessfulContextInspection(toolTelemetry);
-		const reviewSummary = finalizeReviewSummary(context, summaryDrafts);
 		const assistantMessage = response?.data.content;
 		toolTelemetry.sessionDurationMs = Date.now() - reviewStartedAt;
 		let copilotUsage: ReviewCopilotUsage | undefined;
@@ -1047,6 +1031,23 @@ export async function runCopilotReview(
 				logger.warn("Failed to read Copilot review usage", error);
 			}
 		}
+		const failedTools = toolExecutionTracker.getUnresolvedContextTools();
+		if (failedTools.length > 0) {
+			const reason = `Repository context inspection was incomplete because these tools had unrecovered failures: ${failedTools.join(", ")}.`;
+			logger.warn(reason);
+			const incompleteFindings: ReviewOutcome["findings"] = [];
+			return omitUndefined({
+				summary: reason,
+				findings: incompleteFindings,
+				incomplete: { reason, failedTools },
+				assistantMessage,
+				toolTelemetry,
+				copilotUsage,
+				stale: false,
+			}) satisfies ReviewOutcome;
+		}
+
+		const reviewSummary = finalizeReviewSummary(context, summaryDrafts);
 		assertReviewCompletion(summaryDrafts.reviewOutcome, findings.length);
 
 		return omitUndefined({

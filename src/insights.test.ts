@@ -420,6 +420,20 @@ describe("buildPullRequestComment", () => {
 		);
 	});
 
+	it("marks incomplete reviews as failed reports", () => {
+		const report = buildInsightReport(config, createContext(undefined), {
+			summary: "Repository context inspection was incomplete.",
+			findings: [],
+			incomplete: {
+				reason: "Repository context inspection was incomplete.",
+				failedTools: ["search_repo"],
+			},
+			stale: false,
+		});
+
+		assert.equal(report.result, "FAIL");
+	});
+
 	it("truncates low-priority sections to stay under the Bitbucket comment limit", () => {
 		const context = createContext(
 			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",

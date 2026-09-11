@@ -147,20 +147,29 @@ function createSdkToolResult(result: Record<string, unknown>): HookToolResult {
 	};
 }
 
-function createGitStub(): GitRepository {
+function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 	return {
 		diffPaths: async () =>
 			"diff --git a/src/example.ts b/src/example.ts\n+const changed = true;",
 		listFilesAtCommit: async () => "",
 		readTextFileAtCommit: async () => ({ status: "not_found" as const }),
 		searchTextAtCommit: async () => "",
+		...overrides,
 	} as unknown as GitRepository;
+}
+
+let toolInvocationCount = 0;
+
+function nextToolCallId(toolName: string): string {
+	toolInvocationCount += 1;
+	return `${toolName}-call-${toolInvocationCount}`;
 }
 
 async function invokeSessionTool(
 	configArg: SessionConfig,
 	toolName: string,
 	args: Record<string, unknown>,
+	toolCallId = nextToolCallId(toolName),
 ): Promise<unknown> {
 	const tool = configArg.tools?.find(
 		(candidate) => candidate.name === toolName,
@@ -178,7 +187,7 @@ async function invokeSessionTool(
 		) => Promise<unknown>
 	)(args, {
 		sessionId: "session-1",
-		toolCallId: `${toolName}-call`,
+		toolCallId,
 		toolName,
 		arguments: args,
 	});
@@ -814,70 +823,230 @@ describe("runCopilotReview", () => {
 		);
 	});
 
-	it("fails closed after a repository context tool failure", async () => {
-		await assert.rejects(
-			runCopilotReview(
-				config,
-				createReviewContext(),
-				createGitStub(),
-				createLoggerSpy().logger,
-				{
-					createCopilotClient() {
-						return {
-							async start() {},
-							async createSession(configArg: SessionConfig) {
-								let eventHandler: SessionEventHandler | undefined;
-								return {
-									on(handler: SessionEventHandler) {
-										eventHandler = handler;
-										return () => {};
-									},
-									async sendAndWait() {
-										const invalidArgs = { page: 0 };
-										await configArg.hooks?.onPreToolUse?.(
-											{
-												toolName: "search_repo",
-												toolArgs: invalidArgs,
-											} as never,
-											{ sessionId: "session-1" } as never,
-										);
-										eventHandler?.({
-											id: "query-start",
-											timestamp: "2026-09-02T00:00:00.000Z",
-											parentId: null,
-											type: "tool.execution_start",
-											data: {
-												toolCallId: "query-1",
-												toolName: "search_repo",
-												arguments: invalidArgs,
-											},
-										} as never);
-										eventHandler?.({
-											id: "query-complete",
-											timestamp: "2026-09-02T00:00:00.100Z",
-											parentId: "query-start",
-											type: "tool.execution_complete",
-											data: {
-												toolCallId: "query-1",
-												success: false,
-												error: { message: "Invalid repository search" },
-											},
-										} as never);
-										await recordCleanReview(configArg);
-										return { data: { content: "Looks good." } };
-									},
-									async disconnect() {},
-								} as never;
-							},
-							async stop() {
-								return [];
-							},
-						};
-					},
+	it("returns an incomplete review after an unrecovered context failure", async () => {
+		const outcome = await runCopilotReview(
+			config,
+			createReviewContext(),
+			createGitStub(),
+			createLoggerSpy().logger,
+			{
+				createCopilotClient() {
+					return {
+						async start() {},
+						async createSession(configArg: SessionConfig) {
+							let eventHandler: SessionEventHandler | undefined;
+							return {
+								on(handler: SessionEventHandler) {
+									eventHandler = handler;
+									return () => {};
+								},
+								async sendAndWait() {
+									const invalidArgs = { page: 0 };
+									await configArg.hooks?.onPreToolUse?.(
+										{
+											toolName: "search_repo",
+											toolArgs: invalidArgs,
+										} as never,
+										{ sessionId: "session-1" } as never,
+									);
+									eventHandler?.({
+										id: "query-start",
+										timestamp: "2026-09-02T00:00:00.000Z",
+										parentId: null,
+										type: "tool.execution_start",
+										data: {
+											toolCallId: "query-1",
+											toolName: "search_repo",
+											arguments: invalidArgs,
+										},
+									} as never);
+									eventHandler?.({
+										id: "query-complete",
+										timestamp: "2026-09-02T00:00:00.100Z",
+										parentId: "query-start",
+										type: "tool.execution_complete",
+										data: {
+											toolCallId: "query-1",
+											success: false,
+											error: { message: "Invalid repository search" },
+										},
+									} as never);
+									await recordCleanReview(configArg);
+									return { data: { content: "Looks good." } };
+								},
+								async disconnect() {},
+							} as never;
+						},
+						async stop() {
+							return [];
+						},
+					};
 				},
-			),
-			/repository context tools failed: search_repo/,
+			},
 		);
+
+		assert.deepEqual(outcome.incomplete, {
+			reason:
+				"Repository context inspection was incomplete because these tools had unrecovered failures: search_repo.",
+			failedTools: ["search_repo"],
+		});
+		assert.deepEqual(outcome.findings, []);
+		assert.equal(
+			outcome.toolTelemetry?.byTool.search_repo?.resultCounts.failure,
+			1,
+		);
+	});
+
+	it("does not treat a rejected context tool result as an execution failure", async () => {
+		const outcome = await runCopilotReview(
+			config,
+			createReviewContext(),
+			createGitStub(),
+			createLoggerSpy().logger,
+			{
+				createCopilotClient() {
+					return {
+						async start() {},
+						async createSession(configArg: SessionConfig) {
+							let eventHandler: SessionEventHandler | undefined;
+							return {
+								on(handler: SessionEventHandler) {
+									eventHandler = handler;
+									return () => {};
+								},
+								async sendAndWait() {
+									const invalidArgs = {
+										revision: "head",
+										patterns: ["value"],
+										page: 0,
+									};
+									eventHandler?.({
+										id: "query-start",
+										timestamp: "2026-09-02T00:00:00.000Z",
+										parentId: null,
+										type: "tool.execution_start",
+										data: {
+											toolCallId: "query-1",
+											toolName: "search_repo",
+											arguments: invalidArgs,
+										},
+									} as never);
+									const result = await invokeSessionTool(
+										configArg,
+										"search_repo",
+										invalidArgs,
+										"query-1",
+									);
+									assert.equal(
+										(result as HookToolResult).resultType,
+										"rejected",
+									);
+									assert.match(
+										(result as HookToolResult).textResultForLlm ?? "",
+										/Invalid repository search/,
+									);
+									eventHandler?.({
+										id: "query-complete",
+										timestamp: "2026-09-02T00:00:00.100Z",
+										parentId: "query-start",
+										type: "tool.execution_complete",
+										data: {
+											toolCallId: "query-1",
+											success: false,
+											error: { message: "Invalid repository search" },
+										},
+									} as never);
+									await recordCleanReview(configArg);
+									return { data: { content: "Looks good." } };
+								},
+								async disconnect() {},
+							} as never;
+						},
+						async stop() {
+							return [];
+						},
+					};
+				},
+			},
+		);
+
+		assert.equal(outcome.incomplete, undefined);
+		assert.equal(
+			outcome.toolTelemetry?.byTool.search_repo?.resultCounts.rejected,
+			1,
+		);
+	});
+
+	it("completes after a repository context tool recovers", async () => {
+		let searchCalls = 0;
+		const outcome = await runCopilotReview(
+			config,
+			createReviewContext(),
+			createGitStub({
+				searchTextAtCommit: async () => {
+					searchCalls += 1;
+					if (searchCalls === 1) {
+						throw new Error("temporary failure");
+					}
+					return "";
+				},
+			}),
+			createLoggerSpy().logger,
+			{
+				createCopilotClient() {
+					return {
+						async start() {},
+						async createSession(configArg: SessionConfig) {
+							return {
+								on() {
+									return () => {};
+								},
+								async sendAndWait() {
+									const failedArgs = {
+										revision: "head",
+										patterns: ["value"],
+										paths: [""],
+									};
+									await assert.rejects(
+										invokeSessionTool(
+											configArg,
+											"search_repo",
+											failedArgs,
+											"query-1",
+										),
+										/temporary failure/,
+									);
+									await invokeSessionTool(
+										configArg,
+										"search_repo",
+										{
+											...failedArgs,
+											patternType: "literal",
+											paths: [],
+											contextLines: 0,
+											page: 1,
+										},
+										"query-2",
+									);
+									await recordCleanReview(configArg);
+									return { data: { content: "Looks good." } };
+								},
+								async disconnect() {},
+							} as never;
+						},
+						async stop() {
+							return [];
+						},
+					};
+				},
+			},
+		);
+
+		assert.equal(outcome.incomplete, undefined);
+		assert.deepEqual(outcome.toolTelemetry?.byTool.search_repo?.resultCounts, {
+			failure: 1,
+			success: 1,
+		});
 	});
 
 	it("rejects shell permissions and approves registered tools", async () => {

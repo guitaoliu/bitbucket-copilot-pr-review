@@ -76,6 +76,27 @@ export async function publishReview(
 	artifacts: ReviewArtifacts,
 	logger: Logger,
 ): Promise<PublishResult> {
+	if (review.incomplete) {
+		logger.warn(
+			`Skipping Bitbucket publication because the review is incomplete: ${review.incomplete.reason}`,
+		);
+		return {
+			published: false,
+			publication: {
+				status: "failed",
+				attempted: false,
+				codeInsightsPublished: false,
+				findingCommentsUpdated: false,
+				pullRequestCommentUpdated: false,
+				error: {
+					stage: "review",
+					message: review.incomplete.reason,
+				},
+			},
+			review,
+		};
+	}
+
 	if (config.review.dryRun) {
 		logger.info("Dry run enabled, skipping Bitbucket Code Insights publish.");
 		return {

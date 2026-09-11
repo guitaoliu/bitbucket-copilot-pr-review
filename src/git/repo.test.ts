@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { Logger } from "../shared/logger.ts";
-import { GitRepository } from "./repo.ts";
+import { GitInvalidSearchPatternError, GitRepository } from "./repo.ts";
 
 const logger: Logger = {
 	debug() {},
@@ -173,7 +173,38 @@ describe("GitRepository.ensureCommitAvailable", () => {
 		]);
 	});
 
-	it("includes search scope in Git failures", async () => {
+	it("classifies invalid regex search patterns", async () => {
+		const repo = new GitRepository(
+			"/tmp/repo",
+			logger,
+			"origin",
+		) as unknown as TestableGitRepository;
+
+		for (const stderr of [
+			"fatal: -e option, '*foo': repetition-operator operand invalid",
+			"fatal: -e option, 'a{2,1}': invalid repetition count(s)",
+			"fatal: -e option, 'a{256}': maximum repetition exceeds 255",
+		]) {
+			repo.runGitDetailed = async () => ({ stdout: "", stderr, exitCode: 128 });
+
+			await assert.rejects(
+				repo.searchTextAtCommit(
+					"head-123",
+					["invalid"],
+					"regex",
+					["src/**"],
+					3,
+				),
+				(error: unknown) =>
+					error instanceof GitInvalidSearchPatternError &&
+					error.message.includes(
+						"Git search failed at head-123 using 1 regex patterns across 1 pathspecs",
+					),
+			);
+		}
+	});
+
+	it("keeps other search failures actionable", async () => {
 		const repo = new GitRepository(
 			"/tmp/repo",
 			logger,
@@ -181,13 +212,16 @@ describe("GitRepository.ensureCommitAvailable", () => {
 		) as unknown as TestableGitRepository;
 		repo.runGitDetailed = async () => ({
 			stdout: "",
-			stderr: "invalid regular expression",
-			exitCode: 2,
+			stderr: "fatal: bad object head-123",
+			exitCode: 128,
 		});
 
 		await assert.rejects(
-			repo.searchTextAtCommit("head-123", ["["], "regex", ["src/**"], 3),
-			/Git search failed at head-123 using 1 regex patterns across 1 pathspecs: invalid regular expression/,
+			repo.searchTextAtCommit("head-123", ["value"], "regex", [], 3),
+			(error: unknown) =>
+				error instanceof Error &&
+				!(error instanceof GitInvalidSearchPatternError) &&
+				error.message.includes("fatal: bad object head-123"),
 		);
 	});
 

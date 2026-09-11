@@ -63,6 +63,7 @@ export type ReviewPublicationStatus =
 	| "failed";
 
 type ReviewPublicationFailureStage =
+	| "review"
 	| "code_insights"
 	| "finding_comments"
 	| "pull_request_comment";
@@ -127,6 +128,10 @@ export interface ReviewSummaryDrafts {
 export interface ReviewOutcome {
 	summary: string;
 	findings: ReviewFinding[];
+	incomplete?: {
+		reason: string;
+		failedTools: string[];
+	};
 	assistantMessage?: string;
 	prSummary?: string;
 	changeAreas?: ChangeAreaSummary[];

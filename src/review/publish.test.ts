@@ -35,6 +35,58 @@ function createBitbucketClient(
 }
 
 describe("publishReview", () => {
+	it("blocks publication for an incomplete review", async () => {
+		let bitbucketCalls = 0;
+		const review = createReviewOutcome({
+			summary: "Repository context inspection was incomplete.",
+			incomplete: {
+				reason: "Repository context inspection was incomplete.",
+				failedTools: ["search_repo"],
+			},
+		});
+		const { logger, warnMessages } = createLoggerSpy();
+		const result = await publishReview(
+			createBitbucketClient({
+				async getPullRequest() {
+					bitbucketCalls += 1;
+					return createPullRequest();
+				},
+				async publishCodeInsights() {
+					bitbucketCalls += 1;
+				},
+				async reconcilePullRequestFindingComments() {
+					bitbucketCalls += 1;
+				},
+				async upsertPullRequestComment() {
+					bitbucketCalls += 1;
+				},
+			}),
+			baseReviewerConfig,
+			createReviewContext(createPullRequest()),
+			review,
+			createReviewArtifacts(),
+			logger,
+		);
+
+		assert.equal(bitbucketCalls, 0);
+		assert.deepEqual(result, {
+			published: false,
+			publication: {
+				status: "failed",
+				attempted: false,
+				codeInsightsPublished: false,
+				findingCommentsUpdated: false,
+				pullRequestCommentUpdated: false,
+				error: {
+					stage: "review",
+					message: "Repository context inspection was incomplete.",
+				},
+			},
+			review,
+		});
+		assert.match(warnMessages[0] ?? "", /review is incomplete/);
+	});
+
 	it("returns early without touching Bitbucket when dry run is enabled", async () => {
 		const config: ReviewerConfig = {
 			...baseReviewerConfig,

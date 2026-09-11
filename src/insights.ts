@@ -325,7 +325,9 @@ export function buildInsightReport(
 		1900,
 	);
 	const result: InsightReportPayload["result"] =
-		sanitizedOutcome.findings.length > 0 ? "FAIL" : "PASS";
+		sanitizedOutcome.incomplete || sanitizedOutcome.findings.length > 0
+			? "FAIL"
+			: "PASS";
 
 	return omitUndefined({
 		title: config.report.title,

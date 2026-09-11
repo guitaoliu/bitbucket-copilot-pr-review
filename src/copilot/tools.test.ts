@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { Tool } from "@github/copilot-sdk";
-import type { GitRepository } from "../git/repo.ts";
+import {
+	GitInvalidSearchPatternError,
+	type GitRepository,
+} from "../git/repo.ts";
 import type {
 	FindingDraft,
 	ReviewContext,
@@ -468,6 +471,73 @@ describe("Copilot tools", () => {
 			content: "",
 			outOfRange: true,
 		});
+	});
+
+	it("rejects malformed regex searches so Copilot can retry", async () => {
+		const tool = createSearchRepoTool(
+			createReviewToolContext(
+				reviewContext,
+				createGitStub({
+					searchTextAtCommit: async () => {
+						throw new GitInvalidSearchPatternError(
+							"Git search failed at head-123 using 1 regex patterns across all pathspecs: fatal: -e option, 'removeUser(': parentheses not balanced",
+						);
+					},
+				}),
+				[],
+				createSummaryDrafts(),
+				{},
+			),
+		);
+		const handler = getHandler<
+			Record<string, unknown>,
+			{ resultType: string; textResultForLlm: string }
+		>(tool as unknown as Tool<Record<string, unknown>>);
+
+		const result = await handler(
+			{
+				revision: "head",
+				patterns: ["removeUser("],
+				patternType: "regex",
+				paths: [],
+			},
+			toolInvocation("search_repo"),
+		);
+
+		assert.equal(result.resultType, "rejected");
+		assert.match(result.textResultForLlm, /retry with patternType literal/);
+	});
+
+	it("preserves non-pattern repository search failures", async () => {
+		const tool = createSearchRepoTool(
+			createReviewToolContext(
+				reviewContext,
+				createGitStub({
+					searchTextAtCommit: async () => {
+						throw new Error("Git search failed: bad revision");
+					},
+				}),
+				[],
+				createSummaryDrafts(),
+				{},
+			),
+		);
+		const handler = getHandler<Record<string, unknown>, unknown>(
+			tool as unknown as Tool<Record<string, unknown>>,
+		);
+
+		await assert.rejects(
+			handler(
+				{
+					revision: "head",
+					patterns: ["value"],
+					patternType: "regex",
+					paths: [],
+				},
+				toolInvocation("search_repo"),
+			),
+			/Git search failed: bad revision/,
+		);
 	});
 
 	it("rejects read_file paths that escape the repository", async () => {

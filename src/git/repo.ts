@@ -21,6 +21,8 @@ export type GitReadTextFileResult =
 
 export type GitSearchPatternType = "literal" | "regex";
 
+export class GitInvalidSearchPatternError extends Error {}
+
 interface GitCommandOptions {
 	allowFailure?: boolean;
 }
@@ -372,9 +374,15 @@ export class GitRepository {
 			return "";
 		}
 
-		throw new Error(
-			`Git search failed at ${commit} using ${patterns.length} ${patternType} patterns across ${paths.length || "all"} pathspecs: ${result.stderr || `exit code ${result.exitCode}`}`,
-		);
+		const message = `Git search failed at ${commit} using ${patterns.length} ${patternType} patterns across ${paths.length || "all"} pathspecs: ${result.stderr || `exit code ${result.exitCode}`}`;
+		if (
+			patternType === "regex" &&
+			result.stderr.startsWith("fatal: -e option")
+		) {
+			throw new GitInvalidSearchPatternError(message);
+		}
+
+		throw new Error(message);
 	}
 
 	async listFilesAtCommit(

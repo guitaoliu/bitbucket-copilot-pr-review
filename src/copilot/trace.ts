@@ -6,7 +6,6 @@ import { REVIEW_TOOL_NAMES } from "./tools/index.ts";
 export type CopilotSessionEventTracer = {
 	handleEvent(event: SessionEvent): void;
 	getReasoningStatus(): "content" | "empty" | "missing";
-	getFailedReviewToolCounts(): Record<string, number>;
 };
 
 const REVIEW_TOOL_NAME_SET: ReadonlySet<string> = new Set(REVIEW_TOOL_NAMES);
@@ -33,7 +32,6 @@ export function createSessionEventTracer(
 	>();
 	let reasoningContentObserved = false;
 	let reasoningEventObserved = false;
-	const failedReviewToolCounts = new Map<string, number>();
 
 	const appendContent = (reasoningId: string, content: string): void => {
 		if (!content) {
@@ -85,12 +83,6 @@ export function createSessionEventTracer(
 				);
 
 				if (REVIEW_TOOL_NAME_SET.has(startedTool.toolName)) {
-					if (success === false) {
-						failedReviewToolCounts.set(
-							startedTool.toolName,
-							(failedReviewToolCounts.get(startedTool.toolName) ?? 0) + 1,
-						);
-					}
 					logger.info("Copilot completed review tool", {
 						toolCallId,
 						toolName: startedTool.toolName,
@@ -324,9 +316,6 @@ export function createSessionEventTracer(
 				return "content";
 			}
 			return reasoningEventObserved ? "empty" : "missing";
-		},
-		getFailedReviewToolCounts() {
-			return Object.fromEntries(failedReviewToolCounts);
 		},
 	};
 }

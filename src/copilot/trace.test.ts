@@ -416,36 +416,6 @@ describe("createSessionEventTracer", () => {
 		]);
 	});
 
-	it("counts failed review tool executions", () => {
-		const { logger } = createLoggerSpy();
-		const tracer = createSessionEventTracer(logger);
-
-		tracer.handleEvent({
-			id: "1",
-			timestamp: "2026-03-25T00:00:00.000Z",
-			parentId: null,
-			type: "tool.execution_start",
-			data: {
-				toolCallId: "query-1",
-				toolName: "search_repo",
-				arguments: { operations: [] },
-			},
-		} as SessionEvent);
-		tracer.handleEvent({
-			id: "2",
-			timestamp: "2026-03-25T00:00:01.000Z",
-			parentId: "1",
-			type: "tool.execution_complete",
-			data: {
-				toolCallId: "query-1",
-				success: false,
-				error: { message: "Invalid repo query" },
-			},
-		} as SessionEvent);
-
-		assert.deepEqual(tracer.getFailedReviewToolCounts(), { search_repo: 1 });
-	});
-
 	it("logs subagent lifecycle progress", () => {
 		const { logger, infoCalls, warnCalls } = createLoggerSpy();
 		const tracer = createSessionEventTracer(logger);
