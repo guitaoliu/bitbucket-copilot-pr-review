@@ -107,6 +107,76 @@ describe("createReviewToolExecutionTracker", () => {
 		});
 	});
 
+	it("uses the SDK validation error when local Zod parsing is more permissive", () => {
+		const tracker = createReviewToolExecutionTracker();
+		tracker.trackTools([
+			defineTool("search_repo", {
+				parameters: searchSchema,
+				handler: async () => "unused",
+			}),
+		]);
+		const invalidArgs = {
+			revision: "head",
+			patterns: ["value"],
+			unexpected: true,
+		};
+		assert.equal(searchSchema.safeParse(invalidArgs).success, true);
+
+		tracker.handleEvent(
+			executionEvent("tool.execution_start", {
+				toolCallId: "call-1",
+				toolName: "search_repo",
+				arguments: invalidArgs,
+			}),
+		);
+		tracker.handleEvent(
+			executionEvent("tool.execution_complete", {
+				toolCallId: "call-1",
+				success: false,
+				error: {
+					message: "Invalid input for builtin tool search_repo",
+				},
+			}),
+		);
+
+		assert.deepEqual(tracker.getUnresolvedContextTools(), []);
+		assert.deepEqual(tracker.getResultCounts(), {
+			search_repo: { rejected: 1 },
+		});
+	});
+
+	it("classifies SDK validation failures for tools with JSON Schema parameters", () => {
+		const tracker = createReviewToolExecutionTracker();
+		tracker.trackTools([
+			defineTool("record_pr_summary", {
+				parameters: {
+					type: "object",
+					required: ["summary"],
+				},
+				handler: async () => "unused",
+			}),
+		]);
+
+		tracker.handleEvent(
+			executionEvent("tool.execution_start", {
+				toolCallId: "call-1",
+				toolName: "record_pr_summary",
+				arguments: {},
+			}),
+		);
+		tracker.handleEvent(
+			executionEvent("tool.execution_complete", {
+				toolCallId: "call-1",
+				success: false,
+				error: { message: "Invalid tool input: missing summary" },
+			}),
+		);
+
+		assert.deepEqual(tracker.getResultCounts(), {
+			record_pr_summary: { rejected: 1 },
+		});
+	});
+
 	it("clears only the same normalized operation after a successful retry", async () => {
 		const tracker = createReviewToolExecutionTracker();
 		const [tool] = tracker.trackTools([

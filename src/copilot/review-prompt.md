@@ -30,7 +30,7 @@
 - Prefer BUG or VULNERABILITY when the PR already makes behavior wrong or widens access. Use CODE_SMELL for missing tests only when the gap adds a separate merge-relevant risk beyond any concrete defect.
 
 ## Finding rules
-- Call record_pr_summary last with PR purpose and reviewOutcome: clean for no findings, otherwise findings_recorded.
+- Call record_pr_summary last with a concise summary of the PR purpose and main behavior change.
 - record_change_area_summary: clear areas only; use exact reviewed paths or reviewed path globs.
 - Emit one finding per root cause. Target reviewable changed files only.
 - Deleted-file findings use line 0.

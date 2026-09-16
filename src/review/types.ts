@@ -117,11 +117,8 @@ export interface ChangeAreaSummary {
 	summary: string;
 }
 
-type ReviewCompletionOutcome = "clean" | "findings_recorded";
-
 export interface ReviewSummaryDrafts {
 	prSummary?: string;
-	reviewOutcome?: ReviewCompletionOutcome;
 	changeAreas?: ChangeAreaSummary[];
 }
 

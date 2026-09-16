@@ -65,6 +65,16 @@ function normalizeToolArguments(tool: TrackableTool, args: unknown): unknown {
 	return parsed.success ? parsed.data : args;
 }
 
+export function isSdkToolInputValidationError(
+	error: string | { message: string } | undefined,
+): boolean {
+	const message = typeof error === "string" ? error : error?.message;
+	return (
+		message !== undefined &&
+		/^(?:invalid input for\b|invalid tool input(?: json)?:)/i.test(message)
+	);
+}
+
 function getToolResultType(result: unknown): ToolResultType {
 	if (
 		typeof result === "object" &&
@@ -95,7 +105,6 @@ export function createReviewToolExecutionTracker(): ReviewToolExecutionTracker {
 		if (!tool) {
 			return;
 		}
-
 		callsById.set(toolCallId, {
 			toolName,
 			...(isContextToolName(toolName)
@@ -175,7 +184,11 @@ export function createReviewToolExecutionTracker(): ReviewToolExecutionTracker {
 			} else if (event.type === "tool.execution_complete") {
 				finish(
 					event.data.toolCallId,
-					event.data.success ? "success" : "failure",
+					event.data.success
+						? "success"
+						: isSdkToolInputValidationError(event.data.error)
+							? "rejected"
+							: "failure",
 				);
 			}
 		},

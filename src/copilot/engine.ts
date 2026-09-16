@@ -34,7 +34,10 @@ import {
 	buildSystemMessage,
 } from "./prompt.ts";
 import { ReviewBundle } from "./review-bundle.ts";
-import { createReviewToolExecutionTracker } from "./tool-execution.ts";
+import {
+	createReviewToolExecutionTracker,
+	isSdkToolInputValidationError,
+} from "./tool-execution.ts";
 import type { ReviewInspectionState } from "./tools/context.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
 import { createSessionEventTracer } from "./trace.ts";
@@ -303,11 +306,7 @@ function buildCopilotAuthTroubleshootingHint(config: ReviewerConfig): string {
 function wrapCopilotSessionStageError(
 	error: unknown,
 	config: ReviewerConfig,
-	stage:
-		| "client startup"
-		| "session creation"
-		| "review request"
-		| "review completion request",
+	stage: "client startup" | "session creation" | "review request",
 ): Error {
 	const cause = error instanceof Error ? error : new Error(String(error));
 	if (isHtmlJsonParseError(cause)) {
@@ -696,9 +695,10 @@ function buildPostToolLogMessage(
 
 function buildPostToolFailureLogMessage(
 	input: PostToolUseFailureInput,
+	resultType: "failure" | "rejected",
 ): string {
 	return [
-		`Copilot failed tool ${input.toolName}`,
+		`Copilot ${resultType === "rejected" ? "rejected" : "failed"} tool ${input.toolName}`,
 		formatToolLogValue(input.error)
 			? `error=${formatToolLogValue(input.error)}`
 			: undefined,
@@ -774,14 +774,21 @@ function createReviewSessionHooks(
 			toolTelemetry.errorCount += 1;
 			const counter = getToolTelemetryCounter(toolTelemetry, input.toolName);
 			counter.completed += 1;
-			counter.resultCounts.failure = (counter.resultCounts.failure ?? 0) + 1;
+			const resultType = isSdkToolInputValidationError(input.error)
+				? "rejected"
+				: "failure";
+			counter.resultCounts[resultType] =
+				(counter.resultCounts[resultType] ?? 0) + 1;
 			const startedAt = shiftToolStartTime(progressState, input.toolName);
 			const durationMs = startedAt !== undefined ? Date.now() - startedAt : 0;
 			counter.totalDurationMs += durationMs;
 			toolTelemetry.totalDurationMs += durationMs;
-			logger.info(buildPostToolFailureLogMessage(input));
+			logger.info(buildPostToolFailureLogMessage(input, resultType));
 			return {
-				additionalContext: `Tool ${input.toolName} failed: ${input.error}. Use the failure to adjust inputs and continue the readonly review.`,
+				additionalContext:
+					resultType === "rejected"
+						? `Tool ${input.toolName} rejected invalid input: ${input.error}. Correct the arguments and continue the readonly review.`
+						: `Tool ${input.toolName} failed: ${input.error}. Use the failure to adjust inputs and continue the readonly review.`,
 			};
 		},
 		onErrorOccurred: async (input: {
@@ -814,24 +821,6 @@ function summarizeOutcome(
 	}
 
 	return `Copilot identified ${findingsCount} reportable issue${findingsCount === 1 ? "" : "s"} in the reviewed pull request changes.`;
-}
-
-function assertReviewCompletion(
-	reviewOutcome: ReviewSummaryDrafts["reviewOutcome"],
-	findingsCount: number,
-): void {
-	if (!reviewOutcome) {
-		throw new Error(
-			"Copilot review did not record a structured completion outcome.",
-		);
-	}
-
-	const expectedOutcome = findingsCount > 0 ? "findings_recorded" : "clean";
-	if (reviewOutcome !== expectedOutcome) {
-		throw new Error(
-			`Copilot review outcome ${reviewOutcome} does not match ${findingsCount} finalized findings.`,
-		);
-	}
 }
 
 function assertSuccessfulReviewInspection(reviewBundle: ReviewBundle): void {
@@ -974,24 +963,23 @@ export async function runCopilotReview(
 			context.reviewableFiles,
 			config.review.minConfidence,
 		);
-		if (!summaryDrafts.reviewOutcome) {
+		if (!summaryDrafts.prSummary) {
 			logger.info(
-				"Continuing Copilot review because the structured completion outcome is missing.",
+				"Continuing Copilot review because the pull request summary is missing.",
 				{ findings: findings.length },
 			);
 			try {
 				response = await session.sendAndWait(
 					{
 						prompt:
-							"Finish the review without more repository inspection. Correct any rejected findings using the tool feedback, emit any remaining already-validated findings, then call record_pr_summary. Use reviewOutcome clean only when no accepted findings remain; otherwise use findings_recorded.",
+							"Finish the review without more repository inspection. Correct any rejected findings using the tool feedback, emit any remaining already-validated findings, then call record_pr_summary.",
 					},
 					config.copilot.timeoutMs,
 				);
 			} catch (error) {
-				throw wrapCopilotSessionStageError(
+				logger.warn(
+					"Copilot review completion request failed; continuing with finalized findings and the deterministic summary fallback if needed.",
 					error,
-					config,
-					"review completion request",
 				);
 			}
 			findings = finalizeFindings(
@@ -1048,7 +1036,11 @@ export async function runCopilotReview(
 		}
 
 		const reviewSummary = finalizeReviewSummary(context, summaryDrafts);
-		assertReviewCompletion(summaryDrafts.reviewOutcome, findings.length);
+		if (!summaryDrafts.prSummary) {
+			logger.warn(
+				"Copilot review summary was still missing after the completion request; using the deterministic pull request summary fallback.",
+			);
+		}
 
 		return omitUndefined({
 			summary: summarizeOutcome(context, findings.length),

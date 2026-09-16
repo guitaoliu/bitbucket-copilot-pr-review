@@ -231,7 +231,6 @@ async function recordSuccessfulInspection(
 async function recordCleanSummary(configArg: SessionConfig): Promise<void> {
 	await invokeSessionTool(configArg, "record_pr_summary", {
 		summary: "Refactors the reviewed behavior.",
-		reviewOutcome: "clean",
 	});
 }
 
@@ -565,14 +564,12 @@ describe("runCopilotReview", () => {
 										await recordSuccessfulInspection(configArg);
 										await invokeSessionTool(configArg, "record_pr_summary", {
 											summary: "Refactors the reviewed behavior.",
-											reviewOutcome: "clean",
 										});
 										await configArg.hooks?.onPostToolUse?.(
 											{
 												toolName: "record_pr_summary",
 												toolArgs: {
 													summary: "Refactors the reviewed behavior.",
-													reviewOutcome: "clean",
 												},
 												toolResult: createSdkToolResult({}),
 											} as never,
@@ -612,7 +609,7 @@ describe("runCopilotReview", () => {
 		assert.deepEqual(
 			logSpy.infoEntries.filter((entry) =>
 				entry.message.startsWith(
-					"Continuing Copilot review because the structured completion outcome is missing",
+					"Continuing Copilot review because the pull request summary is missing",
 				),
 			),
 			[],
@@ -626,7 +623,7 @@ describe("runCopilotReview", () => {
 		);
 	});
 
-	it("requests structured completion when the initial review omits it", async () => {
+	it("requests completion when the initial review omits the summary", async () => {
 		const context = createReviewContext();
 		const logSpy = createLoggerSpy();
 		let sendCount = 0;
@@ -675,7 +672,6 @@ describe("runCopilotReview", () => {
 										});
 										await invokeSessionTool(configArg, "record_pr_summary", {
 											summary: "Refactors the reviewed behavior.",
-											reviewOutcome: "findings_recorded",
 										});
 									}
 									return { data: { content: "Review complete." } };
@@ -696,50 +692,103 @@ describe("runCopilotReview", () => {
 		assert.equal(outcome.prSummary, "Refactors the reviewed behavior.");
 	});
 
-	it("rejects missing or inconsistent structured completion outcomes", async () => {
+	it("uses a deterministic fallback when the pull request summary remains missing", async () => {
 		const context = createReviewContext();
 		const logSpy = createLoggerSpy();
 		let sendCount = 0;
 
-		for (const reviewOutcome of [undefined, "findings_recorded"] as const) {
-			await assert.rejects(
-				runCopilotReview(config, context, createGitStub(), logSpy.logger, {
-					createCopilotClient() {
-						return {
-							async start() {},
-							async createSession(configArg: SessionConfig) {
-								return {
-									rpc: {},
-									on() {
-										return () => {};
-									},
-									async sendAndWait() {
-										sendCount += 1;
+		const outcome = await runCopilotReview(
+			config,
+			context,
+			createGitStub(),
+			logSpy.logger,
+			{
+				createCopilotClient() {
+					return {
+						async start() {},
+						async createSession(configArg: SessionConfig) {
+							return {
+								rpc: {},
+								on() {
+									return () => {};
+								},
+								async sendAndWait() {
+									sendCount += 1;
+									if (sendCount === 1) {
 										await recordSuccessfulInspection(configArg);
-										if (reviewOutcome) {
-											await invokeSessionTool(configArg, "record_pr_summary", {
-												summary: "Found a build regression.",
-												reviewOutcome,
-											});
-										}
-										return { data: { content: "Looks good." } };
-									},
-									async disconnect() {},
-								} as never;
-							},
-							async stop() {
-								return [];
-							},
-						} as never;
-					},
-				}),
-				reviewOutcome
-					? /does not match 0 finalized findings/
-					: /did not record a structured completion outcome/,
-			);
-		}
+									}
+									return { data: { content: "Looks good." } };
+								},
+								async disconnect() {},
+							} as never;
+						},
+						async stop() {
+							return [];
+						},
+					} as never;
+				},
+			},
+		);
 
-		assert.equal(sendCount, 3);
+		assert.equal(sendCount, 2);
+		assert.equal(outcome.prSummary, "Test PR");
+		assert.equal(outcome.findings.length, 0);
+		assert.match(
+			logSpy.warnEntries.at(-1)?.message ?? "",
+			/using the deterministic pull request summary fallback/,
+		);
+	});
+
+	it("uses the deterministic fallback when the completion request fails", async () => {
+		const context = createReviewContext();
+		const logSpy = createLoggerSpy();
+		let sendCount = 0;
+
+		const outcome = await runCopilotReview(
+			config,
+			context,
+			createGitStub(),
+			logSpy.logger,
+			{
+				createCopilotClient() {
+					return {
+						async start() {},
+						async createSession(configArg: SessionConfig) {
+							return {
+								rpc: {},
+								on() {
+									return () => {};
+								},
+								async sendAndWait() {
+									sendCount += 1;
+									if (sendCount === 1) {
+										await recordSuccessfulInspection(configArg);
+										return { data: { content: "Looks good." } };
+									}
+									throw new Error("completion timeout");
+								},
+								async disconnect() {},
+							} as never;
+						},
+						async stop() {
+							return [];
+						},
+					} as never;
+				},
+			},
+		);
+
+		assert.equal(sendCount, 2);
+		assert.equal(outcome.prSummary, "Test PR");
+		assert.equal(outcome.findings.length, 0);
+		assert.match(
+			logSpy.warnEntries.at(-2)?.message ?? "",
+			/completion request failed/,
+		);
+		assert.match(
+			logSpy.warnEntries.at(-1)?.message ?? "",
+			/using the deterministic pull request summary fallback/,
+		);
 	});
 
 	it("wraps Copilot startup HTML parse failures with actionable auth guidance", async () => {
@@ -841,11 +890,18 @@ describe("runCopilotReview", () => {
 									return () => {};
 								},
 								async sendAndWait() {
-									const invalidArgs = { page: 0 };
+									const failedArgs = {
+										revision: "head",
+										patterns: ["value"],
+										patternType: "literal",
+										paths: [],
+										contextLines: 0,
+										page: 1,
+									};
 									await configArg.hooks?.onPreToolUse?.(
 										{
 											toolName: "search_repo",
-											toolArgs: invalidArgs,
+											toolArgs: failedArgs,
 										} as never,
 										{ sessionId: "session-1" } as never,
 									);
@@ -857,7 +913,7 @@ describe("runCopilotReview", () => {
 										data: {
 											toolCallId: "query-1",
 											toolName: "search_repo",
-											arguments: invalidArgs,
+											arguments: failedArgs,
 										},
 									} as never);
 									eventHandler?.({
@@ -975,6 +1031,89 @@ describe("runCopilotReview", () => {
 			outcome.toolTelemetry?.byTool.search_repo?.resultCounts.rejected,
 			1,
 		);
+	});
+
+	it("does not treat SDK input validation as a context failure", async () => {
+		const outcome = await runCopilotReview(
+			config,
+			createReviewContext(),
+			createGitStub(),
+			createLoggerSpy().logger,
+			{
+				createCopilotClient() {
+					return {
+						async start() {},
+						async createSession(configArg: SessionConfig) {
+							let eventHandler: SessionEventHandler | undefined;
+							return {
+								on(handler: SessionEventHandler) {
+									eventHandler = handler;
+									return () => {};
+								},
+								async sendAndWait() {
+									const invalidArgs = {
+										revision: "head",
+										path: "src/example.ts",
+										ranges: [{ start: 1 }, { start: 2 }],
+										page: 1,
+									};
+									const error =
+										'Invalid input for builtin tool read_file: /ranges/1: "end" is a required property';
+									await configArg.hooks?.onPreToolUse?.(
+										{
+											toolName: "read_file",
+											toolArgs: invalidArgs,
+										} as never,
+										{ sessionId: "session-1" } as never,
+									);
+									eventHandler?.({
+										id: "query-start",
+										timestamp: "2026-09-02T00:00:00.000Z",
+										parentId: null,
+										type: "tool.execution_start",
+										data: {
+											toolCallId: "query-1",
+											toolName: "read_file",
+											arguments: invalidArgs,
+										},
+									} as never);
+									await configArg.hooks?.onPostToolUseFailure?.(
+										{
+											toolName: "read_file",
+											toolArgs: invalidArgs,
+											error,
+										} as never,
+										{ sessionId: "session-1" } as never,
+									);
+									eventHandler?.({
+										id: "query-complete",
+										timestamp: "2026-09-02T00:00:00.100Z",
+										parentId: "query-start",
+										type: "tool.execution_complete",
+										data: {
+											toolCallId: "query-1",
+											success: false,
+											error: { message: error },
+										},
+									} as never);
+									await recordCleanReview(configArg);
+									return { data: { content: "Looks good." } };
+								},
+								async disconnect() {},
+							} as never;
+						},
+						async stop() {
+							return [];
+						},
+					};
+				},
+			},
+		);
+
+		assert.equal(outcome.incomplete, undefined);
+		assert.deepEqual(outcome.toolTelemetry?.byTool.read_file?.resultCounts, {
+			rejected: 1,
+		});
 	});
 
 	it("completes after a repository context tool recovers", async () => {

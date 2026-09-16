@@ -268,16 +268,13 @@ describe("Copilot tools", () => {
 			createReviewChangesTool(toolContext),
 		);
 		const summarize = getHandler<
-			{
-				summary: string;
-				reviewOutcome: "clean" | "findings_recorded";
-			},
+			{ summary: string },
 			string | { resultType: string; textResultForLlm: string }
 		>(createRecordPrSummaryTool(toolContext));
 
 		const first = await inspect({ page: 1 }, toolInvocation("review_changes"));
 		const rejected = await summarize(
-			{ summary: "Summary", reviewOutcome: "clean" },
+			{ summary: "Summary" },
 			toolInvocation("record_pr_summary"),
 		);
 		assert.equal(
@@ -297,7 +294,7 @@ describe("Copilot tools", () => {
 		});
 		assert.equal(
 			await summarize(
-				{ summary: "Summary", reviewOutcome: "clean" },
+				{ summary: "Summary" },
 				toolInvocation("record_pr_summary"),
 			),
 			"Recorded the pull request summary.",
@@ -1077,18 +1074,11 @@ describe("Copilot tools", () => {
 				summaryDrafts,
 			),
 		);
-		const handler = getHandler<
-			{
-				summary: string;
-				reviewOutcome: "clean" | "findings_recorded";
-			},
-			string
-		>(tool);
+		const handler = getHandler<{ summary: string }, string>(tool);
 
 		const firstResult = await handler(
 			{
 				summary: "Adds stricter validation to the renamed service flow.",
-				reviewOutcome: "findings_recorded",
 			},
 			{
 				sessionId: "session",
@@ -1100,7 +1090,6 @@ describe("Copilot tools", () => {
 		const secondResult = await handler(
 			{
 				summary: "Tightens validation and updates the renamed service path.",
-				reviewOutcome: "clean",
 			},
 			{
 				sessionId: "session",
@@ -1116,7 +1105,6 @@ describe("Copilot tools", () => {
 			summaryDrafts.prSummary,
 			"Tightens validation and updates the renamed service path.",
 		);
-		assert.equal(summaryDrafts.reviewOutcome, "clean");
 		assert.match(
 			JSON.stringify(tool.parameters),
 			/Use short bullet points when that is clearer than one sentence/,
