@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 
 import type { Logger } from "../shared/logger.ts";
@@ -259,5 +263,62 @@ describe("GitRepository.ensureCommitAvailable", () => {
 			["ls-tree", "-r", "--name-only", "base-123"],
 			["ls-tree", "-r", "--name-only", "base-123"],
 		]);
+	});
+
+	it("aborts in-flight commands instead of reporting empty results", async () => {
+		const repoRoot = mkdtempSync(path.join(tmpdir(), "git-abort-"));
+		try {
+			const git = (...args: string[]) =>
+				execFileSync("git", args, { cwd: repoRoot, encoding: "utf8" });
+			git("init", "--quiet");
+			writeFileSync(path.join(repoRoot, "example.ts"), "const needle = 1;\n");
+			git("add", "example.ts");
+			git(
+				"-c",
+				"user.name=Test",
+				"-c",
+				"user.email=test@example.com",
+				"commit",
+				"--quiet",
+				"-m",
+				"init",
+			);
+			const repo = new GitRepository(repoRoot, logger, "origin");
+			const isAbortError = (error: unknown) =>
+				error instanceof Error && error.name === "AbortError";
+
+			const searchController = new AbortController();
+			const search = repo.searchTextAtCommit(
+				"HEAD",
+				["missing"],
+				"literal",
+				[],
+				0,
+				searchController.signal,
+			);
+			searchController.abort();
+			await assert.rejects(search, isAbortError);
+
+			const listController = new AbortController();
+			const listing = repo.listFilesAtCommit("HEAD", [], listController.signal);
+			listController.abort();
+			await assert.rejects(listing, isAbortError);
+
+			const readController = new AbortController();
+			const read = repo.readTextFileAtCommit(
+				"HEAD",
+				"example.ts",
+				readController.signal,
+			);
+			readController.abort();
+			await assert.rejects(read, isAbortError);
+
+			assert.equal(
+				await repo.searchTextAtCommit("HEAD", ["missing"], "literal", [], 0),
+				"",
+			);
+		} finally {
+			rmSync(repoRoot, { recursive: true, force: true });
+		}
 	});
 });

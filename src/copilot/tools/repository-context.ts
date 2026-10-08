@@ -159,7 +159,7 @@ export function createReadFileTool(toolContext: ReviewToolContext) {
 			"Read one text file at a fixed review revision. Use ranges for source lines and page for large results.",
 		parameters: schema,
 		overridesBuiltInTool: true,
-		handler: async (args) => {
+		handler: async (args, invocation) => {
 			const parsed = schema.safeParse(args);
 			if (!parsed.success) {
 				return toRejectedResult(`Invalid file read: ${parsed.error.message}`);
@@ -167,6 +167,7 @@ export function createReadFileTool(toolContext: ReviewToolContext) {
 			const result = await toolContext.git.readTextFileAtCommit(
 				resolveRevision(parsed.data.revision, toolContext),
 				parsed.data.path,
+				invocation.signal,
 			);
 			const page = selectQueryPage(
 				result.status === "ok"
@@ -227,7 +228,7 @@ export function createSearchRepoTool(toolContext: ReviewToolContext) {
 		description:
 			"Search repository text at a fixed review revision for 1 to 8 patterns. Returns matching lines with up to 12 lines of surrounding context. Start with page 1 and continue only with nextPage from that exact query; use read_file for larger ranges.",
 		parameters: schema,
-		handler: async (args) => {
+		handler: async (args, invocation) => {
 			const parsed = schema.safeParse(args);
 			if (!parsed.success) {
 				return toRejectedResult(
@@ -246,6 +247,7 @@ export function createSearchRepoTool(toolContext: ReviewToolContext) {
 					parsed.data.patternType,
 					parsed.data.paths,
 					parsed.data.contextLines,
+					invocation.signal,
 				);
 			} catch (error) {
 				if (error instanceof GitInvalidSearchPatternError) {
@@ -315,7 +317,7 @@ export function createFindFilesTool(toolContext: ReviewToolContext) {
 		description:
 			"List tracked repository files at a fixed review revision using exact paths, directory prefixes, or glob patterns.",
 		parameters: schema,
-		handler: async (args) => {
+		handler: async (args, invocation) => {
 			const parsed = schema.safeParse(args);
 			if (!parsed.success) {
 				return toRejectedResult(
@@ -325,6 +327,7 @@ export function createFindFilesTool(toolContext: ReviewToolContext) {
 			const content = await toolContext.git.listFilesAtCommit(
 				resolveRevision(parsed.data.revision, toolContext),
 				parsed.data.paths,
+				invocation.signal,
 			);
 			const output = selectQueryPage(
 				content || "No matching files.",

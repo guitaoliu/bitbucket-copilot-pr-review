@@ -25,6 +25,7 @@ export class GitInvalidSearchPatternError extends Error {}
 
 interface GitCommandOptions {
 	allowFailure?: boolean;
+	signal?: AbortSignal | undefined;
 }
 
 interface GitCommandResult {
@@ -93,7 +94,10 @@ export class GitRepository {
 		};
 	}
 
-	private async runGitDetailed(args: string[]): Promise<GitCommandResult> {
+	private async runGitDetailed(
+		args: string[],
+		signal?: AbortSignal,
+	): Promise<GitCommandResult> {
 		const startedAt = Date.now();
 		try {
 			const { stdout, stderr } = await execFileAsync(
@@ -103,6 +107,7 @@ export class GitRepository {
 					cwd: this.repoRoot,
 					encoding: "utf8",
 					maxBuffer: 32 * 1024 * 1024,
+					...(signal ? { signal } : {}),
 				},
 			);
 			return { stdout, stderr, exitCode: 0 };
@@ -133,7 +138,7 @@ export class GitRepository {
 		args: string[],
 		options?: GitCommandOptions,
 	): Promise<string> {
-		const result = await this.runGitDetailed(args);
+		const result = await this.runGitDetailed(args, options?.signal);
 		if (result.exitCode === 0) {
 			return result.stdout;
 		}
@@ -159,12 +164,12 @@ export class GitRepository {
 	private async getPathTypeAtCommit(
 		commit: string,
 		filePath: string,
+		signal?: AbortSignal,
 	): Promise<GitCommitPathType | undefined> {
-		const result = await this.runGitDetailed([
-			"cat-file",
-			"-t",
-			`${commit}:${filePath}`,
-		]);
+		const result = await this.runGitDetailed(
+			["cat-file", "-t", `${commit}:${filePath}`],
+			signal,
+		);
 		if (result.exitCode !== 0) {
 			return undefined;
 		}
@@ -354,19 +359,23 @@ export class GitRepository {
 		patternType: GitSearchPatternType,
 		paths: readonly string[],
 		contextLines: number,
+		signal?: AbortSignal,
 	): Promise<string> {
-		const result = await this.runGitDetailed([
-			"grep",
-			"-n",
-			"-I",
-			patternType === "literal" ? "-F" : "-E",
-			"-C",
-			String(contextLines),
-			...patterns.flatMap((pattern) => ["-e", pattern]),
-			commit,
-			"--",
-			...paths,
-		]);
+		const result = await this.runGitDetailed(
+			[
+				"grep",
+				"-n",
+				"-I",
+				patternType === "literal" ? "-F" : "-E",
+				"-C",
+				String(contextLines),
+				...patterns.flatMap((pattern) => ["-e", pattern]),
+				commit,
+				"--",
+				...paths,
+			],
+			signal,
+		);
 		if (result.exitCode === 0) {
 			return result.stdout;
 		}
@@ -388,8 +397,12 @@ export class GitRepository {
 	async listFilesAtCommit(
 		commit: string,
 		paths: readonly string[],
+		signal?: AbortSignal,
 	): Promise<string> {
-		const content = await this.runGit(["ls-tree", "-r", "--name-only", commit]);
+		const content = await this.runGit(
+			["ls-tree", "-r", "--name-only", commit],
+			{ signal },
+		);
 		if (paths.length === 0) {
 			return content;
 		}
@@ -415,8 +428,9 @@ export class GitRepository {
 	async readTextFileAtCommit(
 		commit: string,
 		filePath: string,
+		signal?: AbortSignal,
 	): Promise<GitReadTextFileResult> {
-		const pathType = await this.getPathTypeAtCommit(commit, filePath);
+		const pathType = await this.getPathTypeAtCommit(commit, filePath, signal);
 		if (!pathType) {
 			return { status: "not_found" };
 		}
@@ -425,7 +439,9 @@ export class GitRepository {
 			return { status: "not_file" };
 		}
 
-		const content = await this.runGit(["show", `${commit}:${filePath}`]);
+		const content = await this.runGit(["show", `${commit}:${filePath}`], {
+			signal,
+		});
 		if (content.includes("\u0000")) {
 			return { status: "not_text" };
 		}
