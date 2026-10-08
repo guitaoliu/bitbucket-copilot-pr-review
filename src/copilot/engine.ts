@@ -12,6 +12,7 @@ import type {
 	ToolResultObject,
 } from "@github/copilot-sdk";
 import { CopilotClient, RuntimeConnection, ToolSet } from "@github/copilot-sdk";
+import packageJson from "../../package.json" with { type: "json" };
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import { finalizeFindings } from "../policy/findings.ts";
@@ -282,6 +283,10 @@ function buildCopilotClientOptions(
 			args: runtimeArgs,
 		}),
 		logLevel: clientLogLevel,
+		clientInfo: {
+			applicationName: packageJson.name,
+			applicationVersion: packageJson.version,
+		},
 		env: copilotEnvironment,
 		gitHubToken,
 		useLoggedInUser: gitHubToken !== undefined ? false : undefined,
