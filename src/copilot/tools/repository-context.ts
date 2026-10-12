@@ -1,10 +1,24 @@
-import { defineTool } from "@github/copilot-sdk";
 import { z } from "zod";
 
-import { GitInvalidSearchPatternError } from "../../git/repo.ts";
-import { type PagedContent, selectPage } from "../review-bundle.ts";
-import { toRejectedResult } from "./common.ts";
+import {
+	GitInvalidSearchPatternError,
+	type GitSearchFileMatches,
+} from "../../git/repo.ts";
+import {
+	getRepoFileAccessDecision,
+	matchesRepoPathPattern,
+	normalizeRepoPath,
+	REPO_SEARCH_EXCLUDE_GLOBS,
+} from "../../policy/path-access.ts";
+import {
+	type PagedContent,
+	paginateContent,
+	selectPage,
+} from "../pagination.ts";
 import { type ReviewToolContext, recordInspectionResult } from "./context.ts";
+import { defineReviewTool, rejectToolCall } from "./define.ts";
+
+type ContextToolName = "read_file" | "search_repo" | "find_files";
 
 const MAX_PATHS = 50;
 const MAX_RANGES = 20;
@@ -17,7 +31,10 @@ const pathSchema = z
 	.string()
 	.min(1)
 	.max(500)
-	.refine(isSafeRepoPath, "must be a relative repository path");
+	.refine(
+		(value) => normalizeRepoPath(value) !== undefined,
+		"must be a relative repository path",
+	);
 const pathsSchema = z
 	.array(pathSchema)
 	.max(MAX_PATHS)
@@ -26,38 +43,23 @@ const pathsSchema = z
 		"Repository paths to search, or an empty array for the whole repository.",
 	);
 const rangeSchema = z
-	.object({
+	.strictObject({
 		start: z.number().int().min(1),
 		end: z.number().int().min(1),
 	})
 	.refine(({ start, end }) => end >= start, "end must be >= start");
 
-function isSafeRepoPath(value: string): boolean {
-	const containsControlCharacter = [...value].some((character) => {
-		const code = character.charCodeAt(0);
-		return code < 32 || code === 127;
-	});
-	return (
-		!value.startsWith("/") &&
-		!value.startsWith(":") &&
-		!/^[A-Za-z]:/.test(value) &&
-		!value.includes("\\") &&
-		!containsControlCharacter &&
-		!value.split("/").includes("..")
-	);
-}
-
 function resolveRevision(
-	revision: "merge-base" | "base" | "head",
-	toolContext: ReviewToolContext,
+	revision: z.output<typeof revisionSchema>,
+	{ context }: ReviewToolContext,
 ): string {
 	switch (revision) {
 		case "merge-base":
-			return toolContext.context.mergeBaseCommit;
+			return context.mergeBaseCommit;
 		case "base":
-			return toolContext.context.baseCommit;
+			return context.baseCommit;
 		case "head":
-			return toolContext.context.headCommit;
+			return context.headCommit;
 	}
 }
 
@@ -77,201 +79,216 @@ function formatRanges(
 		.join("\n");
 }
 
-function recordResult(
-	toolContext: ReviewToolContext,
-	toolName: "read_file" | "search_repo" | "find_files",
-	result: unknown,
-): void {
-	if (result && typeof result === "object") {
-		const page = result as Partial<PagedContent>;
-		if (page.paginationReset || page.outOfRange) {
-			toolContext.logger?.warn("Recovered invalid context pagination", {
-				toolName,
-				requestedPage: page.requestedPage ?? page.page,
-				returnedPage: page.outOfRange ? undefined : page.page,
-				totalPages: page.totalPages,
-			});
-		}
-	}
-	recordInspectionResult(
-		toolContext.inspectionState,
-		toolName,
-		JSON.stringify(result),
-	);
+function formatSearchMatches(
+	commit: string,
+	files: GitSearchFileMatches[],
+): string {
+	return files
+		.flatMap((file) =>
+			file.groups.map((group) =>
+				group
+					.map((line) => {
+						const separator = line.isMatch ? ":" : "-";
+						return `${commit}:${file.path}${separator}${line.lineNumber}${separator}${line.text}\n`;
+					})
+					.join(""),
+			),
+		)
+		.join("--\n");
 }
 
-function selectQueryPage(
-	content: string,
-	requestedPage: number,
-	queryKey: string,
-	deliveredPagesByQuery: Map<string, Set<number>>,
-	maxBytes?: number,
-): PagedContent {
-	const deliveredPages =
-		deliveredPagesByQuery.get(queryKey) ?? new Set<number>();
-	const requested = selectPage(content, requestedPage, maxBytes);
-	const firstMissingPage = Array.from(
-		{ length: Math.min(requestedPage - 1, requested.totalPages) },
-		(_value, index) => index + 1,
-	).find((page) => !deliveredPages.has(page));
-	const result =
-		firstMissingPage === undefined
-			? requested
-			: {
-					...selectPage(content, firstMissingPage, maxBytes),
-					requestedPage,
-					paginationReset: true as const,
-				};
-	if (!result.outOfRange) {
-		deliveredPages.add(result.page);
-		deliveredPagesByQuery.set(queryKey, deliveredPages);
-	}
-	return result;
-}
-
-function summarizeSearchMatches(content: string): {
+function summarizeSearchMatches(files: GitSearchFileMatches[]): {
 	matchingLineCount: number;
 	matchedFileCount: number;
 } {
-	const matchedFiles = new Set<string>();
 	let matchingLineCount = 0;
-	for (const line of content.split("\n")) {
-		const match = line.match(/^[^:]+:(.+):\d+:/);
-		if (!match?.[1]) {
-			continue;
-		}
-		matchingLineCount += 1;
-		matchedFiles.add(match[1]);
+	let matchedFileCount = 0;
+	for (const file of files) {
+		const fileMatches = file.groups
+			.flat()
+			.filter((line) => line.isMatch).length;
+		matchingLineCount += fileMatches;
+		matchedFileCount += fileMatches > 0 ? 1 : 0;
 	}
-	return { matchingLineCount, matchedFileCount: matchedFiles.size };
+	return { matchingLineCount, matchedFileCount };
+}
+
+function createQueryPager(
+	toolContext: ReviewToolContext,
+	toolName: ContextToolName,
+	maxBytes?: number,
+) {
+	const deliveredPagesByQuery = new Map<string, Set<number>>();
+	return {
+		hasDelivered(queryKey: string, page: number): boolean {
+			return deliveredPagesByQuery.get(queryKey)?.has(page) ?? false;
+		},
+		select(content: string, requestedPage: number, queryKey: string) {
+			const pages = paginateContent(content, maxBytes);
+			const deliveredPages =
+				deliveredPagesByQuery.get(queryKey) ?? new Set<number>();
+			const firstMissingPage = Array.from(
+				{ length: Math.min(requestedPage - 1, pages.length) },
+				(_value, index) => index + 1,
+			).find((page) => !deliveredPages.has(page));
+			const result: PagedContent =
+				firstMissingPage === undefined
+					? selectPage(pages, requestedPage)
+					: {
+							...selectPage(pages, firstMissingPage),
+							requestedPage,
+							paginationReset: true,
+						};
+			if (!result.outOfRange) {
+				deliveredPages.add(result.page);
+				deliveredPagesByQuery.set(queryKey, deliveredPages);
+			}
+			if (result.paginationReset || result.outOfRange) {
+				toolContext.logger.warn("Recovered invalid context pagination", {
+					toolName,
+					requestedPage: result.requestedPage ?? result.page,
+					returnedPage: result.outOfRange ? undefined : result.page,
+					totalPages: result.totalPages,
+				});
+			}
+			return result;
+		},
+	};
+}
+
+function recordContextResult<TResult extends PagedContent>(
+	toolContext: ReviewToolContext,
+	toolName: ContextToolName,
+	result: TResult,
+): TResult {
+	recordInspectionResult(
+		toolContext.state.inspection,
+		toolName,
+		JSON.stringify(result),
+	);
+	return result;
 }
 
 export function createReadFileTool(toolContext: ReviewToolContext) {
-	const deliveredPagesByQuery = new Map<string, Set<number>>();
-	const schema = z.object({
-		revision: revisionSchema,
-		path: pathSchema,
-		ranges: z.array(rangeSchema).max(MAX_RANGES).optional(),
-		page: pageSchema,
-	});
-	return defineTool("read_file", {
+	const pager = createQueryPager(toolContext, "read_file");
+	return defineReviewTool("read_file", {
 		description:
 			"Read one text file at a fixed review revision. Use ranges for source lines and page for large results.",
-		parameters: schema,
+		schema: z.strictObject({
+			revision: revisionSchema,
+			path: pathSchema,
+			ranges: z.array(rangeSchema).max(MAX_RANGES).optional(),
+			page: pageSchema,
+		}),
 		overridesBuiltInTool: true,
 		handler: async (args, invocation) => {
-			const parsed = schema.safeParse(args);
-			if (!parsed.success) {
-				return toRejectedResult(`Invalid file read: ${parsed.error.message}`);
+			const access = getRepoFileAccessDecision(args.path);
+			if (!access.include) {
+				return rejectToolCall(
+					`Reading ${args.path} is not allowed: ${access.reason}.`,
+				);
 			}
 			const result = await toolContext.git.readTextFileAtCommit(
-				resolveRevision(parsed.data.revision, toolContext),
-				parsed.data.path,
+				resolveRevision(args.revision, toolContext),
+				access.normalizedPath,
 				invocation.signal,
 			);
-			const page = selectQueryPage(
+			const page = pager.select(
 				result.status === "ok"
-					? formatRanges(result.content, parsed.data.ranges)
+					? formatRanges(result.content, args.ranges)
 					: `[${result.status}]`,
-				parsed.data.page,
-				JSON.stringify({ ...parsed.data, page: undefined }),
-				deliveredPagesByQuery,
+				args.page,
+				JSON.stringify({ ...args, page: undefined }),
 			);
-			const output = { ...page, path: parsed.data.path };
-			recordResult(toolContext, "read_file", output);
-			return output;
+			return recordContextResult(toolContext, "read_file", {
+				...page,
+				path: args.path,
+			});
 		},
 	});
 }
 
 export function createSearchRepoTool(toolContext: ReviewToolContext) {
-	const deliveredPagesByQuery = new Map<string, Set<number>>();
+	const pager = createQueryPager(
+		toolContext,
+		"search_repo",
+		SEARCH_PAGE_CONTENT_BYTES,
+	);
 	const uniqueQueryKeys = new Set<string>();
 	const noMatchQueryKeys = new Set<string>();
-	const schema = z.preprocess(
-		(args) => {
-			if (typeof args !== "object" || args === null) {
-				return args;
-			}
-			const rawArgs = args as Record<string, unknown>;
-			const requestedContextLines = rawArgs.contextLines;
-			return {
-				...rawArgs,
-				...(Array.isArray(rawArgs.paths)
-					? { paths: rawArgs.paths.filter((path) => path !== "") }
-					: {}),
-				...(typeof requestedContextLines === "number" &&
-				Number.isInteger(requestedContextLines) &&
-				requestedContextLines > MAX_SEARCH_CONTEXT_LINES
-					? { contextLines: MAX_SEARCH_CONTEXT_LINES }
-					: {}),
-			};
-		},
-		z.object({
-			revision: revisionSchema,
-			patterns: z
-				.array(z.string().min(1).max(500))
-				.min(1)
-				.max(MAX_SEARCH_PATTERNS),
-			patternType: z.enum(["literal", "regex"]).default("literal"),
-			paths: pathsSchema,
-			contextLines: z
-				.number()
-				.int()
-				.min(0)
-				.max(MAX_SEARCH_CONTEXT_LINES)
-				.default(0),
-			page: pageSchema,
-		}),
-	);
-	return defineTool("search_repo", {
+	const metrics = toolContext.state.inspection.searchRepoMetrics;
+	return defineReviewTool("search_repo", {
 		description:
 			"Search repository text at a fixed review revision for 1 to 8 patterns. Returns matching lines with up to 12 lines of surrounding context. Start with page 1 and continue only with nextPage from that exact query; use read_file for larger ranges.",
-		parameters: schema,
+		schema: z.preprocess(
+			(args) => {
+				if (typeof args !== "object" || args === null) {
+					return args;
+				}
+				const rawArgs = args as Record<string, unknown>;
+				const requestedContextLines = rawArgs.contextLines;
+				return {
+					...rawArgs,
+					...(Array.isArray(rawArgs.paths)
+						? { paths: rawArgs.paths.filter((path) => path !== "") }
+						: {}),
+					...(typeof requestedContextLines === "number" &&
+					Number.isInteger(requestedContextLines) &&
+					requestedContextLines > MAX_SEARCH_CONTEXT_LINES
+						? { contextLines: MAX_SEARCH_CONTEXT_LINES }
+						: {}),
+				};
+			},
+			z.strictObject({
+				revision: revisionSchema,
+				patterns: z
+					.array(z.string().min(1).max(500))
+					.min(1)
+					.max(MAX_SEARCH_PATTERNS),
+				patternType: z.enum(["literal", "regex"]).default("literal"),
+				paths: pathsSchema,
+				contextLines: z
+					.number()
+					.int()
+					.min(0)
+					.max(MAX_SEARCH_CONTEXT_LINES)
+					.default(0),
+				page: pageSchema,
+			}),
+		),
 		handler: async (args, invocation) => {
-			const parsed = schema.safeParse(args);
-			if (!parsed.success) {
-				return toRejectedResult(
-					`Invalid repository search: ${parsed.error.message}`,
-				);
-			}
-			toolContext.logger?.info(
-				"Copilot repository search request",
-				parsed.data,
-			);
-			let content: string;
+			toolContext.logger.info("Copilot repository search request", args);
+			const commit = resolveRevision(args.revision, toolContext);
+			let files: GitSearchFileMatches[];
 			try {
-				content = await toolContext.git.searchTextAtCommit(
-					resolveRevision(parsed.data.revision, toolContext),
-					parsed.data.patterns,
-					parsed.data.patternType,
-					parsed.data.paths,
-					parsed.data.contextLines,
-					invocation.signal,
-				);
+				files = (
+					await toolContext.git.searchTextAtCommit({
+						commit,
+						patterns: args.patterns,
+						patternType: args.patternType,
+						paths: args.paths,
+						excludeGlobs: REPO_SEARCH_EXCLUDE_GLOBS,
+						contextLines: args.contextLines,
+						signal: invocation.signal,
+					})
+				).filter((file) => getRepoFileAccessDecision(file.path).include);
 			} catch (error) {
 				if (error instanceof GitInvalidSearchPatternError) {
-					return toRejectedResult(
+					return rejectToolCall(
 						"Invalid repository search regex. Use a valid extended regular expression or retry with patternType literal.",
 					);
 				}
 				throw error;
 			}
-			const queryKey = JSON.stringify({ ...parsed.data, page: undefined });
-			toolContext.inspectionState.searchRepoMetrics ??= {
-				uniqueQueries: 0,
-				duplicateQueries: 0,
-				wholeRepoQueries: 0,
-				noMatchQueries: 0,
-			};
-			const metrics = toolContext.inspectionState.searchRepoMetrics;
-			if (deliveredPagesByQuery.get(queryKey)?.has(parsed.data.page)) {
+			const content = formatSearchMatches(commit, files);
+			const queryKey = JSON.stringify({ ...args, page: undefined });
+			if (pager.hasDelivered(queryKey, args.page)) {
 				metrics.duplicateQueries += 1;
 			}
 			if (!uniqueQueryKeys.has(queryKey)) {
 				uniqueQueryKeys.add(queryKey);
 				metrics.uniqueQueries += 1;
-				if (parsed.data.paths.length === 0) {
+				if (args.paths.length === 0) {
 					metrics.wholeRepoQueries += 1;
 				}
 			}
@@ -280,63 +297,60 @@ export function createSearchRepoTool(toolContext: ReviewToolContext) {
 				metrics.noMatchQueries += 1;
 			}
 			const scope =
-				parsed.data.paths.length === 0
+				args.paths.length === 0
 					? "entire repository"
-					: `${parsed.data.paths.length} pathspec${parsed.data.paths.length === 1 ? "" : "s"}`;
-			const matchSummary = summarizeSearchMatches(content);
-			const patternLabel = `${parsed.data.patterns.length} ${parsed.data.patternType} pattern${parsed.data.patterns.length === 1 ? "" : "s"}`;
-			const output = {
-				...selectQueryPage(
+					: `${args.paths.length} pathspec${args.paths.length === 1 ? "" : "s"}`;
+			const patternLabel = `${args.patterns.length} ${args.patternType} pattern${args.patterns.length === 1 ? "" : "s"}`;
+			return recordContextResult(toolContext, "search_repo", {
+				...pager.select(
 					content ||
-						`No matches at ${parsed.data.revision} across ${scope} for ${patternLabel}.`,
-					parsed.data.page,
+						`No matches at ${args.revision} across ${scope} for ${patternLabel}.`,
+					args.page,
 					queryKey,
-					deliveredPagesByQuery,
-					SEARCH_PAGE_CONTENT_BYTES,
 				),
-				searchedRevision: parsed.data.revision,
+				searchedRevision: args.revision,
 				searchScope: scope,
-				patternType: parsed.data.patternType,
-				patternCount: parsed.data.patterns.length,
-				...matchSummary,
-			};
-			recordResult(toolContext, "search_repo", output);
-			return output;
+				patternType: args.patternType,
+				patternCount: args.patterns.length,
+				...summarizeSearchMatches(files),
+			});
 		},
 	});
 }
 
 export function createFindFilesTool(toolContext: ReviewToolContext) {
-	const deliveredPagesByQuery = new Map<string, Set<number>>();
-	const schema = z.object({
-		revision: revisionSchema,
-		paths: pathsSchema,
-		page: pageSchema,
-	});
-	return defineTool("find_files", {
+	const pager = createQueryPager(toolContext, "find_files");
+	return defineReviewTool("find_files", {
 		description:
 			"List tracked repository files at a fixed review revision using exact paths, directory prefixes, or glob patterns.",
-		parameters: schema,
+		schema: z.strictObject({
+			revision: revisionSchema,
+			paths: pathsSchema,
+			page: pageSchema,
+		}),
 		handler: async (args, invocation) => {
-			const parsed = schema.safeParse(args);
-			if (!parsed.success) {
-				return toRejectedResult(
-					`Invalid file listing: ${parsed.error.message}`,
-				);
-			}
-			const content = await toolContext.git.listFilesAtCommit(
-				resolveRevision(parsed.data.revision, toolContext),
-				parsed.data.paths,
-				invocation.signal,
+			const files = (
+				await toolContext.git.listFilesAtCommit(
+					resolveRevision(args.revision, toolContext),
+					invocation.signal,
+				)
+			).filter(
+				(filePath) =>
+					(args.paths.length === 0 ||
+						args.paths.some((pattern) =>
+							matchesRepoPathPattern(filePath, pattern),
+						)) &&
+					getRepoFileAccessDecision(filePath).include,
 			);
-			const output = selectQueryPage(
-				content || "No matching files.",
-				parsed.data.page,
-				JSON.stringify({ ...parsed.data, page: undefined }),
-				deliveredPagesByQuery,
+			return recordContextResult(
+				toolContext,
+				"find_files",
+				pager.select(
+					files.join("\n") || "No matching files.",
+					args.page,
+					JSON.stringify({ ...args, page: undefined }),
+				),
 			);
-			recordResult(toolContext, "find_files", output);
-			return output;
 		},
 	});
 }

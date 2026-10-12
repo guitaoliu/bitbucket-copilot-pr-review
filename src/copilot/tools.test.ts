@@ -1,32 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { Tool } from "@github/copilot-sdk";
 import {
 	GitInvalidSearchPatternError,
 	type GitRepository,
 } from "../git/repo.ts";
-import type {
-	FindingDraft,
-	ReviewContext,
-	ReviewSummaryDrafts,
-} from "../review/types.ts";
+import type { ReviewContext } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
-import { ReviewBundle, selectPage } from "./review-bundle.ts";
+import { ReviewBundle } from "./review-bundle.ts";
+import { createReviewToolTelemetryTracker } from "./telemetry.ts";
 import {
-	createReviewToolContext,
-	type ReviewInspectionState,
+	createReviewToolState,
+	type ReviewToolState,
 } from "./tools/context.ts";
-import { createEmitFindingTool } from "./tools/emit-finding.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
-import { createRecordChangeAreaSummaryTool } from "./tools/record-change-area-summary.ts";
-import { createRecordPrSummaryTool } from "./tools/record-pr-summary.ts";
-import {
-	createFindFilesTool,
-	createReadFileTool,
-	createSearchRepoTool,
-} from "./tools/repository-context.ts";
-import { createReviewChangesTool } from "./tools/review-changes.ts";
 
 const reviewContext: ReviewContext = {
 	repoRoot: "/tmp/repo",
@@ -63,7 +50,6 @@ const reviewContext: ReviewContext = {
 			path: "src/new-name.ts",
 			oldPath: "src/old-name.ts",
 			status: "renamed",
-			patch: "diff --git a/src/old-name.ts b/src/new-name.ts",
 			changedLines: [10, 11],
 			hunks: [
 				{
@@ -82,20 +68,6 @@ const reviewContext: ReviewContext = {
 		{
 			path: "src/multi-hunk.ts",
 			status: "modified",
-			patch: [
-				"diff --git a/src/multi-hunk.ts b/src/multi-hunk.ts",
-				"index 1111111..2222222 100644",
-				"--- a/src/multi-hunk.ts",
-				"+++ b/src/multi-hunk.ts",
-				"@@ -1,3 +1,3 @@",
-				"-const first = oldValue;",
-				"+const first = newValue;",
-				" export { first };",
-				"@@ -10,3 +10,4 @@",
-				" const stable = true;",
-				"+const second = addedValue;",
-				" export { stable };",
-			].join("\n"),
 			changedLines: [1, 10],
 			hunks: [
 				{
@@ -122,61 +94,115 @@ const reviewContext: ReviewContext = {
 	],
 };
 
+const finding = {
+	path: "src/new-name.ts",
+	line: 10,
+	severity: "HIGH",
+	type: "BUG",
+	confidence: "high",
+	title: "Broken behavior",
+	details: "The changed line breaks the reviewed behavior.",
+};
+
+type ToolResult = {
+	resultType?: string;
+	textResultForLlm?: string;
+	page?: number;
+	totalPages?: number;
+	content?: string;
+	nextPage?: number;
+	outOfRange?: true;
+	requestedPage?: number;
+	paginationReset?: true;
+	searchedRevision?: string;
+	searchScope?: string;
+	patternType?: string;
+	patternCount?: number;
+	matchingLineCount?: number;
+	matchedFileCount?: number;
+};
+
+type LogEntry = { message: string; details: unknown[] };
+
+function createLoggerSpy(): {
+	logger: Logger;
+	info: LogEntry[];
+	warn: LogEntry[];
+} {
+	const info: LogEntry[] = [];
+	const warn: LogEntry[] = [];
+	return {
+		logger: {
+			debug() {},
+			info(message, ...details) {
+				info.push({ message, details });
+			},
+			warn(message, ...details) {
+				warn.push({ message, details });
+			},
+			error() {},
+			trace() {},
+			json() {},
+		},
+		info,
+		warn,
+	};
+}
+
 function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 	return {
 		diffPaths: async () => "",
-		listFilesAtCommit: async () => "",
+		listFilesAtCommit: async () => [],
 		readTextFileAtCommit: async () => ({ status: "not_found" as const }),
-		searchTextAtCommit: async () => "",
+		searchTextAtCommit: async () => [],
 		...overrides,
 	} as GitRepository;
 }
 
-function createSummaryDrafts(): ReviewSummaryDrafts {
-	return {};
-}
-
-function getHandler<TArgs, TResult>(tool: Tool<TArgs>) {
-	return tool.handler as (
-		args: TArgs,
-		invocation: {
-			sessionId: string;
-			toolCallId: string;
-			toolName: string;
-			arguments: unknown;
-		},
-	) => Promise<TResult>;
-}
-
-function toolInvocation(toolName: string) {
-	return {
-		sessionId: "session",
-		toolCallId: "tool",
-		toolName,
-		arguments: {},
+function createTools(
+	options: {
+		context?: ReviewContext;
+		git?: GitRepository;
+		logger?: Logger;
+		reviewBundle?: ReviewBundle;
+	} = {},
+) {
+	const context = options.context ?? reviewContext;
+	const git = options.git ?? createGitStub();
+	const state: ReviewToolState = createReviewToolState();
+	const tools = createReviewTools({
+		context,
+		git,
+		logger: options.logger ?? createLoggerSpy().logger,
+		reviewBundle: options.reviewBundle ?? new ReviewBundle(context, git),
+		state,
+		toolCalls: createReviewToolTelemetryTracker(),
+	});
+	let callCount = 0;
+	const invoke = async (
+		toolName: (typeof REVIEW_TOOL_NAMES)[number],
+		args: Record<string, unknown>,
+	): Promise<ToolResult & string> => {
+		const tool = tools.find((candidate) => candidate.name === toolName);
+		assert.ok(tool?.handler, `Expected tool ${toolName}`);
+		callCount += 1;
+		return (await tool.handler(args, {
+			sessionId: "session",
+			toolCallId: `${toolName}-${callCount}`,
+			toolName,
+			arguments: args,
+		})) as ToolResult & string;
 	};
+	return { tools, state, invoke };
 }
 
 describe("Copilot tools", () => {
 	it("creates only the active review tools in the published order", () => {
-		const tools = createReviewTools(
-			reviewContext,
-			createGitStub(),
-			[],
-			createSummaryDrafts(),
-		);
+		const { tools } = createTools();
 
 		assert.deepEqual(
 			tools.map((tool) => tool.name),
-			[
-				"review_changes",
-				"read_file",
-				"search_repo",
-				"find_files",
-				"record_pr_summary",
-				"record_change_area_summary",
-				"emit_finding",
-			],
+			[...REVIEW_TOOL_NAMES],
 		);
 		assert.deepEqual(REVIEW_TOOL_NAMES, [
 			"review_changes",
@@ -191,12 +217,17 @@ describe("Copilot tools", () => {
 			tools.find((tool) => tool.name === "read_file")?.overridesBuiltInTool,
 			true,
 		);
+		assert.ok(tools.every((tool) => tool.skipPermission === undefined));
 	});
 
 	it("pages trusted guidance, skill metadata, and the complete diff", async () => {
 		const git = createGitStub({
-			listFilesAtCommit: async () =>
-				"AGENTS.md\nsrc/AGENTS.md\n.agents/skills/review/SKILL.md\n",
+			listFilesAtCommit: async () => [
+				"AGENTS.md",
+				"src/AGENTS.md",
+				".agents/skills/review/SKILL.md",
+				"src/new-name.ts",
+			],
 			readTextFileAtCommit: async (_commit, filePath) => ({
 				status: "ok" as const,
 				content: filePath.endsWith("/SKILL.md")
@@ -207,32 +238,18 @@ describe("Copilot tools", () => {
 				`diff for ${paths.join(",")}\n${"x".repeat(45_000)}`,
 		});
 		const reviewBundle = new ReviewBundle(reviewContext, git);
-		const inspectionState: ReviewInspectionState = {};
-		const tool = createReviewChangesTool(
-			createReviewToolContext(
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-				inspectionState,
-				undefined,
-				reviewBundle,
-			),
-		);
-		type PageResult = Awaited<ReturnType<ReviewBundle["getPage"]>>;
-		const handler = getHandler<{ page: number }, PageResult>(tool);
+		const { invoke, state } = createTools({ git, reviewBundle });
 
-		const first = await handler({ page: 1 }, toolInvocation("review_changes"));
+		const first = await invoke("review_changes", { page: 1 });
 		const content = [first.content];
-		for (let page = 2; page <= first.totalPages; page += 1) {
-			content.push(
-				(await handler({ page }, toolInvocation("review_changes"))).content,
-			);
+		for (let page = 2; page <= (first.totalPages ?? 0); page += 1) {
+			content.push((await invoke("review_changes", { page })).content);
 		}
 		const result = content.join("");
 
 		assert.match(result, /trusted guidance: AGENTS\.md/);
 		assert.match(result, /trusted guidance: src\/AGENTS\.md/);
+		assert.doesNotMatch(result, /trusted guidance: src\/new-name\.ts/);
 		assert.match(result, /\.agents\/skills\/review\/SKILL\.md/);
 		assert.match(result, /description: Use for reviewing risky changes\./);
 		assert.match(result, /src\/new-name\.ts/);
@@ -242,49 +259,26 @@ describe("Copilot tools", () => {
 			totalPages: first.totalPages,
 			complete: true,
 		});
-		assert.ok(first.totalPages > 1);
-		assert.ok(Buffer.byteLength(first.content) <= 40_000);
+		assert.ok((first.totalPages ?? 0) > 1);
+		assert.ok(Buffer.byteLength(first.content ?? "") <= 40_000);
+		assert.ok((state.inspection.resultCharsByTool.review_changes ?? 0) > 0);
 	});
 
 	it("rejects the summary until every review page is delivered", async () => {
 		const git = createGitStub({
-			listFilesAtCommit: async () => "",
 			diffPaths: async (_base, _head, paths) =>
 				`${paths.at(-1)}\n${"x".repeat(70_000)}`,
 		});
 		const reviewBundle = new ReviewBundle(reviewContext, git);
-		const summaryDrafts = createSummaryDrafts();
-		const toolContext = createReviewToolContext(
-			reviewContext,
-			git,
-			[],
-			summaryDrafts,
-			{},
-			undefined,
-			reviewBundle,
-		);
-		type PageResult = Awaited<ReturnType<ReviewBundle["getPage"]>>;
-		const inspect = getHandler<{ page: number }, PageResult>(
-			createReviewChangesTool(toolContext),
-		);
-		const summarize = getHandler<
-			{ summary: string },
-			string | { resultType: string; textResultForLlm: string }
-		>(createRecordPrSummaryTool(toolContext));
+		const { invoke, state } = createTools({ git, reviewBundle });
 
-		const first = await inspect({ page: 1 }, toolInvocation("review_changes"));
-		const rejected = await summarize(
-			{ summary: "Summary" },
-			toolInvocation("record_pr_summary"),
-		);
-		assert.equal(
-			typeof rejected === "string" ? rejected : rejected.resultType,
-			"rejected",
-		);
-		assert.match(JSON.stringify(rejected), /review_changes pages: 2/);
+		const first = await invoke("review_changes", { page: 1 });
+		const rejected = await invoke("record_pr_summary", { summary: "Summary" });
+		assert.equal(rejected.resultType, "failure");
+		assert.match(rejected.textResultForLlm ?? "", /review_changes pages: 2/);
 
-		for (let page = 2; page <= first.totalPages; page += 1) {
-			await inspect({ page }, toolInvocation("review_changes"));
+		for (let page = 2; page <= (first.totalPages ?? 0); page += 1) {
+			await invoke("review_changes", { page });
 		}
 
 		assert.deepEqual(reviewBundle.getCoverage(), {
@@ -293,91 +287,51 @@ describe("Copilot tools", () => {
 			complete: true,
 		});
 		assert.equal(
-			await summarize(
-				{ summary: "Summary" },
-				toolInvocation("record_pr_summary"),
-			),
+			await invoke("record_pr_summary", { summary: "Summary" }),
 			"Recorded the pull request summary.",
 		);
+		assert.equal(state.summaryDrafts.prSummary, "Summary");
 	});
 
 	it("pages search queries, forwards patterns, and clamps context", async () => {
-		const infoEntries: Array<{ message: string; details: unknown[] }> = [];
+		const logSpy = createLoggerSpy();
 		const contextLines: number[] = [];
 		const requestedPatterns: string[][] = [];
 		const requestedPaths: string[][] = [];
-		const warnings: unknown[][] = [];
-		const inspectionState: ReviewInspectionState = {};
-		const logger: Logger = {
-			debug() {},
-			info(message, ...details) {
-				infoEntries.push({ message, details });
-			},
-			warn(...details) {
-				warnings.push(details);
-			},
-			error() {},
-			trace() {},
-			json() {},
-		};
 		const git = createGitStub({
-			searchTextAtCommit: async (
-				_commit,
-				patterns,
-				_patternType,
-				paths,
-				requestedContextLines,
-			) => {
-				requestedPatterns.push([...patterns]);
-				requestedPaths.push([...paths]);
-				contextLines.push(requestedContextLines);
-				return patterns.includes("missing-pattern")
-					? ""
-					: "head:src/example.ts:10:match\n".repeat(3_000);
+			searchTextAtCommit: async (request) => {
+				requestedPatterns.push([...request.patterns]);
+				requestedPaths.push([...request.paths]);
+				contextLines.push(request.contextLines);
+				return request.patterns.includes("missing-pattern")
+					? []
+					: [
+							{
+								path: "src/example.ts",
+								groups: [
+									Array.from({ length: 3_000 }, () => ({
+										lineNumber: 10,
+										isMatch: true,
+										text: "match",
+									})),
+								],
+							},
+						];
 			},
 		});
-		const tool = createSearchRepoTool(
-			createReviewToolContext(
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-				inspectionState,
-				logger,
-			),
-		);
-		type PageResult = {
-			page: number;
-			totalPages: number;
-			content: string;
-			nextPage?: number;
-			outOfRange?: true;
-			requestedPage?: number;
-			paginationReset?: true;
-			searchedRevision: string;
-			searchScope: string;
-			patternType: string;
-			patternCount: number;
-			matchingLineCount: number;
-			matchedFileCount: number;
-		};
-		const handler = getHandler<Record<string, unknown>, PageResult>(
-			tool as unknown as Tool<Record<string, unknown>>,
-		);
+		const { invoke, state } = createTools({ git, logger: logSpy.logger });
 		const patterns = ["proprietary-pattern", "second-pattern"];
 
-		const first = await handler(
-			{
-				revision: "head",
-				patterns,
-				paths: [""],
-			},
-			toolInvocation("search_repo"),
-		);
+		const first = await invoke("search_repo", {
+			revision: "head",
+			patterns,
+			paths: [""],
+		});
 
-		assert.ok(first.totalPages > 1);
+		assert.ok((first.totalPages ?? 0) > 1);
 		assert.equal(first.nextPage, 2);
-		assert.ok(Buffer.byteLength(first.content) <= 16_000);
+		assert.ok(Buffer.byteLength(first.content ?? "") <= 16_000);
+		assert.match(first.content ?? "", /^head-123:src\/example\.ts:10:match\n/);
 		assert.deepEqual(
 			{
 				searchedRevision: first.searchedRevision,
@@ -396,41 +350,19 @@ describe("Copilot tools", () => {
 				matchedFileCount: 1,
 			},
 		);
-		const second = await handler(
-			{
-				revision: "head",
-				patterns,
-				paths: ["src/**"],
-				contextLines: 99,
-				page: 2,
-			},
-			toolInvocation("search_repo"),
-		);
+		const scopedQuery = {
+			revision: "head",
+			patterns,
+			paths: ["src/**"],
+			contextLines: 99,
+			page: 2,
+		};
+		const second = await invoke("search_repo", scopedQuery);
 		assert.equal(second.page, 1);
 		assert.equal(second.requestedPage, 2);
 		assert.equal(second.paginationReset, true);
-		const continued = await handler(
-			{
-				revision: "head",
-				patterns,
-				paths: ["src/**"],
-				contextLines: 99,
-				page: 2,
-			},
-			toolInvocation("search_repo"),
-		);
-		assert.equal(continued.page, 2);
-		const duplicate = await handler(
-			{
-				revision: "head",
-				patterns,
-				paths: ["src/**"],
-				contextLines: 99,
-				page: 2,
-			},
-			toolInvocation("search_repo"),
-		);
-		assert.equal(duplicate.page, 2);
+		assert.equal((await invoke("search_repo", scopedQuery)).page, 2);
+		assert.equal((await invoke("search_repo", scopedQuery)).page, 2);
 		assert.deepEqual(contextLines, [0, 12, 12, 12]);
 		assert.deepEqual(requestedPatterns, [
 			patterns,
@@ -439,709 +371,508 @@ describe("Copilot tools", () => {
 			patterns,
 		]);
 		assert.deepEqual(requestedPaths, [[], ["src/**"], ["src/**"], ["src/**"]]);
-		assert.match(JSON.stringify(infoEntries), /proprietary-pattern/);
-		assert.match(JSON.stringify(warnings), /pagination/);
-		const noMatches = await handler(
-			{
-				revision: "head",
-				patterns: ["missing-pattern"],
-				paths: [],
-			},
-			toolInvocation("search_repo"),
-		);
+		assert.match(JSON.stringify(logSpy.info), /proprietary-pattern/);
+		assert.match(JSON.stringify(logSpy.warn), /pagination/);
+		const noMatches = await invoke("search_repo", {
+			revision: "head",
+			patterns: ["missing-pattern"],
+			paths: [],
+		});
 		assert.equal(noMatches.matchingLineCount, 0);
 		assert.equal(noMatches.matchedFileCount, 0);
 		assert.match(
-			noMatches.content,
+			noMatches.content ?? "",
 			/No matches at head across entire repository for 1 literal pattern/,
 		);
-		assert.deepEqual(inspectionState.searchRepoMetrics, {
+		assert.deepEqual(state.inspection.searchRepoMetrics, {
 			uniqueQueries: 3,
 			duplicateQueries: 1,
 			wholeRepoQueries: 2,
 			noMatchQueries: 1,
 		});
+	});
 
-		assert.deepEqual(selectPage("one page", 2), {
-			page: 2,
+	it("reports out-of-range review pages without counting them as delivered", async () => {
+		const reviewBundle = new ReviewBundle(reviewContext, createGitStub());
+		const { invoke } = createTools({ reviewBundle });
+
+		const result = await invoke("review_changes", { page: 2 });
+
+		assert.deepEqual(
+			{
+				page: result.page,
+				totalPages: result.totalPages,
+				outOfRange: result.outOfRange,
+			},
+			{ page: 2, totalPages: 1, outOfRange: true },
+		);
+		assert.deepEqual(reviewBundle.getCoverage(), {
+			deliveredPages: 0,
 			totalPages: 1,
-			content: "",
-			outOfRange: true,
+			complete: false,
 		});
 	});
 
+	it("rejects invalid arguments before running the tool", async () => {
+		const { invoke, state } = createTools();
+
+		const result = await invoke("emit_finding", {
+			...finding,
+			severity: "CRITICAL",
+			unexpected: true,
+		});
+
+		assert.equal(result.resultType, "failure");
+		assert.match(
+			result.textResultForLlm ?? "",
+			/^Invalid emit_finding arguments:/,
+		);
+		assert.match(result.textResultForLlm ?? "", /severity/);
+		assert.match(result.textResultForLlm ?? "", /unexpected/);
+		assert.deepEqual(state.drafts, []);
+	});
+
 	it("rejects malformed regex searches so Copilot can retry", async () => {
-		const tool = createSearchRepoTool(
-			createReviewToolContext(
-				reviewContext,
-				createGitStub({
-					searchTextAtCommit: async () => {
-						throw new GitInvalidSearchPatternError(
-							"Git search failed at head-123 using 1 regex patterns across all pathspecs: fatal: -e option, 'removeUser(': parentheses not balanced",
-						);
-					},
-				}),
-				[],
-				createSummaryDrafts(),
-				{},
-			),
-		);
-		const handler = getHandler<
-			Record<string, unknown>,
-			{ resultType: string; textResultForLlm: string }
-		>(tool as unknown as Tool<Record<string, unknown>>);
+		const { invoke } = createTools({
+			git: createGitStub({
+				searchTextAtCommit: async () => {
+					throw new GitInvalidSearchPatternError(
+						"Git search failed at head-123 using 1 regex patterns across all pathspecs: fatal: -e option, 'removeUser(': parentheses not balanced",
+					);
+				},
+			}),
+		});
 
-		const result = await handler(
-			{
-				revision: "head",
-				patterns: ["removeUser("],
-				patternType: "regex",
-				paths: [],
-			},
-			toolInvocation("search_repo"),
-		);
+		const result = await invoke("search_repo", {
+			revision: "head",
+			patterns: ["removeUser("],
+			patternType: "regex",
+			paths: [],
+		});
 
-		assert.equal(result.resultType, "rejected");
-		assert.match(result.textResultForLlm, /retry with patternType literal/);
+		assert.equal(result.resultType, "failure");
+		assert.match(
+			result.textResultForLlm ?? "",
+			/retry with patternType literal/,
+		);
 	});
 
 	it("preserves non-pattern repository search failures", async () => {
-		const tool = createSearchRepoTool(
-			createReviewToolContext(
-				reviewContext,
-				createGitStub({
-					searchTextAtCommit: async () => {
-						throw new Error("Git search failed: bad revision");
-					},
-				}),
-				[],
-				createSummaryDrafts(),
-				{},
-			),
-		);
-		const handler = getHandler<Record<string, unknown>, unknown>(
-			tool as unknown as Tool<Record<string, unknown>>,
-		);
+		const { invoke } = createTools({
+			git: createGitStub({
+				searchTextAtCommit: async () => {
+					throw new Error("Git search failed: bad revision");
+				},
+			}),
+		});
 
 		await assert.rejects(
-			handler(
-				{
-					revision: "head",
-					patterns: ["value"],
-					patternType: "regex",
-					paths: [],
-				},
-				toolInvocation("search_repo"),
-			),
+			invoke("search_repo", {
+				revision: "head",
+				patterns: ["value"],
+				patternType: "regex",
+				paths: [],
+			}),
 			/Git search failed: bad revision/,
 		);
 	});
 
 	it("rejects read_file paths that escape the repository", async () => {
-		const git = createGitStub();
-		const tool = createReadFileTool(
-			createReviewToolContext(
-				reviewContext,
-				git,
-				[],
-				createSummaryDrafts(),
-				{},
-			),
-		);
-		const handler = getHandler<
-			Record<string, unknown>,
-			{ resultType: string; textResultForLlm: string }
-		>(tool as unknown as Tool<Record<string, unknown>>);
+		const { invoke } = createTools();
 
-		const result = await handler(
-			{
-				revision: "head",
-				path: "../secrets",
-			},
-			toolInvocation("read_file"),
-		);
+		const result = await invoke("read_file", {
+			revision: "head",
+			path: "../secrets",
+		});
 
-		assert.equal(result.resultType, "rejected");
-		assert.match(result.textResultForLlm, /relative repository path/);
+		assert.equal(result.resultType, "failure");
+		assert.match(result.textResultForLlm ?? "", /relative repository path/);
+	});
+
+	it("keeps secret-bearing files unreadable, unsearchable, and unlisted", async () => {
+		const secretPaths = [
+			".env",
+			"config/.env.local",
+			"infra/id_rsa",
+			"config/secrets/api.txt",
+		];
+		const readPaths: string[] = [];
+		const excludeGlobs: string[][] = [];
+		const { invoke } = createTools({
+			git: createGitStub({
+				readTextFileAtCommit: async (_commit, filePath) => {
+					readPaths.push(filePath);
+					return { status: "ok" as const, content: "token = SECRET" };
+				},
+				listFilesAtCommit: async () => [...secretPaths, "src/app.ts"],
+				searchTextAtCommit: async (request) => {
+					excludeGlobs.push([...request.excludeGlobs]);
+					return [...secretPaths, "src/app.ts"].map((path) => ({
+						path,
+						groups: [
+							[
+								{
+									lineNumber: 1,
+									isMatch: true,
+									text:
+										path === "src/app.ts" ? "token = env()" : "token = SECRET",
+								},
+							],
+						],
+					}));
+				},
+			}),
+		});
+
+		for (const path of secretPaths) {
+			const result = await invoke("read_file", { revision: "head", path });
+			assert.equal(result.resultType, "failure", path);
+			assert.match(
+				result.textResultForLlm ?? "",
+				/potential secret-bearing path/,
+			);
+		}
+		assert.deepEqual(readPaths, []);
+		const allowed = await invoke("read_file", {
+			revision: "head",
+			path: "./src/app.ts",
+		});
+		assert.equal(allowed.content, "1\ttoken = SECRET");
+		assert.deepEqual(readPaths, ["src/app.ts"]);
+
+		const listing = await invoke("find_files", { revision: "head", paths: [] });
+		assert.equal(listing.content, "src/app.ts");
+
+		const searched = await invoke("search_repo", {
+			revision: "head",
+			patterns: ["token"],
+			paths: [],
+		});
+		assert.equal(searched.content, "head-123:src/app.ts:1:token = env()\n");
+		assert.equal(searched.matchedFileCount, 1);
+		assert.ok(excludeGlobs[0]?.includes("**/node_modules/**"));
 	});
 
 	it("rejects emit_finding when the line is not changed", async () => {
-		const drafts: FindingDraft[] = [];
-		const tool = createEmitFindingTool(
-			createReviewToolContext(
-				reviewContext,
-				createGitStub(),
-				drafts,
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			FindingDraft,
-			{ resultType: string; textResultForLlm: string }
-		>(tool);
+		const { invoke, state } = createTools();
 
-		const result = await handler(
-			{
-				path: "src/new-name.ts",
-				line: 9,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "Wrong line",
-				details: "This line is unchanged.",
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "emit_finding",
-				arguments: {},
-			},
-		);
+		const result = await invoke("emit_finding", { ...finding, line: 9 });
 
 		assert.deepEqual(result, {
-			resultType: "rejected",
-			textResultForLlm: "Line 9 is not a changed line in src/new-name.ts.",
+			resultType: "failure",
+			textResultForLlm:
+				"Line 9 is not a changed line in src/new-name.ts. Valid changed line ranges: 10-11",
 		});
-		assert.deepEqual(drafts, []);
+		assert.deepEqual(state.drafts, []);
+		assert.deepEqual(state.droppedFindings, {
+			unknown_file: 0,
+			unchanged_line: 1,
+		});
 	});
 
 	it("normalizes oldPath findings onto the reviewed head path", async () => {
-		const drafts: FindingDraft[] = [];
-		const tool = createEmitFindingTool(
-			createReviewToolContext(
-				reviewContext,
-				createGitStub(),
-				drafts,
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<FindingDraft, string>(tool);
+		const { invoke, state } = createTools();
 
-		const result = await handler(
-			{
-				path: "src/old-name.ts",
-				line: 10,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "Old path issue",
-				details: "The finding started from the base path.",
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "emit_finding",
-				arguments: {},
-			},
-		);
+		const result = await invoke("emit_finding", {
+			...finding,
+			path: "src/old-name.ts",
+		});
 
 		assert.equal(
 			result,
 			"Recorded finding 1 for src/new-name.ts:10; normalized path from src/old-name.ts to src/new-name.ts.",
 		);
-		assert.deepEqual(drafts, [
-			{
-				path: "src/new-name.ts",
-				line: 10,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "Old path issue",
-				details: "The finding started from the base path.",
-			},
-		]);
+		assert.deepEqual(state.drafts, [finding]);
 	});
 
 	it("loads changed lines lazily for line-level findings", async () => {
-		const drafts: FindingDraft[] = [];
 		let patchLoads = 0;
-		const lazyContext: ReviewContext = {
-			...reviewContext,
-			reviewableFiles: [
-				{
-					path: "src/service.ts",
-					status: "modified",
-					additions: 1,
-					deletions: 0,
-					isBinary: false,
-				},
-			],
-		};
-		const tool = createEmitFindingTool(
-			createReviewToolContext(
-				lazyContext,
-				createGitStub({
-					diffFilePatch: async () => {
-						patchLoads += 1;
-						return [
-							"diff --git a/src/service.ts b/src/service.ts",
-							"@@ -9,0 +10 @@",
-							"+const value = 1;",
-						].join("\n");
+		const { invoke } = createTools({
+			context: {
+				...reviewContext,
+				reviewableFiles: [
+					{
+						path: "src/service.ts",
+						status: "modified",
+						additions: 1,
+						deletions: 0,
+						isBinary: false,
 					},
-				}),
-				drafts,
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<FindingDraft, string>(tool);
-
-		const result = await handler(
-			{
-				path: "src/service.ts",
-				line: 10,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "Lazy line issue",
-				details: "The changed line is validated on demand.",
+				],
 			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "emit_finding",
-				arguments: {},
-			},
-		);
+			git: createGitStub({
+				diffFilePatch: async () => {
+					patchLoads += 1;
+					return [
+						"diff --git a/src/service.ts b/src/service.ts",
+						"@@ -9,0 +10 @@",
+						"+const value = 1;",
+					].join("\n");
+				},
+			}),
+		});
+		const lineFinding = { ...finding, path: "src/service.ts" };
 
-		assert.equal(result, "Recorded finding 1 for src/service.ts:10.");
+		assert.equal(
+			await invoke("emit_finding", lineFinding),
+			"Recorded finding 1 for src/service.ts:10.",
+		);
+		assert.equal(
+			await invoke("emit_finding", { ...lineFinding, title: "Second" }),
+			"Recorded finding 2 for src/service.ts:10.",
+		);
 		assert.equal(patchLoads, 1);
 	});
 
 	it("loads renamed file changed lines with old and new pathspecs", async () => {
-		const drafts: FindingDraft[] = [];
 		let patchPathspec: string | readonly string[] | undefined;
-		const lazyContext: ReviewContext = {
-			...reviewContext,
-			reviewableFiles: [
-				{
-					path: "src/new-name.ts",
-					oldPath: "src/old-name.ts",
-					status: "renamed",
-					additions: 1,
-					deletions: 1,
-					isBinary: false,
-				},
-			],
-		};
-		const tool = createEmitFindingTool(
-			createReviewToolContext(
-				lazyContext,
-				createGitStub({
-					diffFilePatch: async (_base, _head, filePath) => {
-						patchPathspec = filePath;
-						if (Array.isArray(filePath)) {
-							return [
-								"diff --git a/src/old-name.ts b/src/new-name.ts",
-								"similarity index 55%",
-								"rename from src/old-name.ts",
-								"rename to src/new-name.ts",
-								"--- a/src/old-name.ts",
-								"+++ b/src/new-name.ts",
-								"@@ -2 +2 @@ keep",
-								"-old",
-								"+new",
-							].join("\n");
-						}
-
-						return [
-							"diff --git a/src/new-name.ts b/src/new-name.ts",
-							"new file mode 100644",
-							"--- /dev/null",
-							"+++ b/src/new-name.ts",
-							"@@ -0,0 +1,2 @@",
-							"+keep",
-							"+new",
-						].join("\n");
+		const { invoke, state } = createTools({
+			context: {
+				...reviewContext,
+				reviewableFiles: [
+					{
+						path: "src/new-name.ts",
+						oldPath: "src/old-name.ts",
+						status: "renamed",
+						additions: 1,
+						deletions: 1,
+						isBinary: false,
 					},
-				}),
-				drafts,
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			FindingDraft,
-			{ resultType: string; textResultForLlm: string }
-		>(tool);
+				],
+			},
+			git: createGitStub({
+				diffFilePatch: async (_base, _head, filePath) => {
+					patchPathspec = filePath;
+					return [
+						"diff --git a/src/old-name.ts b/src/new-name.ts",
+						"similarity index 55%",
+						"rename from src/old-name.ts",
+						"rename to src/new-name.ts",
+						"--- a/src/old-name.ts",
+						"+++ b/src/new-name.ts",
+						"@@ -2 +2 @@ keep",
+						"-old",
+						"+new",
+					].join("\n");
+				},
+			}),
+		});
 
-		const result = await handler(
-			{
-				path: "src/new-name.ts",
-				line: 1,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "Rename line issue",
-				details: "Line 1 is unchanged after the rename.",
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "emit_finding",
-				arguments: {},
-			},
-		);
+		const result = await invoke("emit_finding", { ...finding, line: 1 });
 
 		assert.deepEqual(patchPathspec, ["src/old-name.ts", "src/new-name.ts"]);
 		assert.deepEqual(result, {
-			resultType: "rejected",
+			resultType: "failure",
 			textResultForLlm:
 				"Line 1 is not a changed line in src/new-name.ts. Valid changed line ranges: 2",
 		});
-		assert.deepEqual(drafts, []);
+		assert.deepEqual(state.drafts, []);
 	});
 
-	it("does not load changed lines for file-level findings", async () => {
-		const drafts: FindingDraft[] = [];
-		let patchLoads = 0;
-		const lazyContext: ReviewContext = {
-			...reviewContext,
-			reviewableFiles: [
-				{
-					path: "src/service.ts",
-					status: "modified",
-					additions: 1,
-					deletions: 0,
-					isBinary: false,
-				},
-			],
-		};
-		const tool = createEmitFindingTool(
-			createReviewToolContext(
-				lazyContext,
-				createGitStub({
-					diffFilePatch: async () => {
-						patchLoads += 1;
-						return "";
+	it("fails closed when the changed lines of a reviewed file cannot be resolved", async () => {
+		const { invoke, state } = createTools({
+			context: {
+				...reviewContext,
+				reviewableFiles: [
+					{
+						path: "src/service.ts",
+						status: "modified",
+						additions: 1,
+						deletions: 0,
+						isBinary: false,
 					},
-				}),
-				drafts,
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<FindingDraft, string>(tool);
+				],
+			},
+			git: createGitStub({ diffFilePatch: async () => "" }),
+		});
 
-		const result = await handler(
-			{
-				path: "src/service.ts",
+		await assert.rejects(
+			invoke("emit_finding", { ...finding, path: "src/service.ts" }),
+			/Unable to resolve changed lines for src\/service\.ts/,
+		);
+		assert.deepEqual(state.drafts, []);
+	});
+
+	it("records file-level findings without loading changed lines", async () => {
+		let patchLoads = 0;
+		const { invoke, state } = createTools({
+			context: {
+				...reviewContext,
+				reviewableFiles: [
+					{
+						path: "src/removed.ts",
+						status: "deleted",
+						additions: 0,
+						deletions: 10,
+						isBinary: false,
+					},
+				],
+			},
+			git: createGitStub({
+				diffFilePatch: async () => {
+					patchLoads += 1;
+					return "";
+				},
+			}),
+		});
+
+		assert.equal(
+			await invoke("emit_finding", {
+				...finding,
+				path: "src/removed.ts",
 				line: 0,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "File-level issue",
-				details: "The file-level finding does not need changed lines.",
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "emit_finding",
-				arguments: {},
-			},
+			}),
+			"Recorded finding 1 for src/removed.ts:file.",
 		);
-
-		assert.equal(result, "Recorded finding 1 for src/service.ts:file.");
+		assert.equal(state.drafts[0]?.path, "src/removed.ts");
 		assert.equal(patchLoads, 0);
 	});
 
-	it("records file-level findings for deleted files", async () => {
-		const drafts: FindingDraft[] = [];
-		const deletedContext: ReviewContext = {
-			...reviewContext,
-			reviewableFiles: [
-				{
-					path: "src/removed.ts",
-					status: "deleted",
-					additions: 0,
-					deletions: 10,
-					isBinary: false,
-				},
-			],
-		};
-		const handler = getHandler<FindingDraft, string>(
-			createEmitFindingTool(
-				createReviewToolContext(
-					deletedContext,
-					createGitStub(),
-					drafts,
-					createSummaryDrafts(),
-				),
-			),
-		);
-
-		assert.equal(
-			await handler(
-				{
-					path: "src/removed.ts",
-					line: 0,
-					severity: "HIGH",
-					type: "BUG",
-					confidence: "high",
-					title: "Required implementation removed",
-					details:
-						"The deletion leaves a required caller without an implementation.",
-				},
-				toolInvocation("emit_finding"),
-			),
-			"Recorded finding 1 for src/removed.ts:file.",
-		);
-		assert.equal(drafts[0]?.path, "src/removed.ts");
-	});
-
 	it("rejects copied-file findings addressed by the source path", async () => {
-		const drafts: FindingDraft[] = [];
-		const copiedReviewContext: ReviewContext = {
-			...reviewContext,
-			reviewableFiles: [
-				{
-					path: "src/copied.ts",
-					oldPath: "src/original.ts",
-					status: "copied",
-					patch: "diff --git a/src/original.ts b/src/copied.ts",
-					changedLines: [10],
-					hunks: [
-						{
-							oldStart: 10,
-							oldLines: 0,
-							newStart: 10,
-							newLines: 1,
-							header: "",
-							changedLines: [10],
-						},
-					],
-					additions: 1,
-					deletions: 0,
-					isBinary: false,
-				},
-			],
-		};
-		const tool = createEmitFindingTool(
-			createReviewToolContext(
-				copiedReviewContext,
-				createGitStub(),
-				drafts,
-				createSummaryDrafts(),
-			),
-		);
-		const handler = getHandler<
-			FindingDraft,
-			{ resultType: string; textResultForLlm: string }
-		>(tool);
-
-		const result = await handler(
-			{
-				path: "src/original.ts",
-				line: 10,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "Copied path issue",
-				details: "Should not resolve through oldPath for copied files.",
+		const { invoke, state } = createTools({
+			context: {
+				...reviewContext,
+				reviewableFiles: [
+					{
+						path: "src/copied.ts",
+						oldPath: "src/original.ts",
+						status: "copied",
+						changedLines: [10],
+						hunks: [],
+						additions: 1,
+						deletions: 0,
+						isBinary: false,
+					},
+				],
 			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "emit_finding",
-				arguments: {},
-			},
-		);
+		});
 
-		assert.equal(result.resultType, "rejected");
-		assert.equal(
-			result.textResultForLlm,
-			"The file src/original.ts is not one of the reviewed files.",
-		);
-		assert.deepEqual(drafts, []);
+		const result = await invoke("emit_finding", {
+			...finding,
+			path: "src/original.ts",
+		});
+
+		assert.deepEqual(result, {
+			resultType: "failure",
+			textResultForLlm:
+				"The file src/original.ts is not one of the reviewed files.",
+		});
+		assert.deepEqual(state.drafts, []);
+		assert.equal(state.droppedFindings.unknown_file, 1);
 	});
 
-	it("marks active read-only tools to skip permission prompts", () => {
-		const toolContext = createReviewToolContext(
-			reviewContext,
-			createGitStub(),
-			[],
-			createSummaryDrafts(),
-		);
-
-		assert.equal(
-			createRecordPrSummaryTool(toolContext).skipPermission,
-			undefined,
-		);
-		assert.equal(createEmitFindingTool(toolContext).skipPermission, undefined);
-	});
-
-	it("describes finding category fields precisely", () => {
-		const toolContext = createReviewToolContext(
-			reviewContext,
-			createGitStub(),
-			[],
-			createSummaryDrafts(),
-		);
-		const emitFindingTool = createEmitFindingTool(toolContext);
-		const emitFindingParameters = emitFindingTool.parameters as {
-			properties?: Record<string, { description?: string }>;
+	it("publishes runtime payload limits in tool schemas", () => {
+		const { tools } = createTools();
+		type JsonSchema = {
+			required?: string[];
+			additionalProperties?: boolean;
+			properties?: Record<string, Record<string, unknown>>;
 		};
+		const jsonSchemaOf = (name: string) =>
+			tools.find((tool) => tool.name === name)?.parameters as JsonSchema;
+		const schemaOf = (name: string) => jsonSchemaOf(name).properties ?? {};
 
+		for (const tool of tools) {
+			assert.equal(
+				jsonSchemaOf(tool.name).additionalProperties,
+				false,
+				tool.name,
+			);
+		}
+		assert.deepEqual(jsonSchemaOf("read_file").required, ["revision", "path"]);
+		assert.deepEqual(jsonSchemaOf("emit_finding").required, [
+			"path",
+			"line",
+			"severity",
+			"type",
+			"confidence",
+			"title",
+			"details",
+		]);
+
+		assert.ok(schemaOf("review_changes").page);
+		assert.ok(schemaOf("read_file").ranges);
+		const search = schemaOf("search_repo");
+		assert.equal(search.contextLines?.default, 0);
+		assert.equal(search.contextLines?.minimum, 0);
+		assert.equal(search.contextLines?.maximum, 12);
+		assert.equal(search.patterns?.minItems, 1);
+		assert.equal(search.patterns?.maxItems, 8);
+		assert.deepEqual(search.patterns?.items, {
+			type: "string",
+			minLength: 1,
+			maxLength: 500,
+		});
+		assert.match(
+			String(search.paths?.description),
+			/empty array for the whole repository/,
+		);
+		assert.ok(schemaOf("find_files").paths);
+
+		const prSummary = schemaOf("record_pr_summary");
+		assert.equal(prSummary.summary?.minLength, 1);
+		assert.equal(prSummary.summary?.maxLength, 1000);
+		assert.match(
+			String(prSummary.summary?.description),
+			/Use short bullet points when that is clearer than one sentence/,
+		);
+
+		const changeArea = schemaOf("record_change_area_summary");
+		assert.equal(changeArea.title?.minLength, 1);
+		assert.equal(changeArea.title?.maxLength, 80);
+		assert.equal(changeArea.paths?.minItems, 1);
+		assert.deepEqual(changeArea.paths?.items, { type: "string", minLength: 1 });
+		assert.equal(changeArea.summary?.minLength, 1);
+		assert.equal(changeArea.summary?.maxLength, 500);
+
+		const emitFinding = schemaOf("emit_finding");
+		assert.equal(emitFinding.path?.minLength, 1);
+		assert.equal(emitFinding.line?.minimum, 0);
+		assert.deepEqual(emitFinding.severity?.enum, ["LOW", "MEDIUM", "HIGH"]);
+		assert.equal(emitFinding.title?.minLength, 1);
+		assert.equal(emitFinding.title?.maxLength, 200);
+		assert.equal(emitFinding.details?.maxLength, 1600);
+		assert.equal(emitFinding.category?.maxLength, 80);
 		assert.equal(
-			emitFindingParameters.properties?.category?.description,
+			emitFinding.category?.description,
 			"Optional short category when obvious and helpful, such as security, correctness, data-integrity, concurrency, reliability, performance, or tests.",
 		);
 	});
 
-	it("publishes runtime payload limits in tool schemas", () => {
-		const toolContext = createReviewToolContext(
-			reviewContext,
-			createGitStub(),
-			[],
-			createSummaryDrafts(),
-		);
-		type Property = {
-			minLength?: number;
-			maxLength?: number;
-			minItems?: number;
-			maxItems?: number;
-			items?: { minLength?: number; maxLength?: number };
-		};
-		const properties = <TArgs>(tool: Tool<TArgs>) =>
-			(tool.parameters as { properties?: Record<string, Property> }).properties;
-		const schemaObjects = [
-			createReviewChangesTool(toolContext),
-			createReadFileTool(toolContext),
-			createSearchRepoTool(toolContext),
-			createFindFilesTool(toolContext),
-		].map((tool) =>
-			(tool.parameters as { toJSONSchema(): unknown }).toJSONSchema(),
-		);
-		const schemas = schemaObjects.map((schema) => JSON.stringify(schema));
-		assert.match(schemas[0] ?? "", /"page"/);
-		assert.match(schemas[1] ?? "", /"ranges"/);
-		assert.match(schemas[2] ?? "", /"patternType"/);
-		const searchRepoSchema = schemaObjects[2] as {
-			properties?: Record<
-				string,
-				{
-					default?: unknown;
-					minimum?: number;
-					maximum?: number;
-					minItems?: number;
-					maxItems?: number;
-					description?: string;
-					items?: { minLength?: number; maxLength?: number };
-				}
-			>;
-		};
-		assert.equal(searchRepoSchema.properties?.contextLines?.default, 0);
-		assert.equal(searchRepoSchema.properties?.contextLines?.minimum, 0);
-		assert.equal(searchRepoSchema.properties?.contextLines?.maximum, 12);
-		assert.equal(searchRepoSchema.properties?.patterns?.minItems, 1);
-		assert.equal(searchRepoSchema.properties?.patterns?.maxItems, 8);
-		assert.equal(searchRepoSchema.properties?.patterns?.items?.minLength, 1);
-		assert.equal(searchRepoSchema.properties?.patterns?.items?.maxLength, 500);
-		assert.match(
-			searchRepoSchema.properties?.paths?.description ?? "",
-			/empty array for the whole repository/,
-		);
-		assert.match(schemas[3] ?? "", /"paths"/);
-		assert.doesNotMatch(schemas.join(""), /"cursor"/);
-
-		const prSummary = properties(createRecordPrSummaryTool(toolContext));
-		assert.equal(prSummary?.summary?.minLength, 1);
-		assert.equal(prSummary?.summary?.maxLength, 1000);
-
-		const changeArea = properties(
-			createRecordChangeAreaSummaryTool(toolContext),
-		);
-		assert.equal(changeArea?.title?.minLength, 1);
-		assert.equal(changeArea?.title?.maxLength, 80);
-		assert.equal(changeArea?.paths?.minItems, 1);
-		assert.equal(changeArea?.paths?.items?.minLength, 1);
-		assert.equal(changeArea?.summary?.minLength, 1);
-		assert.equal(changeArea?.summary?.maxLength, 500);
-
-		const finding = properties(createEmitFindingTool(toolContext));
-		assert.equal(finding?.path?.minLength, 1);
-		assert.equal(finding?.title?.minLength, 1);
-		assert.equal(finding?.title?.maxLength, 200);
-		assert.equal(finding?.details?.maxLength, 1600);
-		assert.equal(finding?.category?.maxLength, 80);
-	});
-
 	it("records and replaces a pull request summary", async () => {
-		const summaryDrafts = createSummaryDrafts();
-		const tool = createRecordPrSummaryTool(
-			createReviewToolContext(
-				reviewContext,
-				createGitStub(),
-				[],
-				summaryDrafts,
-			),
-		);
-		const handler = getHandler<{ summary: string }, string>(tool);
+		const reviewBundle = new ReviewBundle(reviewContext, createGitStub());
+		await reviewBundle.getPage(1);
+		const { invoke, state } = createTools({ reviewBundle });
 
-		const firstResult = await handler(
-			{
-				summary: "Adds stricter validation to the renamed service flow.",
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "record_pr_summary",
-				arguments: {},
-			},
-		);
-		const secondResult = await handler(
-			{
-				summary: "Tightens validation and updates the renamed service path.",
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "record_pr_summary",
-				arguments: {},
-			},
-		);
-
-		assert.equal(firstResult, "Recorded the pull request summary.");
-		assert.equal(secondResult, "Recorded the pull request summary.");
 		assert.equal(
-			summaryDrafts.prSummary,
-			"Tightens validation and updates the renamed service path.",
+			await invoke("record_pr_summary", {
+				summary: "Adds stricter validation to the renamed service flow.",
+			}),
+			"Recorded the pull request summary.",
 		);
-		assert.match(
-			JSON.stringify(tool.parameters),
-			/Use short bullet points when that is clearer than one sentence/,
+		assert.equal(
+			await invoke("record_pr_summary", {
+				summary: "Tightens validation and updates the renamed service path.",
+			}),
+			"Recorded the pull request summary.",
+		);
+		assert.equal(
+			state.summaryDrafts.prSummary,
+			"Tightens validation and updates the renamed service path.",
 		);
 	});
 
 	it("records change areas with reviewed canonical paths", async () => {
-		const summaryDrafts = createSummaryDrafts();
-		const tool = createRecordChangeAreaSummaryTool(
-			createReviewToolContext(
-				reviewContext,
-				createGitStub(),
-				[],
-				summaryDrafts,
-			),
-		);
-		const handler = getHandler<
-			{ title: string; paths: string[]; summary: string },
-			string
-		>(tool);
+		const { invoke, state } = createTools();
 
-		const result = await handler(
-			{
-				title: "Validation flow",
-				paths: ["src/old-name.ts", "src/multi-hunk.ts", "src/multi-hunk.ts"],
-				summary: "Tightens validation across renamed service paths.",
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "record_change_area_summary",
-				arguments: {},
-			},
-		);
+		const result = await invoke("record_change_area_summary", {
+			title: "Validation flow",
+			paths: ["src/old-name.ts", "src/multi-hunk.ts", "src/multi-hunk.ts"],
+			summary: "Tightens validation across renamed service paths.",
+		});
 
 		assert.equal(result, "Recorded the change area summary.");
-		assert.deepEqual(summaryDrafts.changeAreas, [
+		assert.deepEqual(state.summaryDrafts.changeAreas, [
 			{
 				title: "Validation flow",
 				paths: ["src/new-name.ts", "src/multi-hunk.ts"],
@@ -1151,36 +882,16 @@ describe("Copilot tools", () => {
 	});
 
 	it("keeps reviewed path globs compact in change areas", async () => {
-		const summaryDrafts = createSummaryDrafts();
-		const tool = createRecordChangeAreaSummaryTool(
-			createReviewToolContext(
-				reviewContext,
-				createGitStub(),
-				[],
-				summaryDrafts,
-			),
-		);
-		const handler = getHandler<
-			{ title: string; paths: string[]; summary: string },
-			string
-		>(tool);
+		const { invoke, state } = createTools();
 
-		const result = await handler(
-			{
-				title: "Validation flow",
-				paths: ["src/*.ts"],
-				summary: "Tightens validation across renamed service paths.",
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "record_change_area_summary",
-				arguments: {},
-			},
-		);
+		const result = await invoke("record_change_area_summary", {
+			title: "Validation flow",
+			paths: ["src/*.ts"],
+			summary: "Tightens validation across renamed service paths.",
+		});
 
 		assert.equal(result, "Recorded the change area summary.");
-		assert.deepEqual(summaryDrafts.changeAreas, [
+		assert.deepEqual(state.summaryDrafts.changeAreas, [
 			{
 				title: "Validation flow",
 				paths: ["src/*.ts"],
@@ -1190,39 +901,19 @@ describe("Copilot tools", () => {
 	});
 
 	it("rejects change areas that reference files outside the reviewed scope", async () => {
-		const summaryDrafts = createSummaryDrafts();
-		const tool = createRecordChangeAreaSummaryTool(
-			createReviewToolContext(
-				reviewContext,
-				createGitStub(),
-				[],
-				summaryDrafts,
-			),
-		);
-		const handler = getHandler<
-			{ title: string; paths: string[]; summary: string },
-			{ resultType: string; textResultForLlm: string }
-		>(tool);
+		const { invoke, state } = createTools();
 
-		const result = await handler(
-			{
-				title: "Generated files",
-				paths: ["dist/generated.js"],
-				summary: "Updates generated output.",
-			},
-			{
-				sessionId: "session",
-				toolCallId: "tool",
-				toolName: "record_change_area_summary",
-				arguments: {},
-			},
-		);
+		const result = await invoke("record_change_area_summary", {
+			title: "Generated files",
+			paths: ["dist/generated.js"],
+			summary: "Updates generated output.",
+		});
 
 		assert.deepEqual(result, {
-			resultType: "rejected",
+			resultType: "failure",
 			textResultForLlm:
-				"The file dist/generated.js is not one of the reviewed files.",
+				"The path dist/generated.js does not match any reviewed file.",
 		});
-		assert.equal(summaryDrafts.changeAreas, undefined);
+		assert.equal(state.summaryDrafts.changeAreas, undefined);
 	});
 });

@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import path from "node:path";
 import { promisify } from "node:util";
 
 import type { PullRequestInfo } from "../bitbucket/types.ts";
@@ -19,9 +18,30 @@ export type GitReadTextFileResult =
 	| { status: "not_file" }
 	| { status: "not_text" };
 
-export type GitSearchPatternType = "literal" | "regex";
+type GitSearchPatternType = "literal" | "regex";
 
 export class GitInvalidSearchPatternError extends Error {}
+
+export interface GitSearchRequest {
+	commit: string;
+	patterns: readonly string[];
+	patternType: GitSearchPatternType;
+	paths: readonly string[];
+	excludeGlobs: readonly string[];
+	contextLines: number;
+	signal?: AbortSignal | undefined;
+}
+
+interface GitSearchLine {
+	lineNumber: number;
+	isMatch: boolean;
+	text: string;
+}
+
+export interface GitSearchFileMatches {
+	path: string;
+	groups: GitSearchLine[][];
+}
 
 interface GitCommandOptions {
 	allowFailure?: boolean;
@@ -36,6 +56,46 @@ interface GitCommandResult {
 
 function isSuccessfulExitCode(exitCode: number): boolean {
 	return exitCode === 0;
+}
+
+function parseGrepHeadingOutput(
+	commit: string,
+	output: string,
+): GitSearchFileMatches[] {
+	const headingPrefix = `${commit}:`;
+	const files: GitSearchFileMatches[] = [];
+	let file: GitSearchFileMatches | undefined;
+	let group: GitSearchLine[] | undefined;
+	for (const line of output.split("\n")) {
+		if (line === "") {
+			continue;
+		}
+		if (line === "--") {
+			group = undefined;
+			continue;
+		}
+		if (line.startsWith(headingPrefix)) {
+			file = { path: line.slice(headingPrefix.length), groups: [] };
+			files.push(file);
+			group = undefined;
+			continue;
+		}
+
+		const match = /^(\d+)([:-])([\s\S]*)$/.exec(line);
+		if (!match || !file) {
+			throw new Error(`Unexpected git grep output line: ${line}`);
+		}
+		if (!group) {
+			group = [];
+			file.groups.push(group);
+		}
+		group.push({
+			lineNumber: Number(match[1]),
+			isMatch: match[2] === ":",
+			text: match[3] ?? "",
+		});
+	}
+	return files;
 }
 
 export class GitRepository {
@@ -270,19 +330,6 @@ export class GitRepository {
 		return (await this.runGit(["merge-base", baseCommit, headCommit])).trim();
 	}
 
-	async diff(baseCommit: string, headCommit: string): Promise<string> {
-		return this.runGit([
-			"diff",
-			"--no-color",
-			"--find-renames",
-			"--find-copies",
-			"--unified=3",
-			baseCommit,
-			headCommit,
-			"--",
-		]);
-	}
-
 	async diffNameStatus(
 		baseCommit: string,
 		headCommit: string,
@@ -354,33 +401,31 @@ export class GitRepository {
 	}
 
 	async searchTextAtCommit(
-		commit: string,
-		patterns: readonly string[],
-		patternType: GitSearchPatternType,
-		paths: readonly string[],
-		contextLines: number,
-		signal?: AbortSignal,
-	): Promise<string> {
+		request: GitSearchRequest,
+	): Promise<GitSearchFileMatches[]> {
+		const { commit, patterns, patternType, paths, excludeGlobs } = request;
 		const result = await this.runGitDetailed(
 			[
 				"grep",
 				"-n",
 				"-I",
+				"--heading",
 				patternType === "literal" ? "-F" : "-E",
 				"-C",
-				String(contextLines),
+				String(request.contextLines),
 				...patterns.flatMap((pattern) => ["-e", pattern]),
 				commit,
 				"--",
 				...paths,
+				...excludeGlobs.map((glob) => `:(exclude,glob)${glob}`),
 			],
-			signal,
+			request.signal,
 		);
 		if (result.exitCode === 0) {
-			return result.stdout;
+			return parseGrepHeadingOutput(commit, result.stdout);
 		}
 		if (result.exitCode === 1) {
-			return "";
+			return [];
 		}
 
 		const message = `Git search failed at ${commit} using ${patterns.length} ${patternType} patterns across ${paths.length || "all"} pathspecs: ${result.stderr || `exit code ${result.exitCode}`}`;
@@ -396,33 +441,13 @@ export class GitRepository {
 
 	async listFilesAtCommit(
 		commit: string,
-		paths: readonly string[],
 		signal?: AbortSignal,
-	): Promise<string> {
+	): Promise<string[]> {
 		const content = await this.runGit(
-			["ls-tree", "-r", "--name-only", commit],
+			["ls-tree", "-r", "-z", "--name-only", commit],
 			{ signal },
 		);
-		if (paths.length === 0) {
-			return content;
-		}
-
-		return content
-			.split("\n")
-			.filter(
-				(filePath) =>
-					filePath &&
-					paths.some((pattern) => {
-						const normalizedPattern = pattern.replace(/\/+$/, "");
-						return (
-							normalizedPattern === "." ||
-							filePath === normalizedPattern ||
-							filePath.startsWith(`${normalizedPattern}/`) ||
-							path.posix.matchesGlob(filePath, normalizedPattern)
-						);
-					}),
-			)
-			.join("\n");
+		return content.split("\0").filter(Boolean);
 	}
 
 	async readTextFileAtCommit(

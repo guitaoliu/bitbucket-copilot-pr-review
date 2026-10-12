@@ -1,13 +1,7 @@
-import type { GitRepository } from "../../git/repo.ts";
-import type {
-	FindingDraft,
-	ReviewContext,
-	ReviewSummaryDrafts,
-} from "../../review/types.ts";
-import type { Logger } from "../../shared/logger.ts";
-import { ReviewBundle } from "../review-bundle.ts";
-import type { ReviewInspectionState } from "./context.ts";
-import { createReviewToolContext } from "./context.ts";
+import type { Tool } from "@github/copilot-sdk";
+
+import { createReviewToolContext, type ReviewToolsOptions } from "./context.ts";
+import type { ReviewToolCallObserver } from "./define.ts";
 import { createEmitFindingTool } from "./emit-finding.ts";
 import { createRecordChangeAreaSummaryTool } from "./record-change-area-summary.ts";
 import { createRecordPrSummaryTool } from "./record-pr-summary.ts";
@@ -28,25 +22,16 @@ export const REVIEW_TOOL_NAMES = [
 	"emit_finding",
 ] as const;
 
-export function createReviewTools(
-	context: ReviewContext,
-	git: GitRepository,
-	drafts: FindingDraft[],
-	summaryDrafts: ReviewSummaryDrafts,
-	inspectionState: ReviewInspectionState = {},
-	logger?: Logger,
-	reviewBundle = new ReviewBundle(context, git),
-) {
-	const toolContext = createReviewToolContext(
-		context,
-		git,
-		drafts,
-		summaryDrafts,
-		inspectionState,
-		logger,
-		reviewBundle,
-	);
+export const CONTEXT_TOOL_NAMES = [
+	"read_file",
+	"search_repo",
+	"find_files",
+] as const satisfies readonly (typeof REVIEW_TOOL_NAMES)[number][];
 
+export function createReviewTools(
+	options: ReviewToolsOptions & { toolCalls: ReviewToolCallObserver },
+): Tool[] {
+	const toolContext = createReviewToolContext(options);
 	return [
 		createReviewChangesTool(toolContext),
 		createReadFileTool(toolContext),
@@ -55,5 +40,5 @@ export function createReviewTools(
 		createRecordPrSummaryTool(toolContext),
 		createRecordChangeAreaSummaryTool(toolContext),
 		createEmitFindingTool(toolContext),
-	];
+	].map((definition) => definition.bind(options.toolCalls));
 }

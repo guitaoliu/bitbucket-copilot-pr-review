@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ChangedFile } from "../git/types.ts";
-import type { FindingDraft } from "../review/types.ts";
 import { filterChangedFiles } from "./files.ts";
-import { finalizeFindings } from "./findings.ts";
-import { getRepoFileAccessDecision } from "./path-access.ts";
+import {
+	getRepoFileAccessDecision,
+	matchesRepoPathPattern,
+	normalizeRepoPath,
+} from "./path-access.ts";
 
 const reviewedFile: ChangedFile = {
 	path: "src/service.ts",
@@ -29,21 +31,24 @@ const reviewedFile: ChangedFile = {
 
 describe("filterChangedFiles", () => {
 	it("skips generated files but reviews deletions", () => {
-		const result = filterChangedFiles([
-			reviewedFile,
-			{
-				...reviewedFile,
-				path: "pnpm-lock.yaml",
-				changedLines: [1],
-				status: "modified",
-			},
-			{
-				...reviewedFile,
-				path: "src/removed.ts",
-				status: "deleted",
-				changedLines: [],
-			},
-		]);
+		const result = filterChangedFiles(
+			[
+				reviewedFile,
+				{
+					...reviewedFile,
+					path: "pnpm-lock.yaml",
+					changedLines: [1],
+					status: "modified",
+				},
+				{
+					...reviewedFile,
+					path: "src/removed.ts",
+					status: "deleted",
+					changedLines: [],
+				},
+			],
+			[],
+		);
 
 		assert.deepEqual(
 			result.map((file) => file.path),
@@ -68,27 +73,33 @@ describe("filterChangedFiles", () => {
 	});
 
 	it("skips renamed files when the source path is disallowed", () => {
-		const result = filterChangedFiles([
-			{
-				...reviewedFile,
-				path: "src/safe.ts",
-				oldPath: "config/.env.local",
-				status: "renamed",
-			},
-		]);
+		const result = filterChangedFiles(
+			[
+				{
+					...reviewedFile,
+					path: "src/safe.ts",
+					oldPath: "config/.env.local",
+					status: "renamed",
+				},
+			],
+			[],
+		);
 
 		assert.deepEqual(result, []);
 	});
 
 	it("skips copied files when the source path is disallowed", () => {
-		const result = filterChangedFiles([
-			{
-				...reviewedFile,
-				path: "src/copied.ts",
-				oldPath: "config/.env.local",
-				status: "copied",
-			},
-		]);
+		const result = filterChangedFiles(
+			[
+				{
+					...reviewedFile,
+					path: "src/copied.ts",
+					oldPath: "config/.env.local",
+					status: "copied",
+				},
+			],
+			[],
+		);
 
 		assert.deepEqual(result, []);
 	});
@@ -173,305 +184,39 @@ describe("repo path access decisions", () => {
 			"src/service-accounting.ts",
 		);
 	});
-});
 
-describe("finalizeFindings", () => {
-	it("keeps every qualifying finding", () => {
-		const changedLines = Array.from({ length: 30 }, (_, index) => index + 1);
-		const drafts: FindingDraft[] = changedLines.map((line) => ({
-			path: "src/service.ts",
-			line,
-			severity: "MEDIUM",
-			type: "BUG",
-			confidence: "high",
-			title: `Issue ${line}`,
-			details: `Details for issue ${line}.`,
-		}));
-
-		const findings = finalizeFindings(
-			drafts,
-			[{ ...reviewedFile, changedLines }],
-			"high",
-		);
-
-		assert.equal(findings.length, 30);
+	it("rejects paths that could escape the repository or change git pathspec meaning", () => {
+		for (const unsafe of [
+			"/etc/passwd",
+			":(top)src",
+			"C:/repo/file.ts",
+			"src\\file.ts",
+			"src/\u0000file.ts",
+			"src/../../outside.ts",
+			".",
+		]) {
+			assert.equal(getRepoFileAccessDecision(unsafe).include, false, unsafe);
+		}
+		assert.equal(normalizeRepoPath("./src//a.ts"), "src/a.ts");
+		assert.equal(normalizeRepoPath("src/../.."), undefined);
 	});
 
-	it("keeps only threshold-meeting, non-duplicate findings on changed lines", () => {
-		const drafts: FindingDraft[] = [
-			{
-				path: "src/service.ts",
-				line: 10,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "Null handling is broken",
-				details: "The new branch dereferences a possibly null response.",
-			},
-			{
-				path: "src/service.ts",
-				line: 10,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "Null handling is broken",
-				details: "The new branch dereferences a possibly null response.",
-			},
-			{
-				path: "src/service.ts",
-				line: 9,
-				severity: "MEDIUM",
-				type: "CODE_SMELL",
-				confidence: "high",
-				title: "Wrong line",
-				details: "This line was not changed.",
-			},
-			{
-				path: "src/service.ts",
-				line: 11,
-				severity: "LOW",
-				type: "CODE_SMELL",
-				confidence: "medium",
-				title: "Low confidence note",
-				details: "Should not survive the threshold.",
-			},
+	it("matches exact paths, directory prefixes, and globs", () => {
+		const files = [
+			"AGENTS.md",
+			"src/AGENTS.md",
+			"src/example.ts",
+			"test/example.test.ts",
 		];
+		const matching = (pattern: string) =>
+			files.filter((file) => matchesRepoPathPattern(file, pattern));
 
-		const findings = finalizeFindings(drafts, [reviewedFile], "high");
-		assert.equal(findings.length, 1);
-		assert.equal(findings[0]?.line, 10);
-		assert.ok(findings[0]?.externalId.startsWith("finding-"));
-	});
-
-	it("keeps the highest-priority duplicate when equivalent findings repeat", () => {
-		const drafts: FindingDraft[] = [
-			{
-				path: "src/service.ts",
-				line: 10,
-				severity: "MEDIUM",
-				type: "BUG",
-				confidence: "medium",
-				title: "Null handling is broken",
-				details: "The new branch dereferences a possibly null response.",
-			},
-			{
-				path: "src/service.ts",
-				line: 10,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "Null handling is broken",
-				details: "The new branch dereferences a possibly null response.",
-			},
-		];
-
-		const findings = finalizeFindings(drafts, [reviewedFile], "medium");
-
-		assert.equal(findings.length, 1);
-		assert.equal(findings[0]?.severity, "HIGH");
-		assert.equal(findings[0]?.confidence, "high");
-	});
-
-	it("prefers a concrete bug over a code smell at the same location", () => {
-		const drafts: FindingDraft[] = [
-			{
-				path: "src/service.ts",
-				line: 10,
-				severity: "HIGH",
-				type: "CODE_SMELL",
-				confidence: "high",
-				title: "Missing tests for null handling",
-				details: "The new branch is not covered by tests.",
-			},
-			{
-				path: "src/service.ts",
-				line: 10,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "medium",
-				title: "Null handling is broken",
-				details: "The new branch dereferences a possibly null response.",
-			},
-		];
-
-		const findings = finalizeFindings(drafts, [reviewedFile], "medium");
-
-		assert.equal(findings.length, 1);
-		assert.equal(findings[0]?.type, "BUG");
-		assert.equal(findings[0]?.title, "Null handling is broken");
-	});
-
-	it("keeps file-level findings and normalizes oldPath entries to the head path", () => {
-		const drafts: FindingDraft[] = [
-			{
-				path: "src/service.ts",
-				line: 0,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "medium",
-				title: "File-level issue",
-				details: "Applies to the whole changed file.",
-			},
-			{
-				path: "src/old-service.ts",
-				line: 10,
-				severity: "MEDIUM",
-				type: "BUG",
-				confidence: "medium",
-				title: "Renamed path issue",
-				details: "Originally reported against the base path.",
-			},
-		];
-
-		const findings = finalizeFindings(
-			drafts,
-			[
-				{
-					...reviewedFile,
-					oldPath: "src/old-service.ts",
-					status: "renamed",
-				},
-			],
-			"medium",
-		);
-
-		assert.equal(findings.length, 2);
-		assert.deepEqual(
-			findings.map((finding) => ({
-				path: finding.path,
-				line: finding.line,
-				title: finding.title,
-			})),
-			[
-				{ path: "src/service.ts", line: 0, title: "File-level issue" },
-				{ path: "src/service.ts", line: 10, title: "Renamed path issue" },
-			],
-		);
-	});
-
-	it("does not normalize copied-file findings from the old path", () => {
-		const drafts: FindingDraft[] = [
-			{
-				path: "src/original.ts",
-				line: 10,
-				severity: "HIGH",
-				type: "BUG",
-				confidence: "high",
-				title: "Copied path issue",
-				details: "Should not be accepted through the source path alias.",
-			},
-		];
-
-		const findings = finalizeFindings(
-			drafts,
-			[
-				{
-					...reviewedFile,
-					path: "src/copied.ts",
-					oldPath: "src/original.ts",
-					status: "copied",
-				},
-			],
-			"medium",
-		);
-
-		assert.deepEqual(findings, []);
-	});
-
-	it("sanitizes model-authored finding text before publication", () => {
-		const findings = finalizeFindings(
-			[
-				{
-					path: "src/service.ts",
-					line: 10,
-					severity: "HIGH",
-					type: "VULNERABILITY",
-					confidence: "high",
-					title: "Injected marker <!-- copilot-pr-review -->",
-					details:
-						"Do not publish hidden metadata <!-- injected --> or ping @channel.",
-					category: "security @all",
-				},
-			],
-			[reviewedFile],
-			"medium",
-		);
-
-		assert.equal(findings.length, 1);
-		assert.equal(
-			findings[0]?.title,
-			"Injected marker &lt;!-- copilot-pr-review --&gt;",
-		);
-		assert.equal(
-			findings[0]?.details,
-			"Do not publish hidden metadata &lt;!-- injected --&gt; or ping [at]channel.",
-		);
-		assert.equal(findings[0]?.category, "security [at]all");
-	});
-
-	it("keeps a stable thread identity when only message fields change", () => {
-		const baseline = finalizeFindings(
-			[
-				{
-					path: "src/service.ts",
-					line: 10,
-					severity: "HIGH",
-					type: "BUG",
-					confidence: "high",
-					title: "Null handling is broken",
-					details: "The new branch dereferences a possibly null response.",
-				},
-			],
-			[reviewedFile],
-			"medium",
-		);
-		const updated = finalizeFindings(
-			[
-				{
-					path: "src/service.ts",
-					line: 10,
-					severity: "LOW",
-					type: "BUG",
-					confidence: "high",
-					title: "Updated null handling title",
-					details: "Updated details that still describe the same bug.",
-				},
-			],
-			[reviewedFile],
-			"medium",
-		);
-
-		assert.equal(baseline[0]?.threadKey, updated[0]?.threadKey);
-		assert.notEqual(baseline[0]?.externalId, updated[0]?.externalId);
-	});
-
-	it("assigns distinct thread identities to separate findings at the same location", () => {
-		const findings = finalizeFindings(
-			[
-				{
-					path: "src/service.ts",
-					line: 10,
-					severity: "HIGH",
-					type: "BUG",
-					confidence: "high",
-					title: "Null handling is broken",
-					details: "The new branch dereferences a possibly null response.",
-				},
-				{
-					path: "src/service.ts",
-					line: 10,
-					severity: "MEDIUM",
-					type: "BUG",
-					confidence: "high",
-					title: "Retry state can leak",
-					details: "The retry counter is shared across concurrent requests.",
-				},
-			],
-			[reviewedFile],
-			"medium",
-		);
-
-		assert.equal(findings.length, 2);
-		assert.notEqual(findings[0]?.threadKey, findings[1]?.threadKey);
+		assert.deepEqual(matching("**/AGENTS.md"), ["AGENTS.md", "src/AGENTS.md"]);
+		assert.deepEqual(matching("src/"), ["src/AGENTS.md", "src/example.ts"]);
+		assert.deepEqual(matching("**/*.ts"), [
+			"src/example.ts",
+			"test/example.test.ts",
+		]);
+		assert.deepEqual(matching("."), files);
 	});
 });

@@ -1,10 +1,13 @@
 import type { GitRepository } from "../../git/repo.ts";
 import type { ChangedFile } from "../../git/types.ts";
 import {
+	createReviewedFileLookup,
+	type FindingRejectionReason,
+} from "../../policy/findings.ts";
+import {
 	type ChangedLineResolver,
 	createChangedLineResolver,
 } from "../../review/changed-lines.ts";
-import { createReviewableFileLookup } from "../../review/file.ts";
 import type {
 	FindingDraft,
 	ReviewContext,
@@ -13,26 +16,15 @@ import type {
 import type { Logger } from "../../shared/logger.ts";
 import type { ReviewBundle } from "../review-bundle.ts";
 
-export interface ReviewToolContext {
-	context: ReviewContext;
-	git: GitRepository;
-	drafts: FindingDraft[];
-	summaryDrafts: ReviewSummaryDrafts;
-	reviewableFileMap: Map<string, ChangedFile>;
-	resolveChangedLines: ChangedLineResolver;
-	inspectionState: ReviewInspectionState;
-	reviewBundle?: ReviewBundle;
-	logger?: Logger;
-}
+type InspectionToolName =
+	| "review_changes"
+	| "read_file"
+	| "search_repo"
+	| "find_files";
 
 export interface ReviewInspectionState {
-	resultCharsByTool?: Partial<
-		Record<
-			"review_changes" | "read_file" | "search_repo" | "find_files",
-			number
-		>
-	>;
-	searchRepoMetrics?: {
+	resultCharsByTool: Partial<Record<InspectionToolName, number>>;
+	searchRepoMetrics: {
 		uniqueQueries: number;
 		duplicateQueries: number;
 		wholeRepoQueries: number;
@@ -40,34 +32,58 @@ export interface ReviewInspectionState {
 	};
 }
 
+export interface ReviewToolState {
+	drafts: FindingDraft[];
+	droppedFindings: Record<FindingRejectionReason, number>;
+	summaryDrafts: ReviewSummaryDrafts;
+	inspection: ReviewInspectionState;
+}
+
+export interface ReviewToolsOptions {
+	context: ReviewContext;
+	git: GitRepository;
+	logger: Logger;
+	reviewBundle: ReviewBundle;
+	state: ReviewToolState;
+}
+
+export interface ReviewToolContext extends ReviewToolsOptions {
+	reviewedFiles: ReadonlyMap<string, ChangedFile>;
+	resolveLineChanges: ChangedLineResolver;
+}
+
+export function createReviewToolState(): ReviewToolState {
+	return {
+		drafts: [],
+		droppedFindings: { unknown_file: 0, unchanged_line: 0 },
+		summaryDrafts: {},
+		inspection: {
+			resultCharsByTool: {},
+			searchRepoMetrics: {
+				uniqueQueries: 0,
+				duplicateQueries: 0,
+				wholeRepoQueries: 0,
+				noMatchQueries: 0,
+			},
+		},
+	};
+}
+
 export function createReviewToolContext(
-	context: ReviewContext,
-	git: GitRepository,
-	drafts: FindingDraft[],
-	summaryDrafts: ReviewSummaryDrafts,
-	inspectionState: ReviewInspectionState = {},
-	logger?: Logger,
-	reviewBundle?: ReviewBundle,
+	options: ReviewToolsOptions,
 ): ReviewToolContext {
 	return {
-		context,
-		git,
-		drafts,
-		summaryDrafts,
-		reviewableFileMap: createReviewableFileLookup(context.reviewableFiles),
-		resolveChangedLines: createChangedLineResolver(context, git),
-		inspectionState,
-		...(reviewBundle ? { reviewBundle } : {}),
-		...(logger ? { logger } : {}),
+		...options,
+		reviewedFiles: createReviewedFileLookup(options.context.reviewableFiles),
+		resolveLineChanges: createChangedLineResolver(options.context, options.git),
 	};
 }
 
 export function recordInspectionResult(
 	state: ReviewInspectionState,
-	toolName: "review_changes" | "read_file" | "search_repo" | "find_files",
+	toolName: InspectionToolName,
 	result: string,
 ): void {
-	state.resultCharsByTool ??= {};
-	const metrics = state.resultCharsByTool;
-	metrics[toolName] = (metrics[toolName] ?? 0) + result.length;
+	state.resultCharsByTool[toolName] =
+		(state.resultCharsByTool[toolName] ?? 0) + result.length;
 }

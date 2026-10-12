@@ -146,36 +146,12 @@ type RepoFileAccessDecision =
 	| { include: true; normalizedPath: string }
 	| { include: false; reason: string };
 
-function hasExcludedExtension(filePath: string): boolean {
+function hasExtensionIn(
+	filePath: string,
+	extensions: ReadonlySet<string>,
+): boolean {
 	const lowerPath = filePath.toLowerCase();
-	for (const extension of EXCLUDED_EXTENSIONS) {
-		if (lowerPath.endsWith(extension)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-function hasSecretExtension(filePath: string): boolean {
-	const lowerPath = filePath.toLowerCase();
-	for (const extension of SECRET_EXTENSIONS) {
-		if (lowerPath.endsWith(extension)) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-function hasSourceCodeExtension(filePath: string): boolean {
-	const lowerPath = filePath.toLowerCase();
-	for (const extension of SOURCE_CODE_EXTENSIONS) {
-		if (lowerPath.endsWith(extension)) {
-			return true;
-		}
-	}
-
-	return false;
+	return [...extensions].some((extension) => lowerPath.endsWith(extension));
 }
 
 function getFilenameStem(filename: string): string {
@@ -226,77 +202,79 @@ function isSecretBearingFilename(filename: string): boolean {
 	const lowerFilename = filename.toLowerCase();
 	const stem = getFilenameStem(lowerFilename);
 	if (SECRET_BASENAME_PATTERNS.some((pattern) => pattern.test(stem))) {
-		if (hasSourceCodeExtension(lowerFilename)) {
-			return false;
-		}
-
-		return true;
+		return !hasExtensionIn(lowerFilename, SOURCE_CODE_EXTENSIONS);
 	}
 
-	return hasSecretExtension(lowerFilename);
+	return hasExtensionIn(lowerFilename, SECRET_EXTENSIONS);
 }
 
-function reject(reason: string): { include: false; reason: string } {
-	return { include: false, reason };
-}
-
-function allow<T extends object>(value: T): T & { include: true } {
-	return { include: true, ...value };
-}
-
-function normalizeRepoRelativePath(filePath: string): string | undefined {
-	const trimmed = filePath.trim();
-	if (trimmed.length === 0) {
-		return undefined;
-	}
-
-	const normalized = path.posix.normalize(trimmed.replace(/\\/g, "/"));
-	if (normalized === "." || normalized === "") {
-		return undefined;
-	}
-
+export function normalizeRepoPath(value: string): string | undefined {
+	const trimmed = value.trim();
 	if (
-		normalized.startsWith("/") ||
-		normalized === ".." ||
-		normalized.startsWith("../")
+		trimmed.length === 0 ||
+		trimmed.startsWith("/") ||
+		trimmed.startsWith(":") ||
+		/^[A-Za-z]:/.test(trimmed) ||
+		trimmed.includes("\\") ||
+		[...trimmed].some((character) => {
+			const code = character.charCodeAt(0);
+			return code < 32 || code === 127;
+		})
 	) {
+		return undefined;
+	}
+
+	const normalized = path.posix.normalize(trimmed);
+	if (normalized === ".." || normalized.startsWith("../")) {
 		return undefined;
 	}
 
 	return normalized;
 }
 
-function getBasePathRejectionReason(
-	normalizedPath: string,
-	pathKind: "file" | "directory",
-): string | undefined {
+export const REPO_SEARCH_EXCLUDE_GLOBS: readonly string[] = [
+	...EXCLUDED_DIRECTORIES,
+].map((directory) => `**/${directory}/**`);
+
+export function matchesRepoPathPattern(
+	filePath: string,
+	pattern: string,
+): boolean {
+	const normalizedPattern = pattern.replace(/\/+$/, "");
+	return (
+		normalizedPattern === "." ||
+		filePath === normalizedPattern ||
+		filePath.startsWith(`${normalizedPattern}/`) ||
+		path.posix.matchesGlob(filePath, normalizedPattern)
+	);
+}
+
+function getRejectionReason(normalizedPath: string): string | undefined {
 	const segments = normalizedPath.split("/");
-	const filename = segments[segments.length - 1] ?? normalizedPath;
-	const directorySegments =
-		pathKind === "directory" ? segments : segments.slice(0, -1);
+	const filename = segments.at(-1) ?? normalizedPath;
+	const directorySegments = segments.slice(0, -1);
 
 	if (segments.some((segment) => EXCLUDED_DIRECTORIES.has(segment))) {
 		return "generated or vendored path";
 	}
 
-	if (SECRET_PATH_PATTERNS.some((pattern) => pattern.test(normalizedPath))) {
-		return "potential secret-bearing path";
-	}
-
 	if (
+		SECRET_PATH_PATTERNS.some((pattern) => pattern.test(normalizedPath)) ||
 		directorySegments.some((segment) =>
 			isSecretBearingDirectorySegment(segment),
-		)
+		) ||
+		isSecretConfigDirectoryPath(directorySegments) ||
+		isSecretBearingFilename(filename)
 	) {
 		return "potential secret-bearing path";
 	}
 
-	if (isSecretConfigDirectoryPath(directorySegments)) {
-		return "potential secret-bearing path";
+	if (EXCLUDED_FILENAMES.has(filename)) {
+		return "lockfile";
 	}
 
-	if (pathKind === "file" && isSecretBearingFilename(filename)) {
-		return "potential secret-bearing path";
+	if (hasExtensionIn(normalizedPath, EXCLUDED_EXTENSIONS)) {
+		return "binary or generated extension";
 	}
 
 	return undefined;
@@ -305,26 +283,16 @@ function getBasePathRejectionReason(
 export function getRepoFileAccessDecision(
 	filePath: string,
 ): RepoFileAccessDecision {
-	const normalizedPath = normalizeRepoRelativePath(filePath);
-	if (!normalizedPath) {
-		return reject("path must be repo-relative and stay within the repository");
+	const normalizedPath = normalizeRepoPath(filePath);
+	if (!normalizedPath || normalizedPath === ".") {
+		return {
+			include: false,
+			reason: "path must be repo-relative and stay within the repository",
+		};
 	}
 
-	const pathReason = getBasePathRejectionReason(normalizedPath, "file");
-	if (pathReason) {
-		return reject(pathReason);
-	}
-
-	const segments = normalizedPath.split("/");
-	const filename = segments[segments.length - 1] ?? normalizedPath;
-
-	if (EXCLUDED_FILENAMES.has(filename)) {
-		return reject("lockfile");
-	}
-
-	if (hasExcludedExtension(normalizedPath)) {
-		return reject("binary or generated extension");
-	}
-
-	return allow({ normalizedPath });
+	const reason = getRejectionReason(normalizedPath);
+	return reason
+		? { include: false, reason }
+		: { include: true, normalizedPath };
 }

@@ -1,20 +1,11 @@
 import type { SessionEvent } from "@github/copilot-sdk";
 
 import type { Logger } from "../shared/logger.ts";
-import { REVIEW_TOOL_NAMES } from "./tools/index.ts";
 
 export type CopilotSessionEventTracer = {
 	handleEvent(event: SessionEvent): void;
 	getReasoningStatus(): "content" | "empty" | "missing";
 };
-
-const REVIEW_TOOL_NAME_SET: ReadonlySet<string> = new Set(REVIEW_TOOL_NAMES);
-const REPOSITORY_INSPECTION_TOOL_NAMES = new Set([
-	"review_changes",
-	"read_file",
-	"search_repo",
-	"find_files",
-]);
 
 type SessionEventWithData = SessionEvent & { data?: Record<string, unknown> };
 
@@ -26,10 +17,6 @@ export function createSessionEventTracer(
 	logger: Logger,
 ): CopilotSessionEventTracer {
 	const reasoningContentById = new Map<string, string>();
-	const startedToolsById = new Map<
-		string,
-		{ toolName: string; startedAtMs: number }
-	>();
 	let reasoningContentObserved = false;
 	let reasoningEventObserved = false;
 
@@ -61,43 +48,6 @@ export function createSessionEventTracer(
 
 	return {
 		handleEvent(event) {
-			if (event.type === "tool.execution_start") {
-				const { toolCallId, toolName } = event.data;
-				startedToolsById.set(toolCallId, {
-					toolName,
-					startedAtMs: new Date(event.timestamp).getTime(),
-				});
-				return;
-			}
-
-			if (event.type === "tool.execution_complete") {
-				const { error, result, success, toolCallId } = event.data;
-				const startedTool = startedToolsById.get(toolCallId);
-				startedToolsById.delete(toolCallId);
-				if (!startedTool) {
-					return;
-				}
-				const durationMs = Math.max(
-					0,
-					new Date(event.timestamp).getTime() - startedTool.startedAtMs,
-				);
-
-				if (REVIEW_TOOL_NAME_SET.has(startedTool.toolName)) {
-					logger.info("Copilot completed review tool", {
-						toolCallId,
-						toolName: startedTool.toolName,
-						success,
-						durationMs,
-						...(!REPOSITORY_INSPECTION_TOOL_NAMES.has(startedTool.toolName) &&
-						result?.content
-							? { result: result.content }
-							: {}),
-						...(error ? { error: error.message } : {}),
-					});
-				}
-				return;
-			}
-
 			if (event.type === "assistant.intent") {
 				const data = getEventData(event);
 				const intent =

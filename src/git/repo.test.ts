@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
 import type { Logger } from "../shared/logger.ts";
-import { GitInvalidSearchPatternError, GitRepository } from "./repo.ts";
+import {
+	GitInvalidSearchPatternError,
+	GitRepository,
+	type GitSearchRequest,
+} from "./repo.ts";
 
 const logger: Logger = {
 	debug() {},
@@ -40,14 +44,8 @@ type TestableGitRepository = {
 		| { status: "not_file" }
 		| { status: "not_text" }
 	>;
-	searchTextAtCommit(
-		commit: string,
-		patterns: readonly string[],
-		patternType: "literal" | "regex",
-		paths: readonly string[],
-		contextLines: number,
-	): Promise<string>;
-	listFilesAtCommit(commit: string, paths: readonly string[]): Promise<string>;
+	searchTextAtCommit: GitRepository["searchTextAtCommit"];
+	listFilesAtCommit: GitRepository["listFilesAtCommit"];
 	runGit(args: string[]): Promise<string>;
 	runGitDetailed(args: string[]): Promise<{
 		stdout: string;
@@ -55,6 +53,19 @@ type TestableGitRepository = {
 		exitCode: number;
 	}>;
 };
+
+function searchRequest(
+	overrides: Partial<GitSearchRequest> & { commit: string },
+): GitSearchRequest {
+	return {
+		patterns: ["needle"],
+		patternType: "literal",
+		paths: [],
+		excludeGlobs: [],
+		contextLines: 0,
+		...overrides,
+	};
+}
 
 describe("GitRepository.ensureCommitAvailable", () => {
 	it("skips fetch when the commit already exists locally", async () => {
@@ -133,16 +144,18 @@ describe("GitRepository.ensureCommitAvailable", () => {
 		};
 		repo.runGitDetailed = async (args) => {
 			calls.push(args);
-			return { stdout: "match", stderr: "", exitCode: 0 };
+			return { stdout: "head:src/a.ts\n1:needle\n", stderr: "", exitCode: 0 };
 		};
 
 		await repo.diffPaths("base", "head", ["src/example[1].ts"], 12);
 		await repo.searchTextAtCommit(
-			"head",
-			["needle", "second"],
-			"literal",
-			["src/**"],
-			3,
+			searchRequest({
+				commit: "head",
+				patterns: ["needle", "second"],
+				paths: ["src/**"],
+				excludeGlobs: ["**/vendor/**"],
+				contextLines: 3,
+			}),
 		);
 
 		assert.deepEqual(calls, [
@@ -163,6 +176,7 @@ describe("GitRepository.ensureCommitAvailable", () => {
 				"grep",
 				"-n",
 				"-I",
+				"--heading",
 				"-F",
 				"-C",
 				"3",
@@ -173,6 +187,7 @@ describe("GitRepository.ensureCommitAvailable", () => {
 				"head",
 				"--",
 				"src/**",
+				":(exclude,glob)**/vendor/**",
 			],
 		]);
 	});
@@ -193,11 +208,11 @@ describe("GitRepository.ensureCommitAvailable", () => {
 
 			await assert.rejects(
 				repo.searchTextAtCommit(
-					"head-123",
-					["invalid"],
-					"regex",
-					["src/**"],
-					3,
+					searchRequest({
+						commit: "head-123",
+						patternType: "regex",
+						paths: ["src/**"],
+					}),
 				),
 				(error: unknown) =>
 					error instanceof GitInvalidSearchPatternError &&
@@ -221,7 +236,9 @@ describe("GitRepository.ensureCommitAvailable", () => {
 		});
 
 		await assert.rejects(
-			repo.searchTextAtCommit("head-123", ["value"], "regex", [], 3),
+			repo.searchTextAtCommit(
+				searchRequest({ commit: "head-123", patternType: "regex" }),
+			),
 			(error: unknown) =>
 				error instanceof Error &&
 				!(error instanceof GitInvalidSearchPatternError) &&
@@ -229,7 +246,7 @@ describe("GitRepository.ensureCommitAvailable", () => {
 		);
 	});
 
-	it("filters listed files with globs and directory prefixes", async () => {
+	it("lists tracked file names verbatim", async () => {
 		const calls: string[][] = [];
 		const repo = new GitRepository(
 			"/tmp/repo",
@@ -238,31 +255,83 @@ describe("GitRepository.ensureCommitAvailable", () => {
 		) as unknown as TestableGitRepository;
 		repo.runGit = async (args) => {
 			calls.push(args);
-			return [
-				"AGENTS.md",
-				"src/AGENTS.md",
-				"src/example.ts",
-				"test/example.test.ts",
-			].join("\n");
+			return "AGENTS.md\0src/line\nbreak.ts\0src/example.ts\0";
 		};
 
-		assert.equal(
-			await repo.listFilesAtCommit("base-123", ["**/AGENTS.md"]),
-			"AGENTS.md\nsrc/AGENTS.md",
-		);
-		assert.equal(
-			await repo.listFilesAtCommit("base-123", ["src"]),
-			"src/AGENTS.md\nsrc/example.ts",
-		);
-		assert.equal(
-			await repo.listFilesAtCommit("base-123", ["**/*.ts"]),
-			"src/example.ts\ntest/example.test.ts",
-		);
-		assert.deepEqual(calls, [
-			["ls-tree", "-r", "--name-only", "base-123"],
-			["ls-tree", "-r", "--name-only", "base-123"],
-			["ls-tree", "-r", "--name-only", "base-123"],
+		assert.deepEqual(await repo.listFilesAtCommit("base-123"), [
+			"AGENTS.md",
+			"src/line\nbreak.ts",
+			"src/example.ts",
 		]);
+		assert.deepEqual(calls, [
+			["ls-tree", "-r", "-z", "--name-only", "base-123"],
+		]);
+	});
+
+	it("groups search matches by file even when names contain separators", async () => {
+		const repoRoot = mkdtempSync(path.join(tmpdir(), "git-search-"));
+		try {
+			const git = (...args: string[]) =>
+				execFileSync("git", args, { cwd: repoRoot, encoding: "utf8" });
+			git("init", "--quiet");
+			mkdirSync(path.join(repoRoot, "src"));
+			mkdirSync(path.join(repoRoot, "vendor"));
+			writeFileSync(
+				path.join(repoRoot, "src/a.ts"),
+				"before\nneedle\nafter\n\n\n\nneedle\n",
+			);
+			writeFileSync(path.join(repoRoot, "we:ird-1-2.txt"), "x\nneedle-1:2\n");
+			writeFileSync(path.join(repoRoot, "vendor/lib.js"), "needle\n");
+			git("add", ".");
+			git(
+				"-c",
+				"user.name=Test",
+				"-c",
+				"user.email=test@example.com",
+				"commit",
+				"--quiet",
+				"-m",
+				"init",
+			);
+			const commit = git("rev-parse", "HEAD").trim();
+			const repo = new GitRepository(repoRoot, logger, "origin");
+
+			const files = await repo.searchTextAtCommit(
+				searchRequest({
+					commit,
+					excludeGlobs: ["**/vendor/**"],
+					contextLines: 1,
+				}),
+			);
+
+			assert.deepEqual(files, [
+				{
+					path: "src/a.ts",
+					groups: [
+						[
+							{ lineNumber: 1, isMatch: false, text: "before" },
+							{ lineNumber: 2, isMatch: true, text: "needle" },
+							{ lineNumber: 3, isMatch: false, text: "after" },
+						],
+						[
+							{ lineNumber: 6, isMatch: false, text: "" },
+							{ lineNumber: 7, isMatch: true, text: "needle" },
+						],
+					],
+				},
+				{
+					path: "we:ird-1-2.txt",
+					groups: [
+						[
+							{ lineNumber: 1, isMatch: false, text: "x" },
+							{ lineNumber: 2, isMatch: true, text: "needle-1:2" },
+						],
+					],
+				},
+			]);
+		} finally {
+			rmSync(repoRoot, { recursive: true, force: true });
+		}
 	});
 
 	it("aborts in-flight commands instead of reporting empty results", async () => {
@@ -289,18 +358,17 @@ describe("GitRepository.ensureCommitAvailable", () => {
 
 			const searchController = new AbortController();
 			const search = repo.searchTextAtCommit(
-				"HEAD",
-				["missing"],
-				"literal",
-				[],
-				0,
-				searchController.signal,
+				searchRequest({
+					commit: "HEAD",
+					patterns: ["missing"],
+					signal: searchController.signal,
+				}),
 			);
 			searchController.abort();
 			await assert.rejects(search, isAbortError);
 
 			const listController = new AbortController();
-			const listing = repo.listFilesAtCommit("HEAD", [], listController.signal);
+			const listing = repo.listFilesAtCommit("HEAD", listController.signal);
 			listController.abort();
 			await assert.rejects(listing, isAbortError);
 
@@ -313,9 +381,11 @@ describe("GitRepository.ensureCommitAvailable", () => {
 			readController.abort();
 			await assert.rejects(read, isAbortError);
 
-			assert.equal(
-				await repo.searchTextAtCommit("HEAD", ["missing"], "literal", [], 0),
-				"",
+			assert.deepEqual(
+				await repo.searchTextAtCommit(
+					searchRequest({ commit: "HEAD", patterns: ["missing"] }),
+				),
+				[],
 			);
 		} finally {
 			rmSync(repoRoot, { recursive: true, force: true });

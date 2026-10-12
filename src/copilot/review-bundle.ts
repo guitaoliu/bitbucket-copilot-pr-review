@@ -3,86 +3,18 @@ import { posix as path } from "node:path";
 import type { GitRepository } from "../git/repo.ts";
 import type { ChangedFile } from "../git/types.ts";
 import type { ReviewContext } from "../review/types.ts";
+import {
+	type PagedContent,
+	paginateContent,
+	selectPage,
+} from "./pagination.ts";
 
-const PAGE_CONTENT_BYTES = 40_000;
-
-export interface PagedContent {
-	page: number;
-	totalPages: number;
-	content: string;
-	nextPage?: number;
-	outOfRange?: true;
-	requestedPage?: number;
-	paginationReset?: true;
-}
+const GUIDANCE_PATH_GLOBS = ["**/AGENTS.md", ".agents/skills/*/SKILL.md"];
 
 export interface ReviewCoverage {
 	deliveredPages: number;
 	totalPages?: number;
 	complete: boolean;
-}
-
-function takeUtf8Prefix(
-	value: string,
-	maxBytes: number,
-): { content: string; consumed: number } {
-	let bytes = 0;
-	let consumed = 0;
-	for (const character of value) {
-		const characterBytes = Buffer.byteLength(character);
-		if (bytes + characterBytes > maxBytes) {
-			break;
-		}
-		bytes += characterBytes;
-		consumed += character.length;
-	}
-	return { content: value.slice(0, consumed), consumed };
-}
-
-function paginateContent(
-	content: string,
-	maxBytes = PAGE_CONTENT_BYTES,
-): string[] {
-	const pages: string[] = [];
-	let offset = 0;
-	while (offset < content.length) {
-		const remaining = content.slice(offset);
-		const prefix = takeUtf8Prefix(remaining, maxBytes);
-		let consumed = prefix.consumed;
-		let pageContent = prefix.content;
-		if (consumed < remaining.length) {
-			const newline = pageContent.lastIndexOf("\n");
-			if (newline >= 0) {
-				consumed = newline + 1;
-				pageContent = remaining.slice(0, consumed);
-			}
-		}
-		pages.push(pageContent);
-		offset += consumed;
-	}
-	return pages.length > 0 ? pages : [""];
-}
-
-export function selectPage(
-	content: string,
-	page: number,
-	maxBytes = PAGE_CONTENT_BYTES,
-): PagedContent {
-	const pages = paginateContent(content, maxBytes);
-	if (page > pages.length) {
-		return {
-			page,
-			totalPages: pages.length,
-			content: "",
-			outOfRange: true,
-		};
-	}
-	return {
-		page,
-		totalPages: pages.length,
-		content: pages[page - 1] ?? "",
-		...(page < pages.length ? { nextPage: page + 1 } : {}),
-	};
 }
 
 function isApplicableGuide(guidePath: string, files: ChangedFile[]): boolean {
@@ -119,19 +51,13 @@ export class ReviewBundle {
 	}
 
 	async getPage(
-		page = 1,
+		page: number,
 	): Promise<PagedContent & { coverage: ReviewCoverage }> {
-		const pages = await this.getPages();
-		if (page > pages.length) {
-			throw new Error(`Page ${page} exceeds total pages ${pages.length}.`);
+		const result = selectPage(await this.getPages(), page);
+		if (!result.outOfRange) {
+			this.deliveredPages.add(page);
 		}
-		this.deliveredPages.add(page);
-		return {
-			page,
-			totalPages: pages.length,
-			content: pages[page - 1] ?? "",
-			coverage: this.getCoverage(),
-		};
+		return { ...result, coverage: this.getCoverage() };
 	}
 
 	getCoverage(): ReviewCoverage {
@@ -159,11 +85,11 @@ export class ReviewBundle {
 	}
 
 	private async buildPages(): Promise<string[]> {
-		const trackedGuidance = await this.git.listFilesAtCommit(
-			this.context.baseCommit,
-			["**/AGENTS.md", ".agents/skills/*/SKILL.md"],
+		const paths = (
+			await this.git.listFilesAtCommit(this.context.baseCommit)
+		).filter((entry) =>
+			GUIDANCE_PATH_GLOBS.some((pattern) => path.matchesGlob(entry, pattern)),
 		);
-		const paths = trackedGuidance.split(/\r?\n/).filter(Boolean);
 		const guidePaths = paths
 			.filter((entry) => entry.endsWith("AGENTS.md"))
 			.filter((entry) =>

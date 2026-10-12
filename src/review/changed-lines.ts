@@ -1,33 +1,27 @@
 import { parseUnifiedDiff } from "../git/diff.ts";
 import type { GitRepository } from "../git/repo.ts";
-import type { ChangedFile, HunkSummary } from "../git/types.ts";
+import type { ChangedFile } from "../git/types.ts";
+import type { FileLineChanges } from "../policy/findings.ts";
 import type { ReviewContext } from "./types.ts";
 
 export type ChangedLineResolver = (
 	file: ChangedFile,
-) => Promise<{ changedLines: number[]; hunks: HunkSummary[] }>;
-
-function findParsedFile(
-	file: ChangedFile,
-	parsedFiles: ChangedFile[],
-): ChangedFile | undefined {
-	return parsedFiles.find(
-		(parsed) =>
-			parsed.path === file.path ||
-			(file.oldPath !== undefined && parsed.oldPath === file.oldPath),
-	);
-}
+) => Promise<FileLineChanges>;
 
 export function createChangedLineResolver(
 	context: ReviewContext,
 	git: GitRepository,
 ): ChangedLineResolver {
-	const cache = new Map<
-		string,
-		Promise<{ changedLines: number[]; hunks: HunkSummary[] }>
-	>();
+	const cache = new Map<string, Promise<FileLineChanges>>();
 
-	return async (file) => {
+	return (file) => {
+		if (file.changedLines !== undefined && file.hunks !== undefined) {
+			return Promise.resolve({
+				changedLines: file.changedLines,
+				hunks: file.hunks,
+			});
+		}
+
 		const cached = cache.get(file.path);
 		if (cached) {
 			return cached;
@@ -40,13 +34,20 @@ export function createChangedLineResolver(
 		const promise = git
 			.diffFilePatch(context.mergeBaseCommit, context.headCommit, pathspec)
 			.then((patch) => {
-				const parsedFile = findParsedFile(file, parseUnifiedDiff(patch).files);
-				const changedLines = parsedFile?.changedLines ?? [];
-				const hunks = parsedFile?.hunks ?? [];
-				file.patch = patch;
-				file.changedLines = changedLines;
-				file.hunks = hunks;
-				return { changedLines, hunks };
+				const parsedFile = parseUnifiedDiff(patch).files.find(
+					(parsed) =>
+						parsed.path === file.path ||
+						(file.oldPath !== undefined && parsed.oldPath === file.oldPath),
+				);
+				if (!parsedFile) {
+					throw new Error(
+						`Unable to resolve changed lines for ${file.path}: the diff between ${context.mergeBaseCommit} and ${context.headCommit} has no entry for it.`,
+					);
+				}
+				return {
+					changedLines: parsedFile.changedLines ?? [],
+					hunks: parsedFile.hunks ?? [],
+				};
 			});
 		cache.set(file.path, promise);
 		return promise;

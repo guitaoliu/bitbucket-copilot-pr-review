@@ -10,7 +10,7 @@ This guide collects the implementation and operator detail that is intentionally
 - `@github/copilot` is installed with this package so the reviewer can resolve and launch the bundled Copilot CLI runtime from `node_modules`
 - a GitHub Copilot-enabled account
 
-The reviewer does not expose a shell. `review_changes` pages trusted guidance and the complete reviewable merge-base-to-head diff, and completion fails closed until every page is delivered. `read_file`, `search_repo`, and `find_files` provide paged context against fixed merge-base, base, and head revisions.
+The reviewer does not expose a shell. `review_changes` pages trusted guidance and the complete reviewable merge-base-to-head diff, and completion fails closed until every page is delivered. `read_file`, `search_repo`, and `find_files` provide paged context against fixed merge-base, base, and head revisions. These context tools enforce the same path-access policy as review filtering: secret-bearing, generated or vendored, lockfile, and binary paths cannot be read, are omitted from file listings, and never appear in search results. `ignorePaths` only narrows the review scope; it does not restrict context tools.
 
 ## Authentication
 
@@ -148,7 +148,7 @@ scripts/run-local-review.sh /path/to/local/my-repo \
 
 The helper script reads credentials from your environment, inherits the application's `gpt-5.6-sol` with `medium` reasoning defaults unless you override them, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and accepts either `FORCE_REVIEW=1` or `REVIEW_FORCE=1` to bypass a published revision skip.
 
-The review JSON output includes `metrics.toolTelemetry` so you can inspect which Copilot tools were requested, allowed, denied, and completed.
+The review JSON output includes `metrics.toolTelemetry` so you can inspect which Copilot tools were requested, allowed, denied, and completed. Counts come from the Copilot session's tool execution events, one entry per tool call: `requested` counts started or permission-checked calls, `denied` counts calls whose permission request was rejected, `allowed` is `requested - denied`, and `completed`, `resultCounts`, and `totalDurationMs` come from execution completion events and their timestamps. `errorCount` adds non-success tool results, session errors, and Copilot client cleanup errors.
 
 Pull requests whose source branch starts with `renovate/` are skipped automatically by default. You can override the skipped branch prefixes with `REVIEW_SKIP_BRANCH_PREFIXES` or repo-level `review.skipBranchPrefixes`, including clearing the list entirely (`REVIEW_SKIP_BRANCH_PREFIXES=,` or `"skipBranchPrefixes": []`).
 
