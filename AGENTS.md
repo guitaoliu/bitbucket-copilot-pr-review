@@ -53,10 +53,12 @@ This file is for agentic coding assistants working in this repository.
 - Run one test file after bundling: `node --test .test-dist/config/load.test.mjs`
 - Run one named test after bundling: `node --test --test-name-pattern="uses simplified defaults" .test-dist/config/load.test.mjs`
 - Run one suite/test pattern after bundling: `node --test --test-name-pattern="buildPullRequestComment" ".test-dist/**/*.test.mjs"`
+- Run the end-to-end suite: `pnpm test:e2e` (builds `dist/cli.js`, then runs `e2e/**/*.e2e.test.ts` directly with Node type stripping)
 
 ## Build/lint/test workflow for changes
 
 - For most code changes, run `pnpm test`.
+- For changes to the review flow, Copilot session setup, tools, or Bitbucket publishing, also run `pnpm test:e2e`.
 - For config, schema, typing, or API-shape changes, run `pnpm typecheck` and `pnpm test`.
 - For formatting-sensitive edits, run `pnpm check` or `pnpm check:fix`.
 - If you change `src/config/repo-config.ts` or schema-generation logic, also run `pnpm generate:repo-config-schema` and keep `schemas/copilot-code-review.schema.json` in sync.
@@ -121,6 +123,7 @@ This file is for agentic coding assistants working in this repository.
 - When changing runtime behavior, add or update tests in the same area rather than relying on end-to-end coverage only.
 - Use small fake clients/dependencies and injected functions for orchestration tests, following `src/review/runner.test.ts` patterns.
 - Keep tests deterministic; avoid network or real Bitbucket calls.
+- `e2e/` runs the built CLI against the real bundled Copilot runtime, a scripted OpenAI-compatible model injected as a BYOK provider by `e2e/support/use-fake-model.ts`, an in-memory Bitbucket server, and a temporary git repository. It needs no Copilot account or model access; extend `e2e/support/scripted-reviewer.ts` when a new end-to-end behavior needs coverage.
 
 ## Repository-specific coding patterns
 

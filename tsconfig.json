@@ -4,7 +4,7 @@
 		"lib": ["ES2023", "DOM"],
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
-		"rootDir": "src",
+		"rootDir": ".",
 		"strict": true,
 		"skipLibCheck": true,
 		"resolveJsonModule": true,
@@ -16,5 +16,5 @@
 		"exactOptionalPropertyTypes": true,
 		"forceConsistentCasingInFileNames": true
 	},
-	"include": ["src/**/*.ts"]
+	"include": ["src/**/*.ts", "e2e/**/*.ts"]
 }

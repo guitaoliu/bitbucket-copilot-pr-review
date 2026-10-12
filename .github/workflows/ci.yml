@@ -48,3 +48,6 @@ jobs:
 
       - name: Build CLI
         run: pnpm build
+
+      - name: Run end-to-end tests
+        run: node --test "e2e/**/*.e2e.test.ts"
