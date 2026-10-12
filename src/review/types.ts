@@ -32,6 +32,7 @@ export interface ReviewToolTelemetry {
 	totalDurationMs: number;
 	sessionDurationMs: number;
 	errorCount: number;
+	completionFollowUps: number;
 	byTool: Record<string, ReviewToolTelemetryCounter>;
 }
 

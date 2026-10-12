@@ -225,6 +225,7 @@ async function converse(
 				"Continuing Copilot review because the pull request summary is missing.",
 				{ findings: toolState.drafts.length },
 			);
+			tracker.recordCompletionFollowUp();
 			try {
 				response = await session.sendAndWait(
 					{ prompt: COMPLETION_PROMPT },

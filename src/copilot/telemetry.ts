@@ -33,6 +33,7 @@ export interface ReviewToolTelemetryTracker extends ReviewToolCallObserver {
 	handleEvent(event: SessionEvent): CompletedToolCall | undefined;
 	recordPermissionDenied(request: PermissionRequest): void;
 	recordError(): void;
+	recordCompletionFollowUp(): void;
 	getUnresolvedContextTools(): string[];
 	snapshot(input: {
 		sessionDurationMs: number;
@@ -55,6 +56,7 @@ export function createReviewToolTelemetryTracker(): ReviewToolTelemetryTracker {
 	const unresolvedOperations = new Map<string, string>();
 	let unattributedDenials = 0;
 	let reportedErrors = 0;
+	let completionFollowUps = 0;
 
 	const getCall = (toolCallId: string): ToolCallRecord => {
 		const existing = calls.get(toolCallId);
@@ -145,6 +147,9 @@ export function createReviewToolTelemetryTracker(): ReviewToolTelemetryTracker {
 		recordError() {
 			reportedErrors += 1;
 		},
+		recordCompletionFollowUp() {
+			completionFollowUps += 1;
+		},
 		getUnresolvedContextTools() {
 			const unresolvedToolNames = new Set(unresolvedOperations.values());
 			return CONTEXT_TOOL_NAMES.filter((toolName) =>
@@ -160,6 +165,7 @@ export function createReviewToolTelemetryTracker(): ReviewToolTelemetryTracker {
 				totalDurationMs: 0,
 				sessionDurationMs,
 				errorCount: reportedErrors,
+				completionFollowUps,
 				byTool: {},
 			};
 			for (const call of calls.values()) {

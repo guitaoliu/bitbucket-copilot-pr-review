@@ -399,8 +399,15 @@ describe("runCopilotReview", () => {
 				allowed: telemetry?.totalAllowed,
 				completed: telemetry?.totalCompleted,
 				errors: telemetry?.errorCount,
+				completionFollowUps: telemetry?.completionFollowUps,
 			},
-			{ requested: 3, allowed: 3, completed: 3, errors: 0 },
+			{
+				requested: 3,
+				allowed: 3,
+				completed: 3,
+				errors: 0,
+				completionFollowUps: 0,
+			},
 		);
 		assert.deepEqual(
 			{
@@ -659,6 +666,7 @@ describe("runCopilotReview", () => {
 			rejected: 1,
 			success: 1,
 		});
+		assert.equal(outcome.toolTelemetry?.completionFollowUps, 1);
 	});
 
 	it("uses a deterministic fallback when the pull request summary remains missing", async () => {

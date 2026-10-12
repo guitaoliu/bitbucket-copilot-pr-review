@@ -233,6 +233,7 @@ describe("buildReviewRunOutput", () => {
 				totalDurationMs: 44,
 				sessionDurationMs: 80,
 				errorCount: 0,
+				completionFollowUps: 0,
 				byTool: {
 					bash: {
 						requested: 1,

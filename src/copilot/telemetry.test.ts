@@ -78,6 +78,7 @@ describe("createReviewToolTelemetryTracker", () => {
 			totalDurationMs: 1_250,
 			sessionDurationMs: 5_000,
 			errorCount: 0,
+			completionFollowUps: 0,
 			byTool: {
 				read_file: {
 					requested: 1,
