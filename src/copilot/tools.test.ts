@@ -5,7 +5,7 @@ import {
 	GitInvalidSearchPatternError,
 	type GitRepository,
 } from "../git/repo.ts";
-import type { ReviewContext } from "../review/types.ts";
+import type { ReviewScope } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { ReviewBundle } from "./review-bundle.ts";
 import { createReviewToolTelemetryTracker } from "./telemetry.ts";
@@ -15,7 +15,7 @@ import {
 } from "./tools/context.ts";
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
 
-const reviewContext: ReviewContext = {
+const reviewContext: ReviewScope = {
 	pr: {
 		id: 123,
 		version: 1,
@@ -131,7 +131,7 @@ function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 
 function createTools(
 	options: {
-		context?: ReviewContext;
+		context?: ReviewScope;
 		git?: GitRepository;
 		logger?: Logger;
 		reviewBundle?: ReviewBundle;

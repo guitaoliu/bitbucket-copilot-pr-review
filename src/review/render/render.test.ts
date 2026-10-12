@@ -77,13 +77,11 @@ function createContext(prLink: string | undefined): ReviewContext {
 		baseCommit: "base-123",
 		mergeBaseCommit: "base-123",
 		reviewRevision: "review-rev-123",
-		reviewDiff: "",
 		diffStats: { fileCount: 6, additions: 4, deletions: 1 },
 		reviewableFiles: [
 			{
 				path: "src/service.ts",
 				status: "modified",
-				changedLines: [42],
 				additions: 1,
 				deletions: 0,
 				isBinary: false,
@@ -91,7 +89,6 @@ function createContext(prLink: string | undefined): ReviewContext {
 			{
 				path: "src/new-file.ts",
 				status: "added",
-				changedLines: [1, 2],
 				additions: 2,
 				deletions: 0,
 				isBinary: false,
@@ -100,7 +97,6 @@ function createContext(prLink: string | undefined): ReviewContext {
 				path: "src/new-name.ts",
 				oldPath: "src/old-name.ts",
 				status: "renamed",
-				changedLines: [10],
 				additions: 1,
 				deletions: 1,
 				isBinary: false,
@@ -253,7 +249,6 @@ describe("buildPullRequestComment", () => {
 				{
 					path: "pages/[id].tsx",
 					status: "modified",
-					changedLines: [7],
 					additions: 1,
 					deletions: 0,
 					isBinary: false,
@@ -362,7 +357,6 @@ describe("buildPullRequestComment", () => {
 		const reviewableFiles = Array.from({ length: 180 }, (_, index) => ({
 			path: `src/reviewed-${index}.ts`,
 			status: "modified" as const,
-			changedLines: [index + 1],
 			additions: 1,
 			deletions: 0,
 			isBinary: false,

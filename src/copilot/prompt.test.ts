@@ -65,13 +65,11 @@ const context: ReviewContext = {
 	baseCommit: "base-123",
 	mergeBaseCommit: "base-123",
 	reviewRevision: "review-rev-123",
-	reviewDiff: "",
 	diffStats: { fileCount: 1, additions: 2, deletions: 1 },
 	reviewableFiles: [
 		{
 			path: "src/example.ts",
 			status: "modified",
-			changedLines: [10],
 			additions: 1,
 			deletions: 1,
 			isBinary: false,
@@ -183,7 +181,6 @@ describe("buildPrompt", () => {
 					additions: 2,
 					deletions: 1,
 					isBinary: false,
-					changedLines: [1, 2],
 				},
 				{
 					path: "src/new name.ts",
@@ -192,7 +189,6 @@ describe("buildPrompt", () => {
 					additions: 4,
 					deletions: 3,
 					isBinary: false,
-					changedLines: [1, 2, 3, 4],
 				},
 			],
 		});
@@ -208,7 +204,6 @@ describe("buildPrompt", () => {
 			reviewableFiles: Array.from({ length: 40 }, (_, index) => ({
 				path: `src/example-${index}.ts`,
 				status: "modified" as const,
-				changedLines: [index + 1],
 				additions: 1,
 				deletions: 0,
 				isBinary: false,

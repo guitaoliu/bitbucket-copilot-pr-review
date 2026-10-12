@@ -14,7 +14,9 @@ import {
 	createPullRequest,
 	createReviewContext,
 	createReviewOutcome,
+	createReviewScope,
 } from "../test-support/review-fixtures.ts";
+import { buildReviewContext, loadReviewScope } from "./context.ts";
 import { buildPublicationStateFields } from "./publication-state.ts";
 import { runReview } from "./runner.ts";
 import type {
@@ -52,6 +54,46 @@ function readOnlyClient(pr: PullRequestInfo): ReviewBitbucketClient {
 	});
 }
 
+function commitAll(repoRoot: string, message: string): string {
+	const git = (...args: string[]) =>
+		execFileSync(
+			"git",
+			["-c", "user.name=Test", "-c", "user.email=test@example.com", ...args],
+			{ cwd: repoRoot, encoding: "utf8" },
+		).trim();
+	git("add", "-A");
+	git("commit", "--quiet", "-m", message);
+	return git("rev-parse", "HEAD");
+}
+
+function publishedClient(
+	pr: PullRequestInfo,
+	reviewRevision: string,
+): ReviewBitbucketClient {
+	return createFakeBitbucketClient({
+		pullRequest: { getPullRequest: async () => pr },
+		codeInsights: {
+			getReport: async () => ({
+				data: buildPublicationStateFields({
+					revision: reviewRevision,
+					findingCount: 0,
+				}),
+			}),
+			putReport: failIfCalled("putReport"),
+		},
+		comments: {
+			listComments: async () => [
+				{
+					id: 1,
+					version: 0,
+					text: `<!-- copilot-pr-review -->\n<!-- copilot-pr-review:revision:${reviewRevision} -->`,
+				},
+			],
+			upsertComment: failIfCalled("upsertComment"),
+		},
+	});
+}
+
 function createDependencies(
 	options: {
 		client?: ReviewBitbucketClient;
@@ -69,6 +111,7 @@ function createDependencies(
 			mergeBaseCommit: reviewContext.mergeBaseCommit,
 		}),
 		buildReviewContext: async () => reviewContext,
+		loadReviewScope: async (_git, context) => createReviewScope(context),
 		runCopilotReview: async () => createReviewOutcome(),
 		...overrides,
 	};
@@ -160,44 +203,93 @@ describe("runReview", () => {
 		}
 	});
 
-	it("skips when the publication is already complete", async () => {
+	it("skips without loading the review diff when the publication is already complete", async () => {
 		const pr = createPullRequest();
 		const context = createReviewContext(pr);
-		const client = createFakeBitbucketClient({
-			pullRequest: { getPullRequest: async () => pr },
-			codeInsights: {
-				getReport: async () => ({
-					data: buildPublicationStateFields({
-						revision: context.reviewRevision,
-						findingCount: 0,
-					}),
-				}),
-				putReport: failIfCalled("putReport"),
-			},
-			comments: {
-				listComments: async () => [
-					{
-						id: 1,
-						version: 0,
-						text: "<!-- copilot-pr-review -->\n<!-- copilot-pr-review:revision:review-rev-123 -->",
-					},
-				],
-				upsertComment: failIfCalled("upsertComment"),
-			},
-		});
 
 		const result = await runReview(
 			baseConfig,
 			logger,
 			createDependencies({
-				client,
+				client: publishedClient(pr, context.reviewRevision),
 				context,
+				loadReviewScope: failIfCalled("loadReviewScope"),
 				runCopilotReview: failIfCalled("runCopilotReview"),
 			}),
 		);
 
 		assert.equal(result.skipped, true);
 		assert.match(result.skipReason ?? "", /fully published report/);
+	});
+
+	it("runs a single metadata git diff for a skipped rerun of a published revision", async () => {
+		const repoRoot = mkdtempSync(path.join(tmpdir(), "runner-skip-diff-"));
+		try {
+			execFileSync("git", ["init", "--quiet"], { cwd: repoRoot });
+			writeFileSync(path.join(repoRoot, "app.ts"), "export const a = 1;\n");
+			const base = commitAll(repoRoot, "base");
+			writeFileSync(path.join(repoRoot, "app.ts"), "export const a = 2;\n");
+			const head = commitAll(repoRoot, "head");
+			const pr = createPullRequest(head);
+			const prepared = {
+				config: baseConfig,
+				git: new GitRepository(repoRoot, logger, "origin"),
+				mergeBaseCommit: base,
+			};
+			const { reviewRevision } = await buildReviewContext(
+				{ ...prepared, git: new GitRepository(repoRoot, logger, "origin") },
+				logger,
+				pr,
+			);
+
+			const result = await runReview(
+				baseConfig,
+				logger,
+				createDependencies({
+					client: publishedClient(pr, reviewRevision),
+					prepareReviewContext: async () => prepared,
+					buildReviewContext,
+					loadReviewScope,
+					runCopilotReview: failIfCalled("runCopilotReview"),
+				}),
+			);
+
+			assert.equal(result.skipped, true);
+			assert.equal(result.context.reviewRevision, reviewRevision);
+			assert.equal(
+				prepared.git.getTelemetrySnapshot().byOperation.diff?.count,
+				1,
+			);
+		} finally {
+			rmSync(repoRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("loads the review scope once and hands it to Copilot when reviewing", async () => {
+		const context = createReviewContext();
+		const scope = createReviewScope(context);
+		const loadedContexts: unknown[] = [];
+		let reviewedScope: unknown;
+
+		const result = await runReview(
+			baseConfig,
+			logger,
+			createDependencies({
+				context,
+				loadReviewScope: async (_git, loadedContext) => {
+					loadedContexts.push(loadedContext);
+					return scope;
+				},
+				runCopilotReview: async (_config, reviewScope) => {
+					reviewedScope = reviewScope;
+					return createReviewOutcome();
+				},
+			}),
+		);
+
+		assert.equal(result.skipped, false);
+		assert.deepEqual(loadedContexts, [context]);
+		assert.equal(reviewedScope, scope);
 	});
 
 	it("reports a stale publication when the PR head moves before publish", async () => {
@@ -377,6 +469,7 @@ describe("runReview", () => {
 				client,
 				context,
 				config: confirmConfig,
+				loadReviewScope: failIfCalled("loadReviewScope"),
 				runCopilotReview: failIfCalled("runCopilotReview"),
 				confirmRerun: async ({ message }) => {
 					sequence.push(`confirm:${message}`);

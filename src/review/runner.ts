@@ -8,7 +8,11 @@ import {
 } from "../policy/pull-requests.ts";
 import type { Logger } from "../shared/logger.ts";
 import { confirmRerun } from "./confirm.ts";
-import { buildReviewContext, prepareReviewContext } from "./context.ts";
+import {
+	buildReviewContext,
+	loadReviewScope,
+	prepareReviewContext,
+} from "./context.ts";
 import type { ReviewRunOutput } from "./output-types.ts";
 import { publishReview } from "./publish.ts";
 import {
@@ -28,6 +32,7 @@ const DEFAULT_DEPENDENCIES: ReviewRunnerDependencies = {
 	createBitbucketClient,
 	prepareReviewContext,
 	buildReviewContext,
+	loadReviewScope,
 	runCopilotReview,
 	confirmRerun,
 };
@@ -129,9 +134,10 @@ export async function runReview(
 		});
 	}
 
+	const scope = await dependencies.loadReviewScope(git, context);
 	const review = await dependencies.runCopilotReview(
 		effectiveConfig,
-		context,
+		scope,
 		git,
 		logger,
 	);

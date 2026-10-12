@@ -14,7 +14,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import type { ReviewableFile } from "../git/types.ts";
-import type { ReviewContext } from "../review/types.ts";
+import type { ReviewScope } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import {
 	type RunCopilotReviewDependencies,
@@ -95,7 +95,7 @@ function createChangedFile(): ReviewableFile {
 	};
 }
 
-function createReviewContext(): ReviewContext {
+function createReviewContext(): ReviewScope {
 	return {
 		pr: {
 			id: 123,

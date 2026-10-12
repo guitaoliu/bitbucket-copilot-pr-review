@@ -25,13 +25,11 @@ function createReviewContext(): ReviewContext {
 		baseCommit: pr.target.latestCommit,
 		mergeBaseCommit: pr.target.latestCommit,
 		reviewRevision: "review-rev-123",
-		reviewDiff: "",
 		diffStats: { fileCount: 2, additions: 3, deletions: 1 },
 		reviewableFiles: [
 			{
 				path: "src/service.ts",
 				status: "modified",
-				changedLines: [42],
 				additions: 1,
 				deletions: 0,
 				isBinary: false,
@@ -39,7 +37,6 @@ function createReviewContext(): ReviewContext {
 			{
 				path: "src/other.ts",
 				status: "modified",
-				changedLines: [8],
 				additions: 1,
 				deletions: 0,
 				isBinary: false,
@@ -166,7 +163,6 @@ describe("buildReviewArtifacts", () => {
 		const reviewableFiles = Array.from({ length: 200 }, (_, index) => ({
 			path: `src/file-${index}.ts`,
 			status: "modified" as const,
-			changedLines: [index + 1],
 			additions: 1,
 			deletions: 0,
 			isBinary: false,

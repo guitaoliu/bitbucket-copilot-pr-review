@@ -32,7 +32,6 @@ function createContext(reviewedFileCount = 2): ReviewContext {
 		baseCommit: "base-123",
 		mergeBaseCommit: "base-123",
 		reviewRevision: "review-rev-123",
-		reviewDiff: "",
 		diffStats: {
 			fileCount: reviewedFileCount,
 			additions: reviewedFileCount,
@@ -41,7 +40,6 @@ function createContext(reviewedFileCount = 2): ReviewContext {
 		reviewableFiles: Array.from({ length: reviewedFileCount }, (_, index) => ({
 			path: `src/file-${index}.ts`,
 			status: "modified" as const,
-			changedLines: [index + 1],
 			additions: 1,
 			deletions: 0,
 			isBinary: false,

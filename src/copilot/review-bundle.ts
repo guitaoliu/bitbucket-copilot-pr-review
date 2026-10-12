@@ -2,7 +2,7 @@ import { posix as path } from "node:path";
 
 import type { GitRepository } from "../git/repo.ts";
 import type { ChangedFile } from "../git/types.ts";
-import type { ReviewContext } from "../review/types.ts";
+import type { ReviewScope } from "../review/types.ts";
 import {
 	type PagedContent,
 	paginateContent,
@@ -42,13 +42,13 @@ function extractSkillFrontmatter(content: string): string | undefined {
 }
 
 export class ReviewBundle {
-	private readonly context: ReviewContext;
+	private readonly context: ReviewScope;
 	private readonly git: GitRepository;
 	private readonly deliveredPages = new Set<number>();
 	private pages?: Promise<string[]>;
 	private totalPages?: number;
 
-	constructor(context: ReviewContext, git: GitRepository) {
+	constructor(context: ReviewScope, git: GitRepository) {
 		this.context = context;
 		this.git = git;
 	}

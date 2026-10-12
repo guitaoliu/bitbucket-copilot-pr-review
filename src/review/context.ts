@@ -11,7 +11,7 @@ import { omitUndefined } from "../shared/object.ts";
 import { truncateText } from "../shared/text.ts";
 import { loadTrustedRepoConfig } from "./repo-config.ts";
 import { buildReviewRevision } from "./revision.ts";
-import type { ReviewContext } from "./types.ts";
+import type { ReviewContext, ReviewScope } from "./types.ts";
 
 export interface PreparedReviewContext {
 	config: ReviewerConfig;
@@ -78,19 +78,10 @@ export async function buildReviewContext(
 	const { config, git, mergeBaseCommit } = prepared;
 	const headCommit = pr.source.latestCommit;
 	const changedFiles = await git.diffChangedFiles(mergeBaseCommit, headCommit);
-	const scope = filterChangedFiles(changedFiles, config.review.ignorePaths);
-	const reviewDiff =
-		scope.length === 0
-			? ""
-			: await git.diffPaths(
-					mergeBaseCommit,
-					headCommit,
-					scope.flatMap((file) =>
-						file.oldPath ? [file.oldPath, file.path] : [file.path],
-					),
-					3,
-				);
-	const changedLinesByPath = parseChangedLines(reviewDiff);
+	const reviewableFiles = filterChangedFiles(
+		changedFiles,
+		config.review.ignorePaths,
+	);
 	const ciSummary = await loadCiSummary(config.ciSummaryPath, logger);
 	const reviewRevision = buildReviewRevision(
 		omitUndefined({
@@ -117,11 +108,33 @@ export async function buildReviewContext(
 		mergeBaseCommit,
 		reviewRevision,
 		diffStats: summarizeDiffStats(changedFiles),
-		reviewableFiles: scope.map((file) => ({
+		reviewableFiles,
+		ciSummary,
+	}) satisfies ReviewContext;
+}
+
+export async function loadReviewScope(
+	git: Pick<GitRepository, "diffPaths">,
+	context: ReviewContext,
+): Promise<ReviewScope> {
+	const reviewDiff =
+		context.reviewableFiles.length === 0
+			? ""
+			: await git.diffPaths(
+					context.mergeBaseCommit,
+					context.headCommit,
+					context.reviewableFiles.flatMap((file) =>
+						file.oldPath ? [file.oldPath, file.path] : [file.path],
+					),
+					3,
+				);
+	const changedLinesByPath = parseChangedLines(reviewDiff);
+	return {
+		...context,
+		reviewableFiles: context.reviewableFiles.map((file) => ({
 			...file,
 			changedLines: changedLinesByPath.get(file.path) ?? [],
 		})),
 		reviewDiff,
-		ciSummary,
-	}) satisfies ReviewContext;
+	};
 }

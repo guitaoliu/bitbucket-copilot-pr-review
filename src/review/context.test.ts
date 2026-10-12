@@ -15,8 +15,9 @@ import type { Logger } from "../shared/logger.ts";
 import {
 	baseReviewerConfig,
 	createPullRequest,
+	createReviewContext,
 } from "../test-support/review-fixtures.ts";
-import { buildReviewContext } from "./context.ts";
+import { buildReviewContext, loadReviewScope } from "./context.ts";
 import { buildReviewRevision } from "./revision.ts";
 
 const logger: Logger = {
@@ -46,17 +47,9 @@ function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 				isBinary: false,
 			},
 		],
-		diffPaths: async () =>
-			[
-				"diff --git a/src/example.ts b/src/example.ts",
-				"--- a/src/example.ts",
-				"+++ b/src/example.ts",
-				"@@ -1,2 +1,2 @@",
-				" keep",
-				"-old",
-				"+new",
-				"",
-			].join("\n"),
+		diffPaths: async () => {
+			throw new Error("should not load the review diff");
+		},
 		...overrides,
 	} as GitRepository;
 }
@@ -83,29 +76,17 @@ function finding(path: string, line: number): FindingDraft {
 }
 
 describe("buildReviewContext", () => {
-	it("diffs only reviewable paths once and pins the prompt version in the revision", async () => {
-		const diffPathCalls: Array<{ paths: readonly string[]; context: number }> =
-			[];
-		const git = createGitStub({
-			diffPaths: async (_base, _head, paths, contextLines) => {
-				diffPathCalls.push({ paths, context: contextLines });
-				return "diff --git a/src/example.ts b/src/example.ts\n@@ -1 +1 @@\n-old\n+new\n";
-			},
-		});
-
+	it("reads only file metadata and pins the prompt version in the revision", async () => {
 		const context = await buildReviewContext(
 			{
 				config: baseReviewerConfig,
-				git,
+				git: createGitStub(),
 				mergeBaseCommit: "merge-base-123",
 			},
 			logger,
 			createPullRequest(),
 		);
 
-		assert.deepEqual(diffPathCalls, [
-			{ paths: ["src/example.ts"], context: 3 },
-		]);
 		assert.deepEqual(context.diffStats, {
 			fileCount: 2,
 			additions: 6,
@@ -118,7 +99,6 @@ describe("buildReviewContext", () => {
 				additions: 1,
 				deletions: 1,
 				isBinary: false,
-				changedLines: [1],
 			},
 		]);
 		assert.equal(
@@ -140,39 +120,57 @@ describe("buildReviewContext", () => {
 			}),
 		);
 	});
+});
 
-	it("skips the review diff when no file is reviewable", async () => {
-		let diffPathCalls = 0;
-		const context = await buildReviewContext(
+describe("loadReviewScope", () => {
+	it("diffs only reviewable paths once and attaches their changed lines", async () => {
+		const diffPathCalls: Array<{ paths: readonly string[]; context: number }> =
+			[];
+		const context = createReviewContext(createPullRequest(), {
+			reviewableFiles: [
+				{
+					path: "src/new.ts",
+					oldPath: "src/old.ts",
+					status: "renamed",
+					additions: 1,
+					deletions: 1,
+					isBinary: false,
+				},
+			],
+		});
+
+		const scope = await loadReviewScope(
 			{
-				config: baseReviewerConfig,
-				git: createGitStub({
-					diffChangedFiles: async () => [
-						{
-							path: "pnpm-lock.yaml",
-							status: "modified",
-							additions: 1,
-							deletions: 0,
-							isBinary: false,
-						},
-					],
-					diffPaths: async () => {
-						diffPathCalls += 1;
-						return "";
-					},
-				}),
-				mergeBaseCommit: "merge-base-123",
+				diffPaths: async (_base, _head, paths, contextLines) => {
+					diffPathCalls.push({ paths, context: contextLines });
+					return "diff --git a/src/old.ts b/src/new.ts\nrename from src/old.ts\nrename to src/new.ts\n--- a/src/old.ts\n+++ b/src/new.ts\n@@ -1 +1 @@\n-old\n+new\n";
+				},
 			},
-			logger,
-			createPullRequest(),
+			context,
 		);
 
-		assert.equal(diffPathCalls, 0);
-		assert.deepEqual(context.reviewableFiles, []);
-		assert.equal(context.reviewDiff, "");
+		assert.deepEqual(diffPathCalls, [
+			{ paths: ["src/old.ts", "src/new.ts"], context: 3 },
+		]);
+		assert.deepEqual(
+			scope.reviewableFiles.map((file) => [file.path, file.changedLines]),
+			[["src/new.ts", [1]]],
+		);
+		assert.match(scope.reviewDiff, /^diff --git a\/src\/old\.ts/);
+		assert.equal(scope.reviewRevision, context.reviewRevision);
 	});
 
-	it("validates findings against the scope of a real git diff in two passes", async () => {
+	it("skips the review diff when no file is reviewable", async () => {
+		const scope = await loadReviewScope(
+			createGitStub(),
+			createReviewContext(createPullRequest(), { reviewableFiles: [] }),
+		);
+
+		assert.deepEqual(scope.reviewableFiles, []);
+		assert.equal(scope.reviewDiff, "");
+	});
+
+	it("validates findings against the scope of a real git diff, loading content only on demand", async () => {
 		const root = mkdtempSync(path.join(tmpdir(), "review-context-"));
 		try {
 			const git = (...args: string[]) =>
@@ -229,11 +227,14 @@ describe("buildReviewContext", () => {
 				logger,
 				{ ...pr, target: { ...pr.target, latestCommit: base } },
 			);
+			assert.equal(repo.getTelemetrySnapshot().byOperation.diff?.count, 1);
+
+			const scope = await loadReviewScope(repo, context);
 
 			assert.equal(repo.getTelemetrySnapshot().byOperation.diff?.count, 2);
-			assert.equal(context.diffStats.fileCount, 4);
+			assert.equal(scope.diffStats.fileCount, 4);
 			assert.deepEqual(
-				context.reviewableFiles.map((file) => [
+				scope.reviewableFiles.map((file) => [
 					file.status,
 					file.oldPath,
 					file.path,
@@ -244,9 +245,9 @@ describe("buildReviewContext", () => {
 					["renamed", "src/old-name.js", "src/new-name.js", [6]],
 				],
 			);
-			assert.doesNotMatch(context.reviewDiff, /secret|logo\.png/);
+			assert.doesNotMatch(scope.reviewDiff, /secret|logo\.png/);
 
-			const lookup = createReviewedFileLookup(context.reviewableFiles);
+			const lookup = createReviewedFileLookup(scope.reviewableFiles);
 			const validate = (draft: FindingDraft) => {
 				const result = validateFindingLocation(draft, lookup);
 				return result.ok

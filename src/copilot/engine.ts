@@ -10,9 +10,9 @@ import { finalizeFindings } from "../policy/findings.ts";
 import type { ReviewFinding } from "../policy/types.ts";
 import { finalizeReviewSummary } from "../review/summary.ts";
 import type {
-	ReviewContext,
 	ReviewCopilotUsage,
 	ReviewOutcome,
+	ReviewScope,
 } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
@@ -59,7 +59,7 @@ export interface RunCopilotReviewDependencies {
 
 interface ReviewConversation {
 	config: ReviewerConfig;
-	context: ReviewContext;
+	context: ReviewScope;
 	logger: Logger;
 	reviewBundle: ReviewBundle;
 	toolState: ReviewToolState;
@@ -247,10 +247,7 @@ async function converse(
 	}
 }
 
-function summarizeOutcome(
-	context: ReviewContext,
-	findingsCount: number,
-): string {
+function summarizeOutcome(context: ReviewScope, findingsCount: number): string {
 	if (context.reviewableFiles.length === 0) {
 		return "No reviewable files remained after exclusions, so no AI review was performed.";
 	}
@@ -264,7 +261,7 @@ function summarizeOutcome(
 
 export async function runCopilotReview(
 	config: ReviewerConfig,
-	context: ReviewContext,
+	context: ReviewScope,
 	git: GitRepository,
 	logger: Logger,
 	dependencies: RunCopilotReviewDependencies = {},

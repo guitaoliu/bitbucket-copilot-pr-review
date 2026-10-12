@@ -1,11 +1,15 @@
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
-import type { ReviewableFile } from "../git/types.ts";
+import type { ChangedFile } from "../git/types.ts";
 import type {
 	ReviewArtifacts,
 	ReviewBitbucketClient,
 } from "../review/runner-types.ts";
-import type { ReviewContext, ReviewOutcome } from "../review/types.ts";
+import type {
+	ReviewContext,
+	ReviewOutcome,
+	ReviewScope,
+} from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 
 export const baseReviewerConfig: ReviewerConfig = {
@@ -73,17 +77,13 @@ export function createPullRequest(commit = "head-123"): PullRequestInfo {
 	};
 }
 
-function createReviewableFile(
-	overrides: Partial<ReviewableFile> = {},
-): ReviewableFile {
+function createChangedFile(): ChangedFile {
 	return {
 		path: "src/example.ts",
 		status: "modified",
-		changedLines: [10],
 		additions: 1,
 		deletions: 0,
 		isBinary: false,
-		...overrides,
 	};
 }
 
@@ -98,9 +98,21 @@ export function createReviewContext(
 		mergeBaseCommit: pr.target.latestCommit,
 		reviewRevision: "review-rev-123",
 		diffStats: { fileCount: 1, additions: 1, deletions: 0 },
-		reviewableFiles: [createReviewableFile()],
-		reviewDiff: "diff --git a/src/example.ts b/src/example.ts",
+		reviewableFiles: [createChangedFile()],
 		...overrides,
+	};
+}
+
+export function createReviewScope(
+	context: ReviewContext = createReviewContext(),
+): ReviewScope {
+	return {
+		...context,
+		reviewableFiles: context.reviewableFiles.map((file) => ({
+			...file,
+			changedLines: [10],
+		})),
+		reviewDiff: "diff --git a/src/example.ts b/src/example.ts",
 	};
 }
 

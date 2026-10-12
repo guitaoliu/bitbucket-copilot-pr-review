@@ -5,7 +5,7 @@ import {
 	type FindingRejectionReason,
 } from "../../policy/findings.ts";
 import type { FindingDraft } from "../../policy/types.ts";
-import type { ReviewContext, ReviewSummaryDrafts } from "../../review/types.ts";
+import type { ReviewScope, ReviewSummaryDrafts } from "../../review/types.ts";
 import type { Logger } from "../../shared/logger.ts";
 import type { ReviewBundle } from "../review-bundle.ts";
 
@@ -33,7 +33,7 @@ export interface ReviewToolState {
 }
 
 export interface ReviewToolsOptions {
-	context: ReviewContext;
+	context: ReviewScope;
 	git: GitRepository;
 	logger: Logger;
 	reviewBundle: ReviewBundle;
