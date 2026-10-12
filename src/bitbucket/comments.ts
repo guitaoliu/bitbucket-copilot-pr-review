@@ -1,14 +1,12 @@
 import type { PullRequestCommentStrategy } from "../config/types.ts";
-import type { ReviewFinding } from "../review/types.ts";
-import type { Logger } from "../shared/logger.ts";
 import { omitUndefined } from "../shared/object.ts";
-import {
-	BITBUCKET_PR_COMMENT_MAX_CHARS,
-	sanitizeModelAuthoredText,
-} from "../shared/text.ts";
+import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
+import type { BitbucketRepoScope } from "./scope.ts";
 import { BitbucketApiError } from "./transport.ts";
 import type {
+	CommentRetirement,
 	PullRequestComment,
+	PullRequestCommentDraft,
 	RawBitbucketCommentActivity,
 	RawBitbucketPagedResponse,
 } from "./types.ts";
@@ -31,199 +29,72 @@ function getCommentSortTimestamp(
 	return comment.updatedDate ?? comment.createdDate ?? 0;
 }
 
-function comparePullRequestComments(
+function compareNewestFirst(
 	left: PullRequestComment,
 	right: PullRequestComment,
 ): number {
-	const timestampDifference =
-		getCommentSortTimestamp(right) - getCommentSortTimestamp(left);
-	if (timestampDifference !== 0) {
-		return timestampDifference;
-	}
-
-	const versionDifference = right.version - left.version;
-	if (versionDifference !== 0) {
-		return versionDifference;
-	}
-
-	return right.id - left.id;
-}
-
-const SUPERSEDED_PULL_REQUEST_COMMENT_TEXT =
-	"_Superseded by a newer automated PR review summary. This thread is preserved because Bitbucket will not delete it._";
-const SUPERSEDED_FINDING_COMMENT_TEXT =
-	"_Superseded by a newer automated PR review finding. This thread is preserved because Bitbucket will not delete it._";
-
-interface PullRequestCommentAnchor {
-	diffType: "EFFECTIVE";
-	path: string;
-	line: number;
-	lineType: "ADDED";
-	fileType: "TO";
-}
-
-interface FindingCommentMetadata {
-	revision: string;
-	reviewedCommit: string;
+	return (
+		getCommentSortTimestamp(right) - getCommentSortTimestamp(left) ||
+		right.version - left.version ||
+		right.id - left.id
+	);
 }
 
 function getErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-function isCommentDeletionBlockedByReplies(
+function isBitbucketError(
 	error: unknown,
-): error is BitbucketApiError {
-	if (!(error instanceof BitbucketApiError) || error.statusCode !== 409) {
-		return false;
-	}
-
-	const detail = `${error.responseBody}\n${error.message}`;
+	statusCode: number,
+	pattern: RegExp,
+): boolean {
 	return (
-		detail.includes("CommentDeletionException") ||
-		/replies which must be deleted first/i.test(detail)
+		error instanceof BitbucketApiError &&
+		error.statusCode === statusCode &&
+		pattern.test(`${error.responseBody}\n${error.message}`)
 	);
 }
 
-function isCommentDeletionBlockedByResolvedThread(
-	error: unknown,
-): error is BitbucketApiError {
-	if (!(error instanceof BitbucketApiError) || error.statusCode !== 400) {
-		return false;
-	}
-
-	const detail = `${error.responseBody}\n${error.message}`;
-	return /cannot be deleted from resolved thread/i.test(detail);
+function isDeletionBlockedByReplies(error: unknown): boolean {
+	return isBitbucketError(
+		error,
+		409,
+		/CommentDeletionException|replies which must be deleted first/i,
+	);
 }
 
-function isCommentUpdateBlockedByResolvedThread(
-	error: unknown,
-): error is BitbucketApiError {
-	if (!(error instanceof BitbucketApiError) || error.statusCode !== 400) {
-		return false;
-	}
-
-	const detail = `${error.responseBody}\n${error.message}`;
-	return /changes cannot be made to resolved thread/i.test(detail);
+function isDeletionBlockedByResolvedThread(error: unknown): boolean {
+	return isBitbucketError(
+		error,
+		400,
+		/cannot be deleted from resolved thread/i,
+	);
 }
 
-function escapeRegexLiteral(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function buildFindingCommentMarker(tag: string, externalId: string): string {
-	return `<!-- ${tag}:finding:${externalId} -->`;
-}
-
-function buildFindingCommentThreadMarker(
-	tag: string,
-	threadKey: string,
-): string {
-	return `<!-- ${tag}:finding-thread:${threadKey} -->`;
-}
-
-function parseFindingCommentExternalId(
-	tag: string,
-	text: string,
-): string | undefined {
-	const match = new RegExp(
-		`<!--\\s*${escapeRegexLiteral(tag)}:finding:([^>\\s]+)\\s*-->`,
-	).exec(text);
-	return match?.[1];
-}
-
-function parseFindingCommentThreadKey(
-	tag: string,
-	text: string,
-): string | undefined {
-	const match = new RegExp(
-		`<!--\\s*${escapeRegexLiteral(tag)}:finding-thread:([^>\\s]+)\\s*-->`,
-	).exec(text);
-	return match?.[1];
-}
-
-function buildFindingCommentText(
-	tag: string,
-	finding: ReviewFinding,
-	metadata: FindingCommentMetadata,
-): string {
-	const location =
-		finding.line > 0 ? `${finding.path}:${finding.line}` : finding.path;
-	const lines = [
-		buildFindingCommentMarker(tag, finding.externalId),
-		buildFindingCommentThreadMarker(tag, finding.threadKey),
-		`<!-- ${tag}:finding-revision:${metadata.revision} -->`,
-		`<!-- ${tag}:finding-reviewed-commit:${metadata.reviewedCommit} -->`,
-		`**Type:** ${finding.type} | **Severity:** ${finding.severity} | **Confidence:** ${finding.confidence}`,
-		"",
-		`**${sanitizeModelAuthoredText(finding.title)}**`,
-		"",
-		`Location: \`${location}\``,
-	];
-
-	if (finding.details.trim().length > 0) {
-		lines.push("", sanitizeModelAuthoredText(finding.details));
-	}
-
-	return lines.join("\n");
-}
-
-function buildFindingCommentAnchor(
-	finding: ReviewFinding,
-): PullRequestCommentAnchor | undefined {
-	if (finding.line <= 0) {
-		return undefined;
-	}
-
-	return {
-		diffType: "EFFECTIVE",
-		path: finding.path,
-		line: finding.line,
-		lineType: "ADDED",
-		fileType: "TO",
-	};
+function isUpdateBlockedByResolvedThread(error: unknown): boolean {
+	return isBitbucketError(
+		error,
+		400,
+		/changes cannot be made to resolved thread/i,
+	);
 }
 
 export class PullRequestCommentsApi {
-	private readonly projectKey: string;
-	private readonly repoSlug: string;
-	private readonly prId: number;
-	private readonly logger: Logger;
-	private readonly request: (
-		pathname: string,
-		init?: RequestInit,
-	) => Promise<string>;
-	private readonly requestJson: <T>(
-		pathname: string,
-		init?: RequestInit,
-	) => Promise<T>;
+	private readonly scope: BitbucketRepoScope;
 
-	constructor(
-		projectKey: string,
-		repoSlug: string,
-		prId: number,
-		logger: Logger,
-		request: (pathname: string, init?: RequestInit) => Promise<string>,
-		requestJson: <T>(pathname: string, init?: RequestInit) => Promise<T>,
-	) {
-		this.projectKey = projectKey;
-		this.repoSlug = repoSlug;
-		this.prId = prId;
-		this.logger = logger;
-		this.request = request;
-		this.requestJson = requestJson;
+	constructor(scope: BitbucketRepoScope) {
+		this.scope = scope;
 	}
 
-	async listPullRequestComments(): Promise<PullRequestComment[]> {
+	async listComments(): Promise<PullRequestComment[]> {
 		const commentsById = new Map<number, PullRequestComment>();
 		let start = 0;
 
 		while (true) {
-			const pathname = `/rest/api/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/pull-requests/${this.prId}/activities?limit=1000&start=${start}`;
-			const payload =
-				await this.requestJson<
-					RawBitbucketPagedResponse<RawBitbucketCommentActivity>
-				>(pathname);
+			const payload = await this.scope.transport.requestJson<
+				RawBitbucketPagedResponse<RawBitbucketCommentActivity>
+			>(`${this.scope.pullRequestPath}/activities?limit=1000&start=${start}`);
 
 			for (const activity of payload.values ?? []) {
 				if (activity.action !== "COMMENTED" || !activity.comment) {
@@ -259,273 +130,170 @@ export class PullRequestCommentsApi {
 			start = payload.nextPageStart;
 		}
 
-		return [...commentsById.values()];
+		return [...commentsById.values()].sort(compareNewestFirst);
 	}
 
-	private async listPullRequestCommentsByTag(
-		tag: string,
-	): Promise<PullRequestComment[]> {
-		const marker = `<!-- ${tag} -->`;
-		const comments = await this.listPullRequestComments();
-		return comments
-			.filter((comment) => comment.text.includes(marker))
-			.sort(comparePullRequestComments);
-	}
-
-	async findPullRequestCommentByTag(
-		tag: string,
-	): Promise<PullRequestComment | undefined> {
-		return (await this.listPullRequestCommentsByTag(tag))[0];
-	}
-
-	async createPullRequestComment(
+	private async createComment(
 		text: string,
-		options: { anchor?: PullRequestCommentAnchor } = {},
+		anchor?: PullRequestCommentDraft["anchor"],
 	): Promise<void> {
 		validatePullRequestCommentText(text);
-		const pathname = `/rest/api/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/pull-requests/${this.prId}/comments`;
-		await this.request(pathname, {
-			method: "POST",
-			body: JSON.stringify(omitUndefined({ text, anchor: options.anchor })),
-		});
+		await this.scope.transport.request(
+			`${this.scope.pullRequestPath}/comments`,
+			{
+				method: "POST",
+				json: omitUndefined({
+					text,
+					anchor: anchor
+						? {
+								diffType: "EFFECTIVE",
+								path: anchor.path,
+								line: anchor.line,
+								lineType: "ADDED",
+								fileType: "TO",
+							}
+						: undefined,
+				}),
+			},
+		);
 	}
 
-	async updatePullRequestComment(
-		commentId: number,
-		version: number,
+	private async updateComment(
+		comment: PullRequestComment,
 		text: string,
 	): Promise<void> {
 		validatePullRequestCommentText(text);
-		const pathname = `/rest/api/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/pull-requests/${this.prId}/comments/${commentId}`;
-		await this.request(pathname, {
-			method: "PUT",
-			body: JSON.stringify({ version, text }),
-		});
+		await this.scope.transport.request(
+			`${this.scope.pullRequestPath}/comments/${comment.id}`,
+			{ method: "PUT", json: { version: comment.version, text } },
+		);
 	}
 
-	async deletePullRequestComment(
-		commentId: number,
-		version: number,
+	private async retireComment(
+		comment: PullRequestComment,
+		retirement: CommentRetirement,
 	): Promise<void> {
-		const pathname = `/rest/api/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/pull-requests/${this.prId}/comments/${commentId}?version=${encodeURIComponent(String(version))}`;
-		await this.request(pathname, {
-			method: "DELETE",
-		});
-	}
-
-	async upsertPullRequestComment(
-		tag: string,
-		text: string,
-		options: {
-			strategy?: PullRequestCommentStrategy;
-		} = {},
-	): Promise<void> {
-		const strategy = options.strategy ?? "update";
-		const existingComments = await this.listPullRequestCommentsByTag(tag);
-		const existing = existingComments[0];
-
-		if (!existing) {
-			this.logger.info(`Creating pull request summary comment tagged ${tag}`);
-			await this.createPullRequestComment(text);
-			return;
-		}
-
-		if (strategy === "recreate") {
-			this.logger.info(
-				`Creating replacement pull request summary comment tagged ${tag}`,
-			);
-			await this.createPullRequestComment(text);
-
-			for (const comment of existingComments) {
-				try {
-					this.logger.info(
-						`Deleting superseded pull request summary comment ${comment.id} tagged ${tag}`,
-					);
-					await this.deletePullRequestComment(comment.id, comment.version);
-				} catch (error) {
-					const deleteBlockedByReplies =
-						isCommentDeletionBlockedByReplies(error);
-					const deleteBlockedByResolvedThread =
-						isCommentDeletionBlockedByResolvedThread(error);
-
-					if (deleteBlockedByResolvedThread) {
-						this.logger.debug(
-							`Superseded pull request summary comment ${comment.id} tagged ${tag} is in a resolved thread and cannot be deleted or archived; leaving it in place.`,
-						);
-						continue;
-					}
-
-					if (deleteBlockedByReplies) {
-						try {
-							this.logger.info(
-								`Superseded pull request summary comment ${comment.id} tagged ${tag} has replies; archiving it instead of deleting`,
-							);
-							await this.updatePullRequestComment(
-								comment.id,
-								comment.version,
-								SUPERSEDED_PULL_REQUEST_COMMENT_TEXT,
-							);
-							continue;
-						} catch (archiveError) {
-							this.logger.warn(
-								`Failed to archive superseded pull request summary comment ${comment.id} tagged ${tag} after delete was blocked by replies: ${getErrorMessage(archiveError)}`,
-							);
-							continue;
-						}
-					}
-
-					this.logger.warn(
-						`Failed to delete superseded pull request summary comment ${comment.id} tagged ${tag}: ${getErrorMessage(error)}`,
-					);
-				}
-			}
-			return;
-		}
-
-		this.logger.info(`Updating pull request summary comment tagged ${tag}`);
-		await this.updatePullRequestComment(existing.id, existing.version, text);
-	}
-
-	private async deleteOrArchiveFindingComment(
-		comment: Pick<PullRequestComment, "id" | "version">,
-		tag: string,
-	): Promise<void> {
+		const { logger } = this.scope;
+		const label = `${retirement.label} ${comment.id}`;
 		try {
-			this.logger.info(
-				`Deleting stale pull request finding comment ${comment.id} tagged ${tag}`,
+			logger.info(`Deleting ${label}`);
+			await this.scope.transport.request(
+				`${this.scope.pullRequestPath}/comments/${comment.id}?version=${encodeURIComponent(String(comment.version))}`,
+				{ method: "DELETE" },
 			);
-			await this.deletePullRequestComment(comment.id, comment.version);
 		} catch (error) {
-			const deleteBlockedByReplies = isCommentDeletionBlockedByReplies(error);
-			const deleteBlockedByResolvedThread =
-				isCommentDeletionBlockedByResolvedThread(error);
-
-			if (deleteBlockedByResolvedThread) {
-				this.logger.debug(
-					`Stale pull request finding comment ${comment.id} tagged ${tag} is in a resolved thread and cannot be deleted or archived; leaving it in place.`,
+			if (isDeletionBlockedByResolvedThread(error)) {
+				logger.debug(
+					`${label} is in a resolved thread and cannot be deleted or archived; leaving it in place.`,
 				);
 				return;
 			}
 
-			if (deleteBlockedByReplies) {
-				try {
-					this.logger.info(
-						`Stale pull request finding comment ${comment.id} tagged ${tag} has replies; archiving it instead of deleting`,
-					);
-					await this.updatePullRequestComment(
-						comment.id,
-						comment.version,
-						SUPERSEDED_FINDING_COMMENT_TEXT,
-					);
-					return;
-				} catch (archiveError) {
-					this.logger.warn(
-						`Failed to archive stale pull request finding comment ${comment.id} tagged ${tag} after delete was blocked by replies: ${getErrorMessage(archiveError)}`,
-					);
-					return;
-				}
+			if (!isDeletionBlockedByReplies(error)) {
+				logger.warn(`Failed to delete ${label}: ${getErrorMessage(error)}`);
+				return;
 			}
 
-			this.logger.warn(
-				`Failed to delete stale pull request finding comment ${comment.id} tagged ${tag}: ${getErrorMessage(error)}`,
-			);
+			try {
+				logger.info(`${label} has replies; archiving it instead of deleting`);
+				await this.updateComment(comment, retirement.supersededText);
+			} catch (archiveError) {
+				logger.warn(
+					`Failed to archive ${label} after delete was blocked by replies: ${getErrorMessage(archiveError)}`,
+				);
+			}
 		}
 	}
 
-	private async listPullRequestFindingComments(tag: string): Promise<{
-		commentsByThreadKey: Map<string, PullRequestComment>;
-		legacyCommentsByExternalId: Map<string, PullRequestComment>;
-	}> {
-		const comments = await this.listPullRequestComments();
-		const commentsByThreadKey = new Map<string, PullRequestComment>();
-		const legacyCommentsByExternalId = new Map<string, PullRequestComment>();
-		for (const comment of comments.sort(comparePullRequestComments)) {
-			const legacyExternalId = parseFindingCommentExternalId(tag, comment.text);
-			const threadKey = parseFindingCommentThreadKey(tag, comment.text);
-			if (!threadKey) {
-				if (!legacyExternalId) {
-					continue;
-				}
-
-				const existingLegacy = legacyCommentsByExternalId.get(legacyExternalId);
-				if (existingLegacy) {
-					await this.deleteOrArchiveFindingComment(comment, tag);
-					continue;
-				}
-
-				legacyCommentsByExternalId.set(legacyExternalId, comment);
-				continue;
-			}
-
-			const existing = commentsByThreadKey.get(threadKey);
-			if (existing) {
-				await this.deleteOrArchiveFindingComment(comment, tag);
-				continue;
-			}
-
-			commentsByThreadKey.set(threadKey, comment);
-		}
-
-		return { commentsByThreadKey, legacyCommentsByExternalId };
-	}
-
-	async reconcilePullRequestFindingComments(
-		tag: string,
-		findings: ReviewFinding[],
-		metadata: FindingCommentMetadata,
+	async upsertComment(
+		existing: PullRequestComment[],
+		text: string,
+		options: {
+			strategy: PullRequestCommentStrategy;
+			retirement: CommentRetirement;
+		},
 	): Promise<void> {
-		const { commentsByThreadKey, legacyCommentsByExternalId } =
-			await this.listPullRequestFindingComments(tag);
-		const desiredThreadKeys = new Set(
-			findings.map((finding) => finding.threadKey),
-		);
-		const matchedLegacyExternalIds = new Set<string>();
-
-		for (const finding of findings) {
-			const text = buildFindingCommentText(tag, finding, metadata);
-			const existing =
-				commentsByThreadKey.get(finding.threadKey) ??
-				legacyCommentsByExternalId.get(finding.externalId);
-			if (existing) {
-				try {
-					await this.updatePullRequestComment(
-						existing.id,
-						existing.version,
-						text,
-					);
-					if (!commentsByThreadKey.has(finding.threadKey)) {
-						matchedLegacyExternalIds.add(finding.externalId);
-					}
-					continue;
-				} catch (error) {
-					if (!isCommentUpdateBlockedByResolvedThread(error)) {
-						throw error;
-					}
-
-					this.logger.debug(
-						`Pull request finding comment ${existing.id} tagged ${tag} is in a resolved thread and cannot be updated; creating a replacement comment.`,
-					);
-				}
-			}
-
-			const anchor = buildFindingCommentAnchor(finding);
-			await this.createPullRequestComment(text, anchor ? { anchor } : {});
+		const [latest] = existing;
+		if (latest && options.strategy === "update") {
+			this.scope.logger.info(
+				`Updating ${options.retirement.label} ${latest.id}`,
+			);
+			await this.updateComment(latest, text);
+			return;
 		}
 
-		for (const [threadKey, comment] of commentsByThreadKey) {
-			if (desiredThreadKeys.has(threadKey)) {
+		this.scope.logger.info(`Creating ${options.retirement.label}`);
+		await this.createComment(text);
+		for (const comment of existing) {
+			await this.retireComment(comment, options.retirement);
+		}
+	}
+
+	async reconcileKeyedComments(
+		existing: PullRequestComment[],
+		drafts: PullRequestCommentDraft[],
+		options: {
+			keyOf: (text: string) => string | undefined;
+			retirement: CommentRetirement;
+		},
+	): Promise<void> {
+		const commentsByKey = new Map<string, PullRequestComment>();
+		const duplicates: PullRequestComment[] = [];
+		for (const comment of existing) {
+			const key = options.keyOf(comment.text);
+			if (key === undefined) {
 				continue;
 			}
 
-			await this.deleteOrArchiveFindingComment(comment, tag);
+			if (commentsByKey.has(key)) {
+				duplicates.push(comment);
+			} else {
+				commentsByKey.set(key, comment);
+			}
 		}
 
-		for (const [externalId, comment] of legacyCommentsByExternalId) {
-			if (matchedLegacyExternalIds.has(externalId)) {
-				continue;
+		for (const draft of drafts) {
+			const matchedKey = draft.keys.find((key) => commentsByKey.has(key));
+			const matched =
+				matchedKey === undefined ? undefined : commentsByKey.get(matchedKey);
+			if (matchedKey !== undefined) {
+				commentsByKey.delete(matchedKey);
 			}
 
-			await this.deleteOrArchiveFindingComment(comment, tag);
+			if (
+				!matched ||
+				!(await this.updateUnlessResolved(
+					matched,
+					draft.text,
+					options.retirement,
+				))
+			) {
+				await this.createComment(draft.text, draft.anchor);
+			}
+		}
+
+		for (const comment of [...duplicates, ...commentsByKey.values()]) {
+			await this.retireComment(comment, options.retirement);
+		}
+	}
+
+	private async updateUnlessResolved(
+		comment: PullRequestComment,
+		text: string,
+		retirement: CommentRetirement,
+	): Promise<boolean> {
+		try {
+			await this.updateComment(comment, text);
+			return true;
+		} catch (error) {
+			if (!isUpdateBlockedByResolvedThread(error)) {
+				throw error;
+			}
+
+			this.scope.logger.debug(
+				`${retirement.label} ${comment.id} is in a resolved thread and cannot be updated; creating a replacement comment.`,
+			);
+			return false;
 		}
 	}
 }

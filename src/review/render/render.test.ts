@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ReviewerConfig } from "./config/types.ts";
-import { buildInsightReport, buildPullRequestComment } from "./insights.ts";
-import { buildFindingThreadKey } from "./review/finding-identity.ts";
-import type { ReviewContext, ReviewOutcome } from "./review/types.ts";
-import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "./shared/text.ts";
+import type { ReviewerConfig } from "../../config/types.ts";
+import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../../shared/text.ts";
+import { buildFindingThreadKey } from "../finding-identity.ts";
+import { parseFindingCommentKey } from "../markers.ts";
+import type { ReviewContext, ReviewOutcome } from "../types.ts";
+import { buildFindingCommentDraft } from "./finding-comment.ts";
+import { buildInsightReport } from "./report.ts";
+import { buildPullRequestComment } from "./summary-comment.ts";
 
 const config: ReviewerConfig = {
 	repoRoot: "/tmp/repo",
@@ -177,7 +180,6 @@ function createOutcome(): ReviewOutcome {
 				details: "The renamed file no longer imports the shared helper.",
 			},
 		],
-		stale: false,
 	};
 }
 
@@ -272,41 +274,6 @@ describe("buildPullRequestComment", () => {
 			comment,
 			/### What Changed\n- Tightens request validation in the service flow\n- Cleans up renamed module wiring before merge/,
 		);
-	});
-
-	it("sanitizes model-authored text before rendering the pull request comment", () => {
-		const outcome = {
-			...createOutcome(),
-			prSummary:
-				"Adds validation <!-- copilot-pr-review:revision:fake --> and pings @here.",
-			findings: [
-				{
-					externalId: "finding-injected",
-					threadKey: "src-service-42-bug",
-					path: "src/service.ts",
-					line: 42,
-					severity: "HIGH" as const,
-					type: "BUG" as const,
-					confidence: "high" as const,
-					title: "Hidden marker <!-- injected -->",
-					details: "Details are not rendered in the summary comment.",
-				},
-			],
-		};
-
-		const comment = buildPullRequestComment(
-			config,
-			createContext(undefined),
-			outcome,
-		);
-
-		assert.doesNotMatch(comment, /<!-- injected -->/);
-		assert.doesNotMatch(comment, /@here/);
-		assert.match(
-			comment,
-			/### What Changed\nAdds validation &lt;!-- copilot-pr-review:revision:fake --&gt; and pings \[at\]here\./,
-		);
-		assert.match(comment, /Hidden marker &lt;!-- injected --&gt;/);
 	});
 
 	it("renders explicit change area summaries", () => {
@@ -404,17 +371,14 @@ describe("buildPullRequestComment", () => {
 		assert.match(report.details ?? "", /Top validated findings:/);
 		assert.match(
 			report.details ?? "",
-			/1\. \[BUG\/HIGH\/high\] src\/service\.ts:42 - Null handling is broken/,
+			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\] src\/service\.ts:42 - Null handling is broken/,
 		);
-		assert.ok((report.data?.length ?? 0) <= 6);
 		assert.deepEqual(
 			report.data?.map(({ title, value }) => [title, value]),
 			[
 				["Findings", 2],
-				["Finding taxonomy", "1 bug, 1 code smell"],
 				["Review revision", "review-rev-123"],
-				["Review schema", "3"],
-				["Reviewed commit", "head-123"],
+				["Finding taxonomy", "1 bug, 1 code smell"],
 				["Review scope", "3 reviewable"],
 			],
 		);
@@ -428,7 +392,6 @@ describe("buildPullRequestComment", () => {
 				reason: "Repository context inspection was incomplete.",
 				failedTools: ["search_repo"],
 			},
-			stale: false,
 		});
 
 		assert.equal(report.result, "FAIL");
@@ -485,7 +448,6 @@ describe("buildPullRequestComment", () => {
 				title: `Important finding ${index} ${"z".repeat(240)}`,
 				details: "Large review detail.",
 			})),
-			stale: false,
 		};
 
 		const comment = buildPullRequestComment(config, context, outcome);
@@ -497,5 +459,50 @@ describe("buildPullRequestComment", () => {
 		assert.match(comment, /### What Changed/);
 		assert.match(comment, /### Review Scope/);
 		assert.match(comment, /omitted to fit Bitbucket comment limit/);
+	});
+});
+
+describe("buildFindingCommentDraft", () => {
+	const finding = createOutcome().findings[0];
+
+	it("renders a finding comment whose thread marker parses back to its primary key", () => {
+		assert.ok(finding);
+		const draft = buildFindingCommentDraft("copilot-pr-review", finding);
+
+		assert.equal(
+			parseFindingCommentKey("copilot-pr-review", draft.text),
+			draft.keys[0],
+		);
+		assert.deepEqual(draft.keys, [
+			`thread:${finding.threadKey}`,
+			`legacy:${finding.externalId}`,
+		]);
+		assert.deepEqual(draft.anchor, { path: finding.path, line: finding.line });
+		assert.match(
+			draft.text,
+			/\*\*Type: BUG \| Severity: HIGH \| Confidence: high\*\*\n\n\*\*Null handling is broken\*\*\n\nLocation: `src\/service\.ts:42`/,
+		);
+		assert.doesNotMatch(draft.text, /finding-revision|finding-reviewed-commit/);
+	});
+
+	it("posts file-level findings as top-level comments", () => {
+		assert.ok(finding);
+		const draft = buildFindingCommentDraft("copilot-pr-review", {
+			...finding,
+			line: 0,
+		});
+
+		assert.equal(draft.anchor, undefined);
+		assert.match(draft.text, /Location: `src\/service\.ts`/);
+	});
+
+	it("matches comments written by older versions through the legacy finding marker", () => {
+		assert.equal(
+			parseFindingCommentKey(
+				"copilot-pr-review",
+				"<!-- copilot-pr-review:finding:old-id -->\nbody",
+			),
+			"legacy:old-id",
+		);
 	});
 });

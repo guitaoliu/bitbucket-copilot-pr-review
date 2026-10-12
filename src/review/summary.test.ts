@@ -111,21 +111,6 @@ describe("finalizeReviewSummary", () => {
 		assert.doesNotMatch(result.prSummary, /truncated/i);
 	});
 
-	it("sanitizes model-authored PR summary control markup and mass mentions", () => {
-		const context = createContext(2);
-		const drafts: ReviewSummaryDrafts = {
-			prSummary:
-				"Adds validation <!-- copilot-pr-review:revision:fake --> and pings @here.",
-		};
-
-		const result = finalizeReviewSummary(context, drafts);
-
-		assert.equal(
-			result.prSummary,
-			"Adds validation &lt;!-- copilot-pr-review:revision:fake --&gt; and pings [at]here.",
-		);
-	});
-
 	it("keeps the PR summary for larger reviews", () => {
 		const context = createContext(26);
 		const drafts: ReviewSummaryDrafts = {

@@ -1,7 +1,10 @@
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { ChangedFile } from "../git/types.ts";
-import type { ReviewArtifacts } from "../review/runner-types.ts";
+import type {
+	ReviewArtifacts,
+	ReviewBitbucketClient,
+} from "../review/runner-types.ts";
 import type { ReviewContext, ReviewOutcome } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 
@@ -118,7 +121,6 @@ export function createReviewOutcome(
 		summary: "No reportable issues found.",
 		prSummary: "Confirms the reviewed change is safe to merge.",
 		findings: [],
-		stale: false,
 		...overrides,
 	};
 }
@@ -128,13 +130,41 @@ export function createReviewArtifacts(
 	overrides: Partial<ReviewArtifacts> = {},
 ): ReviewArtifacts {
 	return {
+		review: createReviewOutcome(),
 		report: {
 			title: config.report.title,
 			result: "PASS",
 			reporter: config.report.reporter,
 		},
 		commentBody: "review comment",
+		findingComments: [],
 		...overrides,
+	};
+}
+
+export function createFakeBitbucketClient(
+	overrides: {
+		pullRequest?: Partial<ReviewBitbucketClient["pullRequest"]>;
+		codeInsights?: Partial<ReviewBitbucketClient["codeInsights"]>;
+		comments?: Partial<ReviewBitbucketClient["comments"]>;
+	} = {},
+): ReviewBitbucketClient {
+	return {
+		pullRequest: {
+			getPullRequest: async () => createPullRequest(),
+			...overrides.pullRequest,
+		},
+		codeInsights: {
+			getReport: async () => undefined,
+			putReport: async () => {},
+			...overrides.codeInsights,
+		},
+		comments: {
+			listComments: async () => [],
+			reconcileKeyedComments: async () => {},
+			upsertComment: async () => {},
+			...overrides.comments,
+		},
 	};
 }
 

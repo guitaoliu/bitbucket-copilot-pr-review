@@ -848,7 +848,6 @@ export async function runCopilotReview(
 		return {
 			summary: summarizeOutcome(context, 0),
 			findings: [],
-			stale: false,
 		};
 	}
 
@@ -1036,7 +1035,6 @@ export async function runCopilotReview(
 				assistantMessage,
 				toolTelemetry,
 				copilotUsage,
-				stale: false,
 			}) satisfies ReviewOutcome;
 		}
 
@@ -1055,7 +1053,6 @@ export async function runCopilotReview(
 			changeAreas: reviewSummary.changeAreas,
 			toolTelemetry,
 			copilotUsage,
-			stale: false,
 		}) satisfies ReviewOutcome;
 	} finally {
 		unsubscribeSessionEvents();

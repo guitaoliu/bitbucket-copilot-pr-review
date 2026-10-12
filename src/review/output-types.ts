@@ -1,14 +1,23 @@
 import type { InsightReportPayload } from "../bitbucket/types.ts";
 import type {
 	ReviewOutcome,
-	ReviewPublication,
+	ReviewPublicationError,
 	ReviewPublicationStatus,
 } from "./types.ts";
 
 type ReviewRunOutputReview = Omit<
 	ReviewOutcome,
 	"gitTelemetry" | "toolTelemetry" | "copilotUsage"
->;
+> & { stale: boolean };
+
+export interface ReviewPublication {
+	status: ReviewPublicationStatus;
+	attempted: boolean;
+	codeInsightsPublished: boolean;
+	findingCommentsUpdated: boolean;
+	pullRequestCommentUpdated: boolean;
+	error?: ReviewPublicationError;
+}
 
 export interface ReviewRunOutput {
 	context: {

@@ -1,24 +1,32 @@
 import packageJson from "../../package.json" with { type: "json" };
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
-import { buildInsightReport, buildPullRequestComment } from "../insights.ts";
 import { omitUndefined } from "../shared/object.ts";
-import { sanitizeReviewOutcomeForOutput } from "./output-sanitize.ts";
-import type { ReviewRunOutput } from "./output-types.ts";
+import { sanitizeModelAuthoredText } from "../shared/text.ts";
+import type { ReviewPublication, ReviewRunOutput } from "./output-types.ts";
+import { buildFindingCommentDraft } from "./render/finding-comment.ts";
+import { buildInsightReport } from "./render/report.ts";
+import { buildPullRequestComment } from "./render/summary-comment.ts";
 import type { ReviewArtifacts } from "./runner-types.ts";
 import type {
+	PublicationResult,
 	ReviewContext,
 	ReviewOutcome,
-	ReviewPublication,
 } from "./types.ts";
 
-export function buildSkippedReviewOutput(
-	config: ReviewerConfig,
-	pullRequest: PullRequestInfo,
-	skipReason: string,
-	reviewRevision?: string,
-	mergeBaseCommit?: string,
-): ReviewRunOutput {
+export function buildSkippedReviewOutput({
+	config,
+	pullRequest,
+	skipReason,
+	reviewRevision,
+	mergeBaseCommit,
+}: {
+	config: ReviewerConfig;
+	pullRequest: PullRequestInfo;
+	skipReason: string;
+	reviewRevision?: string;
+	mergeBaseCommit?: string;
+}): ReviewRunOutput {
 	return {
 		context: {
 			toolVersion: packageJson.version,
@@ -47,34 +55,75 @@ export function buildSkippedReviewOutput(
 	};
 }
 
+function sanitizeReviewOutcome(review: ReviewOutcome): ReviewOutcome {
+	const sanitizeOptional = (value: string | undefined) =>
+		value === undefined ? undefined : sanitizeModelAuthoredText(value);
+	return omitUndefined({
+		...review,
+		summary: sanitizeModelAuthoredText(review.summary),
+		findings: review.findings.map((finding) =>
+			omitUndefined({
+				...finding,
+				title: sanitizeModelAuthoredText(finding.title),
+				details: sanitizeModelAuthoredText(finding.details),
+				category: sanitizeOptional(finding.category),
+			}),
+		),
+		assistantMessage: sanitizeOptional(review.assistantMessage),
+		prSummary: sanitizeOptional(review.prSummary),
+		changeAreas: review.changeAreas?.map((area) => ({
+			...area,
+			title: sanitizeModelAuthoredText(area.title),
+			summary: sanitizeModelAuthoredText(area.summary),
+		})),
+	}) satisfies ReviewOutcome;
+}
+
 export function buildReviewArtifacts(
 	config: ReviewerConfig,
 	context: ReviewContext,
-	review: ReviewOutcome,
+	rawReview: ReviewOutcome,
 ): ReviewArtifacts {
+	const review = sanitizeReviewOutcome(rawReview);
 	return {
+		review,
 		report: buildInsightReport(config, context, review),
 		commentBody: buildPullRequestComment(config, context, review),
+		findingComments: review.findings.map((finding) =>
+			buildFindingCommentDraft(config.report.commentTag, finding),
+		),
 	};
+}
+
+function toReviewPublication(result: PublicationResult): ReviewPublication {
+	const completed = result.completedStages;
+	return omitUndefined({
+		status: result.status,
+		attempted:
+			completed.length > 0 ||
+			(result.error !== undefined && result.error.stage !== "review"),
+		codeInsightsPublished: completed.includes("code_insights"),
+		findingCommentsUpdated: completed.includes("finding_comments"),
+		pullRequestCommentUpdated: completed.includes("pull_request_comment"),
+		error: result.error,
+	}) satisfies ReviewPublication;
 }
 
 export function buildReviewRunOutput(
 	context: ReviewContext,
-	review: ReviewOutcome,
 	artifacts: ReviewArtifacts,
-	published: boolean,
-	publication?: ReviewPublication,
+	publicationResult: PublicationResult,
 ): ReviewRunOutput {
-	const sanitizedReview = sanitizeReviewOutcomeForOutput(review);
 	const {
 		gitTelemetry,
 		toolTelemetry,
 		copilotUsage,
 		...reviewWithoutTelemetry
-	} = sanitizedReview;
+	} = artifacts.review;
 	const hasGitTelemetry =
 		gitTelemetry !== undefined &&
 		Object.keys(gitTelemetry.byOperation).length > 0;
+	const publication = toReviewPublication(publicationResult);
 
 	return {
 		context: {
@@ -100,16 +149,15 @@ export function buildReviewRunOutput(
 						}
 					: undefined,
 		}),
-		review: reviewWithoutTelemetry,
+		review: {
+			...reviewWithoutTelemetry,
+			stale: publication.status === "stale",
+		},
 		report: artifacts.report,
 		commentBody: artifacts.commentBody,
-		published,
-		...(publication
-			? {
-					publication,
-					publicationStatus: publication.status,
-				}
-			: {}),
+		published: publication.status === "published",
+		publication,
+		publicationStatus: publication.status,
 		skipped: false,
 	};
 }

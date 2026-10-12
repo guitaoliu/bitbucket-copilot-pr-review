@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Logger } from "../shared/logger.ts";
 import { CodeInsightsApi } from "./code-insights.ts";
+import { type BitbucketRepoScope, createBitbucketRepoScope } from "./scope.ts";
 import { BitbucketApiError } from "./transport.ts";
 
 const logger: Logger = {
@@ -13,14 +14,23 @@ const logger: Logger = {
 	json() {},
 };
 
+function createApi(
+	transport: BitbucketRepoScope["transport"],
+): CodeInsightsApi {
+	return new CodeInsightsApi(
+		createBitbucketRepoScope(
+			{ projectKey: "PROJ", repoSlug: "repo", prId: 123 },
+			transport,
+			logger,
+		),
+	);
+}
+
 describe("CodeInsightsApi", () => {
 	it("returns undefined when a report does not exist", async () => {
-		const api = new CodeInsightsApi(
-			"PROJ",
-			"repo",
-			logger,
-			async () => "",
-			async () => {
+		const api = createApi({
+			request: async () => "",
+			requestJson: async () => {
 				throw new BitbucketApiError(
 					404,
 					"Not Found",
@@ -29,54 +39,55 @@ describe("CodeInsightsApi", () => {
 					"missing",
 				);
 			},
-		);
-
-		const result = await api.getCodeInsightsReport("commit-1", "report-key");
-
-		assert.equal(result, undefined);
-	});
-
-	it("publishes by deleting and recreating the report only", async () => {
-		const calls: string[] = [];
-		const api = new CodeInsightsApi(
-			"PROJ",
-			"repo",
-			logger,
-			async (pathname, init) => {
-				calls.push(`${init?.method ?? "GET"} ${pathname}`);
-				return "";
-			},
-			async () => ({}) as never,
-		);
-
-		await api.publishCodeInsights("commit-1", "report-key", {
-			title: "Copilot PR Review",
-			result: "FAIL",
-			reporter: "Copilot",
 		});
 
+		assert.equal(await api.getReport("commit-1", "report-key"), undefined);
+	});
+
+	it("publishes by replacing the report with a single PUT", async () => {
+		const calls: Array<{
+			method: string | undefined;
+			pathname: string;
+			json: unknown;
+		}> = [];
+		const api = createApi({
+			request: async (pathname, options) => {
+				calls.push({ method: options?.method, pathname, json: options?.json });
+				return "";
+			},
+			requestJson: async () => ({}) as never,
+		});
+		const report = {
+			title: "Copilot PR Review",
+			result: "FAIL" as const,
+			reporter: "Copilot",
+		};
+
+		await api.putReport("commit-1", "report-key", report);
+
 		assert.deepEqual(calls, [
-			"DELETE /rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key",
-			"PUT /rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key",
+			{
+				method: "PUT",
+				pathname:
+					"/rest/insights/latest/projects/PROJ/repos/repo/commits/commit-1/reports/report-key",
+				json: report,
+			},
 		]);
 	});
 
 	it("rejects report payloads with more than six data fields before sending", async () => {
-		const calls: string[] = [];
-		const api = new CodeInsightsApi(
-			"PROJ",
-			"repo",
-			logger,
-			async (pathname, init) => {
-				calls.push(`${init?.method ?? "GET"} ${pathname}`);
+		let requestCount = 0;
+		const api = createApi({
+			request: async () => {
+				requestCount += 1;
 				return "";
 			},
-			async () => ({}) as never,
-		);
+			requestJson: async () => ({}) as never,
+		});
 
 		await assert.rejects(
 			() =>
-				api.createReport("commit-1", "report-key", {
+				api.putReport("commit-1", "report-key", {
 					title: "Copilot PR Review",
 					result: "FAIL",
 					reporter: "Copilot",
@@ -88,7 +99,6 @@ describe("CodeInsightsApi", () => {
 				}),
 			/at most 6 report data fields/,
 		);
-
-		assert.deepEqual(calls, []);
+		assert.equal(requestCount, 0);
 	});
 });

@@ -1,18 +1,15 @@
+import type { PullRequestComment } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { Logger } from "../shared/logger.ts";
+import { findSummaryComments, parseFindingCommentKey } from "./markers.ts";
+import { FINDING_COMMENT_RETIREMENT } from "./render/finding-comment.ts";
+import { SUMMARY_COMMENT_RETIREMENT } from "./render/summary-comment.ts";
 import type { ReviewArtifacts, ReviewBitbucketClient } from "./runner-types.ts";
 import type {
+	PublicationResult,
+	PublicationStage,
 	ReviewContext,
-	ReviewOutcome,
-	ReviewPublication,
-	ReviewPublicationError,
 } from "./types.ts";
-
-export interface PublishResult {
-	published: boolean;
-	publication: ReviewPublication;
-	review: ReviewOutcome;
-}
 
 function getStalePublishReason(
 	context: ReviewContext,
@@ -33,37 +30,33 @@ function getStalePublishReason(
 	return undefined;
 }
 
-function createPublicationError(
-	stage: ReviewPublicationError["stage"],
-	error: unknown,
-): ReviewPublicationError {
-	return {
-		stage,
-		message: error instanceof Error ? error.message : String(error),
-	};
-}
-
-async function upsertPullRequestCommentWithRetry(
+async function publishSummaryComment(
 	bitbucket: ReviewBitbucketClient,
 	config: ReviewerConfig,
-	artifacts: ReviewArtifacts,
+	commentBody: string,
+	comments: PullRequestComment[],
 	logger: Logger,
 ): Promise<void> {
+	const tag = config.report.commentTag;
+	const options = {
+		strategy: config.report.commentStrategy,
+		retirement: SUMMARY_COMMENT_RETIREMENT,
+	};
 	try {
-		await bitbucket.upsertPullRequestComment(
-			config.report.commentTag,
-			artifacts.commentBody,
-			{ strategy: config.report.commentStrategy },
+		await bitbucket.comments.upsertComment(
+			findSummaryComments(tag, comments),
+			commentBody,
+			options,
 		);
 	} catch (firstError) {
 		logger.warn(
-			"Pull request comment update failed once; retrying before marking publication partial.",
+			"Pull request comment update failed once; re-reading comments and retrying before marking publication partial.",
 			firstError,
 		);
-		await bitbucket.upsertPullRequestComment(
-			config.report.commentTag,
-			artifacts.commentBody,
-			{ strategy: config.report.commentStrategy },
+		await bitbucket.comments.upsertComment(
+			findSummaryComments(tag, await bitbucket.comments.listComments()),
+			commentBody,
+			options,
 		);
 	}
 }
@@ -72,160 +65,91 @@ export async function publishReview(
 	bitbucket: ReviewBitbucketClient,
 	config: ReviewerConfig,
 	context: ReviewContext,
-	review: ReviewOutcome,
 	artifacts: ReviewArtifacts,
 	logger: Logger,
-): Promise<PublishResult> {
+): Promise<PublicationResult> {
+	const { review } = artifacts;
 	if (review.incomplete) {
 		logger.warn(
 			`Skipping Bitbucket publication because the review is incomplete: ${review.incomplete.reason}`,
 		);
 		return {
-			published: false,
-			publication: {
-				status: "failed",
-				attempted: false,
-				codeInsightsPublished: false,
-				findingCommentsUpdated: false,
-				pullRequestCommentUpdated: false,
-				error: {
-					stage: "review",
-					message: review.incomplete.reason,
-				},
-			},
-			review,
+			status: "failed",
+			completedStages: [],
+			error: { stage: "review", message: review.incomplete.reason },
 		};
 	}
 
 	if (config.review.dryRun) {
 		logger.info("Dry run enabled, skipping Bitbucket Code Insights publish.");
-		return {
-			published: false,
-			publication: {
-				status: "dry_run",
-				attempted: false,
-				codeInsightsPublished: false,
-				findingCommentsUpdated: false,
-				pullRequestCommentUpdated: false,
-			},
-			review,
-		};
+		return { status: "dry_run", completedStages: [] };
 	}
 
-	const latestPullRequest = await bitbucket.getPullRequest();
-	const staleReason = getStalePublishReason(context, latestPullRequest);
+	const staleReason = getStalePublishReason(
+		context,
+		await bitbucket.pullRequest.getPullRequest(),
+	);
 	if (staleReason) {
 		logger.warn(staleReason);
-		return {
-			published: false,
-			publication: {
-				status: "stale",
-				attempted: false,
-				codeInsightsPublished: false,
-				findingCommentsUpdated: false,
-				pullRequestCommentUpdated: false,
-			},
-			review: {
-				...review,
-				stale: true,
-			},
-		};
+		return { status: "stale", completedStages: [] };
 	}
 
-	try {
-		await bitbucket.publishCodeInsights(
-			context.headCommit,
-			config.report.key,
-			artifacts.report,
-		);
-	} catch (error) {
-		const publicationError = createPublicationError("code_insights", error);
-		logger.error(
-			`Bitbucket publication failed before the PR comment update at stage ${publicationError.stage}: ${publicationError.message}`,
-			error,
-		);
-		return {
-			published: false,
-			publication: {
-				status: "failed",
-				attempted: true,
-				codeInsightsPublished: false,
-				findingCommentsUpdated: false,
-				pullRequestCommentUpdated: false,
-				error: publicationError,
+	const tag = config.report.commentTag;
+	let comments: PullRequestComment[] = [];
+	const stages: Array<[PublicationStage, () => Promise<void>]> = [
+		[
+			"code_insights",
+			() =>
+				bitbucket.codeInsights.putReport(
+					context.headCommit,
+					config.report.key,
+					artifacts.report,
+				),
+		],
+		[
+			"finding_comments",
+			async () => {
+				comments = await bitbucket.comments.listComments();
+				await bitbucket.comments.reconcileKeyedComments(
+					comments,
+					artifacts.findingComments,
+					{
+						keyOf: (text) => parseFindingCommentKey(tag, text),
+						retirement: FINDING_COMMENT_RETIREMENT,
+					},
+				);
 			},
-			review,
-		};
-	}
-
-	try {
-		await bitbucket.reconcilePullRequestFindingComments(
-			config.report.commentTag,
-			review.findings,
-			{
-				revision: context.reviewRevision,
-				reviewedCommit: context.headCommit,
-			},
-		);
-	} catch (error) {
-		const publicationError = createPublicationError("finding_comments", error);
-		logger.error(
-			`Bitbucket publication completed the report publish but failed during finding comment reconciliation: ${publicationError.message}`,
-			error,
-		);
-		return {
-			published: false,
-			publication: {
-				status: "partial",
-				attempted: true,
-				codeInsightsPublished: true,
-				findingCommentsUpdated: false,
-				pullRequestCommentUpdated: false,
-				error: publicationError,
-			},
-			review,
-		};
-	}
-
-	try {
-		await upsertPullRequestCommentWithRetry(
-			bitbucket,
-			config,
-			artifacts,
-			logger,
-		);
-	} catch (error) {
-		const publicationError = createPublicationError(
+		],
+		[
 			"pull_request_comment",
-			error,
-		);
-		logger.error(
-			`Bitbucket publication completed the report publish but failed during PR comment update: ${publicationError.message}`,
-			error,
-		);
-		return {
-			published: false,
-			publication: {
-				status: "partial",
-				attempted: true,
-				codeInsightsPublished: true,
-				findingCommentsUpdated: true,
-				pullRequestCommentUpdated: false,
-				error: publicationError,
-			},
-			review,
-		};
+			() =>
+				publishSummaryComment(
+					bitbucket,
+					config,
+					artifacts.commentBody,
+					comments,
+					logger,
+				),
+		],
+	];
+	const completedStages: PublicationStage[] = [];
+	for (const [stage, publish] of stages) {
+		try {
+			await publish();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			logger.error(
+				`Bitbucket publication failed at stage ${stage} after completing [${completedStages.join(", ")}]: ${message}`,
+				error,
+			);
+			return {
+				status: completedStages.length === 0 ? "failed" : "partial",
+				completedStages,
+				error: { stage, message },
+			};
+		}
+		completedStages.push(stage);
 	}
 
-	return {
-		published: true,
-		publication: {
-			status: "published",
-			attempted: true,
-			codeInsightsPublished: true,
-			findingCommentsUpdated: true,
-			pullRequestCommentUpdated: true,
-		},
-		review,
-	};
+	return { status: "published", completedStages };
 }

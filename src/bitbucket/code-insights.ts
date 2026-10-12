@@ -1,4 +1,4 @@
-import type { Logger } from "../shared/logger.ts";
+import type { BitbucketRepoScope } from "./scope.ts";
 import { BitbucketApiError } from "./transport.ts";
 import type {
 	InsightReportPayload,
@@ -19,40 +19,24 @@ function validateInsightReportPayload(payload: InsightReportPayload): void {
 }
 
 export class CodeInsightsApi {
-	private readonly projectKey: string;
-	private readonly repoSlug: string;
-	private readonly logger: Logger;
-	private readonly request: (
-		pathname: string,
-		init?: RequestInit,
-	) => Promise<string>;
-	private readonly requestJson: <T>(
-		pathname: string,
-		init?: RequestInit,
-	) => Promise<T>;
+	private readonly scope: BitbucketRepoScope;
 
-	constructor(
-		projectKey: string,
-		repoSlug: string,
-		logger: Logger,
-		request: (pathname: string, init?: RequestInit) => Promise<string>,
-		requestJson: <T>(pathname: string, init?: RequestInit) => Promise<T>,
-	) {
-		this.projectKey = projectKey;
-		this.repoSlug = repoSlug;
-		this.logger = logger;
-		this.request = request;
-		this.requestJson = requestJson;
+	constructor(scope: BitbucketRepoScope) {
+		this.scope = scope;
 	}
 
-	async getCodeInsightsReport(
+	private reportPath(commitId: string, reportKey: string): string {
+		return `${this.scope.insightsRepositoryPath}/commits/${encodeURIComponent(commitId)}/reports/${encodeURIComponent(reportKey)}`;
+	}
+
+	async getReport(
 		commitId: string,
 		reportKey: string,
 	): Promise<RawBitbucketCodeInsightsReport | undefined> {
-		const pathname = `/rest/insights/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/commits/${encodeURIComponent(commitId)}/reports/${encodeURIComponent(reportKey)}`;
-
 		try {
-			return await this.requestJson<RawBitbucketCodeInsightsReport>(pathname);
+			return await this.scope.transport.requestJson<RawBitbucketCodeInsightsReport>(
+				this.reportPath(commitId, reportKey),
+			);
 		} catch (error) {
 			if (error instanceof BitbucketApiError && error.statusCode === 404) {
 				return undefined;
@@ -62,45 +46,18 @@ export class CodeInsightsApi {
 		}
 	}
 
-	async deleteReport(commitId: string, reportKey: string): Promise<void> {
-		const pathname = `/rest/insights/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/commits/${encodeURIComponent(commitId)}/reports/${encodeURIComponent(reportKey)}`;
-
-		try {
-			await this.request(pathname, { method: "DELETE" });
-		} catch (error) {
-			if (error instanceof BitbucketApiError && error.statusCode === 404) {
-				this.logger.debug(
-					`No existing Code Insights report found for ${reportKey}`,
-				);
-				return;
-			}
-			throw error;
-		}
-	}
-
-	async createReport(
-		commitId: string,
-		reportKey: string,
-		payload: InsightReportPayload,
-	): Promise<void> {
-		validateInsightReportPayload(payload);
-		const pathname = `/rest/insights/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/commits/${encodeURIComponent(commitId)}/reports/${encodeURIComponent(reportKey)}`;
-		await this.request(pathname, {
-			method: "PUT",
-			body: JSON.stringify(payload),
-		});
-	}
-
-	async publishCodeInsights(
+	async putReport(
 		commitId: string,
 		reportKey: string,
 		report: InsightReportPayload,
 	): Promise<void> {
-		this.logger.info(
+		validateInsightReportPayload(report);
+		this.scope.logger.info(
 			`Publishing Code Insights report ${reportKey} for commit ${commitId}`,
 		);
-		validateInsightReportPayload(report);
-		await this.deleteReport(commitId, reportKey);
-		await this.createReport(commitId, reportKey, report);
+		await this.scope.transport.request(this.reportPath(commitId, reportKey), {
+			method: "PUT",
+			json: report,
+		});
 	}
 }

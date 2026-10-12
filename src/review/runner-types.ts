@@ -1,7 +1,10 @@
+import type { CodeInsightsApi } from "../bitbucket/code-insights.ts";
+import type { PullRequestCommentsApi } from "../bitbucket/comments.ts";
+import type { PullRequestApi } from "../bitbucket/pull-request.ts";
 import type {
 	InsightReportPayload,
+	PullRequestCommentDraft,
 	PullRequestInfo,
-	RawBitbucketCodeInsightsReport,
 } from "../bitbucket/types.ts";
 import type { OperatorConfig, ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
@@ -11,66 +14,46 @@ import type { ReviewContext, ReviewOutcome } from "./types.ts";
 import type { DetachedReviewWorkspace } from "./workspace.ts";
 
 export interface ReviewBitbucketClient {
-	getPullRequest(): Promise<PullRequestInfo>;
-	getCodeInsightsReport(
-		commitId: string,
-		reportKey: string,
-	): Promise<RawBitbucketCodeInsightsReport | undefined>;
-	findPullRequestCommentByTag(
-		tag: string,
-	): Promise<{ text: string; version?: number; id?: number } | undefined>;
-	publishCodeInsights(
-		commitId: string,
-		reportKey: string,
-		report: InsightReportPayload,
-	): Promise<void>;
-	reconcilePullRequestFindingComments(
-		tag: string,
-		findings: ReviewOutcome["findings"],
-		metadata: {
-			revision: string;
-			reviewedCommit: string;
-		},
-	): Promise<void>;
-	upsertPullRequestComment(
-		tag: string,
-		text: string,
-		options?: {
-			strategy?: ReviewerConfig["report"]["commentStrategy"];
-		},
-	): Promise<void>;
+	pullRequest: Pick<PullRequestApi, "getPullRequest">;
+	codeInsights: Pick<CodeInsightsApi, "getReport" | "putReport">;
+	comments: Pick<
+		PullRequestCommentsApi,
+		"listComments" | "reconcileKeyedComments" | "upsertComment"
+	>;
 }
 
 export interface ReviewArtifacts {
+	review: ReviewOutcome;
 	report: InsightReportPayload;
 	commentBody: string;
+	findingComments: PullRequestCommentDraft[];
 }
 
 export interface ReviewRunnerDependencies {
-	createBitbucketClient?: (
+	createBitbucketClient: (
 		config: ReviewerConfig["bitbucket"],
 		logger: Logger,
 	) => ReviewBitbucketClient;
-	prepareReviewContext?: (
+	prepareReviewContext: (
 		operatorConfig: OperatorConfig,
 		logger: Logger,
 		pr: PullRequestInfo,
 	) => Promise<PreparedReviewContext>;
-	buildReviewContext?: (
+	buildReviewContext: (
 		prepared: PreparedReviewContext,
 		logger: Logger,
 		pr: PullRequestInfo,
 	) => Promise<ReviewContext>;
-	runCopilotReview?: (
+	runCopilotReview: (
 		config: ReviewerConfig,
 		context: ReviewContext,
 		git: GitRepository,
 		logger: Logger,
 	) => Promise<ReviewOutcome>;
-	createDetachedReviewWorkspace?: (options: {
+	createReviewWorkspace: (options: {
 		repoRoot: string;
 		commit: string;
 		logger: Logger;
 	}) => Promise<DetachedReviewWorkspace>;
-	confirmRerun?: (options: { message: string }) => Promise<boolean>;
+	confirmRerun: (options: { message: string }) => Promise<boolean>;
 }

@@ -1,8 +1,7 @@
-import { BitbucketClient } from "../bitbucket/client.ts";
+import { createBitbucketClient } from "../bitbucket/client.ts";
 import { resolveReviewerConfig } from "../config/load.ts";
 import type { OperatorConfig } from "../config/types.ts";
 import { runCopilotReview } from "../copilot/engine.ts";
-import { GitRepository } from "../git/repo.ts";
 import {
 	getPullRequestBranchSkipReason,
 	getPullRequestDraftSkipReason,
@@ -21,26 +20,32 @@ import type { ReviewRunnerDependencies } from "./runner-types.ts";
 import {
 	buildReviewReusePlan,
 	getExistingPublicationStatus,
+	type ReviewRerunPlan,
 } from "./skip-policy.ts";
+import type { ReviewContext, ReviewOutcome } from "./types.ts";
 import { createDetachedReviewWorkspace } from "./workspace.ts";
+
+const DEFAULT_DEPENDENCIES: ReviewRunnerDependencies = {
+	createBitbucketClient,
+	prepareReviewContext,
+	buildReviewContext,
+	runCopilotReview,
+	createReviewWorkspace: createDetachedReviewWorkspace,
+	confirmRerun,
+};
 
 export async function runReview(
 	operatorConfig: OperatorConfig,
 	logger: Logger,
-	dependencies: ReviewRunnerDependencies = {},
+	overrides: Partial<ReviewRunnerDependencies> = {},
 ): Promise<ReviewRunOutput> {
 	const config = resolveReviewerConfig(operatorConfig);
-	const bitbucket =
-		dependencies.createBitbucketClient?.(config.bitbucket, logger) ??
-		new BitbucketClient(config.bitbucket, logger);
-	const prepareContext =
-		dependencies.prepareReviewContext ?? prepareReviewContext;
-	const buildContext = dependencies.buildReviewContext ?? buildReviewContext;
-	const reviewWithCopilot = dependencies.runCopilotReview ?? runCopilotReview;
-	const createReviewWorkspace =
-		dependencies.createDetachedReviewWorkspace ?? createDetachedReviewWorkspace;
-	const confirmRerunPrompt = dependencies.confirmRerun ?? confirmRerun;
-	const initialPullRequest = await bitbucket.getPullRequest();
+	const dependencies = { ...DEFAULT_DEPENDENCIES, ...overrides };
+	const bitbucket = dependencies.createBitbucketClient(
+		config.bitbucket,
+		logger,
+	);
+	const initialPullRequest = await bitbucket.pullRequest.getPullRequest();
 
 	logger.info(
 		`Loaded pull request #${initialPullRequest.id} (${initialPullRequest.source.displayId} -> ${initialPullRequest.target.displayId})`,
@@ -49,20 +54,24 @@ export async function runReview(
 	const draftSkipReason = getPullRequestDraftSkipReason(initialPullRequest);
 	if (draftSkipReason) {
 		logger.info(draftSkipReason);
-		return buildSkippedReviewOutput(
+		return buildSkippedReviewOutput({
 			config,
-			initialPullRequest,
-			draftSkipReason,
-		);
+			pullRequest: initialPullRequest,
+			skipReason: draftSkipReason,
+		});
 	}
 
 	if (initialPullRequest.state && initialPullRequest.state !== "OPEN") {
 		const skipReason = `Skipping review because pull request #${initialPullRequest.id} is ${initialPullRequest.state}.`;
 		logger.info(skipReason);
-		return buildSkippedReviewOutput(config, initialPullRequest, skipReason);
+		return buildSkippedReviewOutput({
+			config,
+			pullRequest: initialPullRequest,
+			skipReason,
+		});
 	}
 
-	const prepared = await prepareContext(
+	const prepared = await dependencies.prepareReviewContext(
 		operatorConfig,
 		logger,
 		initialPullRequest,
@@ -74,15 +83,18 @@ export async function runReview(
 	);
 	if (branchSkipReason) {
 		logger.info(branchSkipReason);
-		return buildSkippedReviewOutput(
-			effectiveConfig,
-			initialPullRequest,
-			branchSkipReason,
-			undefined,
-			prepared.mergeBaseCommit,
-		);
+		return buildSkippedReviewOutput({
+			config: effectiveConfig,
+			pullRequest: initialPullRequest,
+			skipReason: branchSkipReason,
+			mergeBaseCommit: prepared.mergeBaseCommit,
+		});
 	}
-	const context = await buildContext(prepared, logger, initialPullRequest);
+	const context = await dependencies.buildReviewContext(
+		prepared,
+		logger,
+		initialPullRequest,
+	);
 	const git = prepared.git;
 	logger.info("Starting review run", {
 		prId: context.pr.id,
@@ -104,135 +116,87 @@ export async function runReview(
 		context,
 		publicationStatus,
 	);
-
-	if (reusePlan.action === "skip" && reusePlan.reason) {
-		logger.info(reusePlan.reason);
-		return buildSkippedReviewOutput(
-			effectiveConfig,
-			initialPullRequest,
-			reusePlan.reason,
-			context.reviewRevision,
-			context.mergeBaseCommit,
-		);
-	}
-
-	if (
-		config.review.confirmRerun &&
-		reusePlan.action === "review" &&
-		reusePlan.confirmMessage
-	) {
-		if (reusePlan.repairWarning) {
-			logger.warn(reusePlan.repairWarning);
-		}
-
-		const confirmed = await confirmRerunPrompt({
-			message: reusePlan.confirmMessage,
+	const skipReason =
+		reusePlan.action === "skip"
+			? reusePlan.reason
+			: await getDeclinedRerunReason(reusePlan, dependencies, logger, context);
+	if (skipReason) {
+		logger.info(skipReason);
+		return buildSkippedReviewOutput({
+			config: effectiveConfig,
+			pullRequest: initialPullRequest,
+			skipReason,
+			reviewRevision: context.reviewRevision,
+			mergeBaseCommit: context.mergeBaseCommit,
 		});
-
-		if (!confirmed) {
-			const skipReason = `Skipped rerun for unchanged PR revision ${context.reviewRevision} after manual confirmation declined.`;
-			logger.info(skipReason);
-			return buildSkippedReviewOutput(
-				effectiveConfig,
-				initialPullRequest,
-				skipReason,
-				context.reviewRevision,
-				context.mergeBaseCommit,
-			);
-		}
 	}
 
-	if (
-		reusePlan.repairWarning &&
-		!(
-			config.review.confirmRerun &&
-			reusePlan.action === "review" &&
-			reusePlan.confirmMessage
-		)
-	) {
-		logger.warn(reusePlan.repairWarning);
-	}
-
-	const shouldUseDetachedReviewWorkspace =
-		dependencies.createDetachedReviewWorkspace !== undefined ||
-		dependencies.runCopilotReview === undefined;
-	let detachedWorkspace:
-		| Awaited<ReturnType<typeof createReviewWorkspace>>
-		| undefined;
-	let review: Awaited<ReturnType<typeof reviewWithCopilot>>;
+	const workspace = await dependencies.createReviewWorkspace({
+		repoRoot: effectiveConfig.repoRoot,
+		commit: context.baseCommit,
+		logger,
+	});
+	logger.info(
+		`Using detached review workspace ${workspace.workspaceRoot} for trusted base ${context.baseCommit}`,
+	);
+	let review: ReviewOutcome;
 	try {
-		if (shouldUseDetachedReviewWorkspace) {
-			detachedWorkspace = await createReviewWorkspace({
-				repoRoot: effectiveConfig.repoRoot,
-				commit: context.baseCommit,
-				logger,
-			});
-			logger.info(
-				`Using detached review workspace ${detachedWorkspace.workspaceRoot} for trusted base ${context.baseCommit}`,
-			);
-		}
-
-		const reviewRepoRoot =
-			detachedWorkspace?.workspaceRoot ?? effectiveConfig.repoRoot;
-		const reviewGit = detachedWorkspace
-			? new GitRepository(reviewRepoRoot, logger, effectiveConfig.gitRemoteName)
-			: git;
-		review = await reviewWithCopilot(
-			shouldUseDetachedReviewWorkspace
-				? {
-						...effectiveConfig,
-						repoRoot: reviewRepoRoot,
-					}
-				: effectiveConfig,
-			shouldUseDetachedReviewWorkspace
-				? {
-						...context,
-						repoRoot: reviewRepoRoot,
-					}
-				: context,
-			reviewGit,
+		review = await dependencies.runCopilotReview(
+			{ ...effectiveConfig, repoRoot: workspace.workspaceRoot },
+			{ ...context, repoRoot: workspace.workspaceRoot },
+			git,
 			logger,
 		);
 	} finally {
-		if (detachedWorkspace) {
-			try {
-				await detachedWorkspace.cleanup();
-				logger.info(
-					`Removed detached review workspace ${detachedWorkspace.workspaceRoot}`,
-				);
-			} catch (error) {
-				logger.warn(
-					`Failed to clean up detached review workspace ${detachedWorkspace.workspaceRoot}`,
-					error,
-				);
-			}
+		try {
+			await workspace.cleanup();
+			logger.info(
+				`Removed detached review workspace ${workspace.workspaceRoot}`,
+			);
+		} catch (error) {
+			logger.warn(
+				`Failed to clean up detached review workspace ${workspace.workspaceRoot}`,
+				error,
+			);
 		}
 	}
-	const artifacts = buildReviewArtifacts(effectiveConfig, context, review);
-	const publishResult = await publishReview(
+	const artifacts = buildReviewArtifacts(effectiveConfig, context, {
+		...review,
+		gitTelemetry: git.getTelemetrySnapshot(),
+	});
+	const publication = await publishReview(
 		bitbucket,
 		effectiveConfig,
 		context,
-		review,
 		artifacts,
 		logger,
 	);
-	const reviewWithTelemetry = {
-		...publishResult.review,
-		gitTelemetry: git.getTelemetrySnapshot(),
-	};
 	logger.info("Completed review run", {
 		prId: context.pr.id,
 		reviewRevision: context.reviewRevision,
-		findings: publishResult.review.findings.length,
-		publicationStatus: publishResult.publication.status,
+		findings: review.findings.length,
+		publicationStatus: publication.status,
 	});
 
-	return buildReviewRunOutput(
-		context,
-		reviewWithTelemetry,
-		artifacts,
-		publishResult.published,
-		publishResult.publication,
-	);
+	return buildReviewRunOutput(context, artifacts, publication);
+}
+
+async function getDeclinedRerunReason(
+	plan: ReviewRerunPlan,
+	dependencies: ReviewRunnerDependencies,
+	logger: Logger,
+	context: ReviewContext,
+): Promise<string | undefined> {
+	if (plan.repairWarning) {
+		logger.warn(plan.repairWarning);
+	}
+
+	if (
+		!plan.confirmMessage ||
+		(await dependencies.confirmRerun({ message: plan.confirmMessage }))
+	) {
+		return undefined;
+	}
+
+	return `Skipped rerun for unchanged PR revision ${context.reviewRevision} after manual confirmation declined.`;
 }

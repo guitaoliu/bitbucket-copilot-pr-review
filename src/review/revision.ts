@@ -1,11 +1,7 @@
 import { createHash } from "node:crypto";
 
 const REVIEW_REVISION_SCHEMA = "3";
-const REVIEW_INPUT_VERSION = "2026-05-accuracy-stability-1";
-
-export function getReviewRevisionSchema(): string {
-	return REVIEW_REVISION_SCHEMA;
-}
+const REVIEW_INPUT_VERSION = "2026-10-revision-only-publication-markers-1";
 
 export function buildReviewRevision(input: {
 	baseCommit: string;

@@ -7,7 +7,7 @@ import {
 	createPullRequest,
 } from "../test-support/review-fixtures.ts";
 import { buildFindingThreadKey } from "./finding-identity.ts";
-import { parsePullRequestCommentMetadata } from "./publication-state.ts";
+import { parseSummaryCommentRevision } from "./markers.ts";
 import {
 	buildReviewArtifacts,
 	buildReviewRunOutput,
@@ -88,7 +88,6 @@ function createReviewOutcome(): ReviewOutcome {
 				details: "The new branch dereferences a possibly null response.",
 			},
 		],
-		stale: false,
 	};
 }
 
@@ -96,7 +95,11 @@ describe("buildSkippedReviewOutput", () => {
 	it("returns a skipped run payload with review context and a PASS report", () => {
 		const pr = createPullRequest("abc123");
 		const skipReason = "Review already published.";
-		const output = buildSkippedReviewOutput(baseConfig, pr, skipReason);
+		const output = buildSkippedReviewOutput({
+			config: baseConfig,
+			pullRequest: pr,
+			skipReason,
+		});
 
 		assert.deepEqual(output, {
 			context: {
@@ -137,10 +140,8 @@ describe("buildReviewArtifacts", () => {
 			artifacts.report.data?.map(({ title, value }) => [title, value]),
 			[
 				["Findings", 1],
-				["Finding taxonomy", "1 bug"],
 				["Review revision", "review-rev-123"],
-				["Review schema", "3"],
-				["Reviewed commit", "head-123"],
+				["Finding taxonomy", "1 bug"],
 				["Review scope", "2 reviewable"],
 			],
 		);
@@ -153,13 +154,9 @@ describe("buildReviewArtifacts", () => {
 			artifacts.commentBody,
 			/<!-- copilot-pr-review:findings-json:/,
 		);
-		assert.match(
+		assert.doesNotMatch(
 			artifacts.commentBody,
-			/<!-- copilot-pr-review:reviewed-commit:head-123 -->/,
-		);
-		assert.match(
-			artifacts.commentBody,
-			/<!-- copilot-pr-review:published-commit:head-123 -->/,
+			/reviewed-commit|published-commit|:schema:/,
 		);
 		assert.match(
 			artifacts.commentBody,
@@ -179,12 +176,13 @@ describe("buildReviewArtifacts", () => {
 			/1\. \[Type: BUG \| Severity: HIGH \| Confidence: high\].*Null handling is broken/s,
 		);
 		assert.match(artifacts.commentBody, /Null handling is broken/);
-
-		const metadata = parsePullRequestCommentMetadata(
-			baseConfig.report.commentTag,
-			artifacts.commentBody,
+		assert.equal(
+			parseSummaryCommentRevision(
+				baseConfig.report.commentTag,
+				artifacts.commentBody,
+			),
+			"review-rev-123",
 		);
-		assert.equal(metadata?.reviewedCommit, "head-123");
 	});
 
 	it("bounds large comment bodies under the Bitbucket limit", () => {
@@ -236,7 +234,6 @@ describe("buildReviewArtifacts", () => {
 				title: `Finding ${index} ${"r".repeat(240)}`,
 				details: "Large detail.",
 			})),
-			stale: false,
 		};
 
 		const artifacts = buildReviewArtifacts(baseConfig, context, review);
@@ -289,19 +286,22 @@ describe("buildReviewRunOutput", () => {
 			},
 		};
 		const artifacts: ReviewArtifacts = {
+			review,
 			report: {
 				title: baseConfig.report.title,
 				result: "FAIL",
 				reporter: baseConfig.report.reporter,
 			},
 			commentBody: "comment body",
+			findingComments: [],
 		};
-		const output = buildReviewRunOutput(context, review, artifacts, true, {
+		const output = buildReviewRunOutput(context, artifacts, {
 			status: "published",
-			attempted: true,
-			codeInsightsPublished: true,
-			findingCommentsUpdated: true,
-			pullRequestCommentUpdated: true,
+			completedStages: [
+				"code_insights",
+				"finding_comments",
+				"pull_request_comment",
+			],
 		});
 
 		assert.deepEqual(output, {
@@ -325,7 +325,7 @@ describe("buildReviewRunOutput", () => {
 				summary: review.summary,
 				prSummary: review.prSummary,
 				findings: review.findings,
-				stale: review.stale,
+				stale: false,
 			},
 			report: artifacts.report,
 			commentBody: "comment body",
@@ -342,13 +342,63 @@ describe("buildReviewRunOutput", () => {
 		});
 	});
 
-	it("sanitizes model-authored review text in the final run output", () => {
+	it("maps stale and partial publication results to the run output publication fields", () => {
+		const context = createReviewContext();
+		const artifacts: ReviewArtifacts = {
+			review: createReviewOutcome(),
+			report: {
+				title: baseConfig.report.title,
+				result: "FAIL",
+				reporter: baseConfig.report.reporter,
+			},
+			commentBody: "comment body",
+			findingComments: [],
+		};
+		const stale = buildReviewRunOutput(context, artifacts, {
+			status: "stale",
+			completedStages: [],
+		});
+		const partial = buildReviewRunOutput(context, artifacts, {
+			status: "partial",
+			completedStages: ["code_insights"],
+			error: { stage: "finding_comments", message: "boom" },
+		});
+		const incomplete = buildReviewRunOutput(context, artifacts, {
+			status: "failed",
+			completedStages: [],
+			error: { stage: "review", message: "incomplete" },
+		});
+
+		assert.equal(stale.published, false);
+		assert.equal(stale.review.stale, true);
+		assert.deepEqual(stale.publication, {
+			status: "stale",
+			attempted: false,
+			codeInsightsPublished: false,
+			findingCommentsUpdated: false,
+			pullRequestCommentUpdated: false,
+		});
+		assert.equal(partial.review.stale, false);
+		assert.deepEqual(partial.publication, {
+			status: "partial",
+			attempted: true,
+			codeInsightsPublished: true,
+			findingCommentsUpdated: false,
+			pullRequestCommentUpdated: false,
+			error: { stage: "finding_comments", message: "boom" },
+		});
+		assert.equal(incomplete.publication?.attempted, false);
+		assert.equal(incomplete.publicationStatus, "failed");
+	});
+
+	it("sanitizes model-authored text for the rendered artifacts and the run output", () => {
 		const context = createReviewContext();
 		const review: ReviewOutcome = {
 			summary: "Found issue <!-- injected-summary --> and ping @here.",
 			assistantMessage:
 				"Assistant message includes <!-- injected-assistant --> and @channel.",
-			prSummary: "Changed behavior <!-- injected-pr-summary -->.",
+			prSummary:
+				"Changed behavior <!-- copilot-pr-review:revision:fake --> for @here.",
 			changeAreas: [
 				{
 					title: "Area <!-- injected-area-title -->",
@@ -370,18 +420,25 @@ describe("buildReviewRunOutput", () => {
 					category: "security @all",
 				},
 			],
-			stale: false,
 		};
-		const artifacts: ReviewArtifacts = {
-			report: {
-				title: baseConfig.report.title,
-				result: "FAIL",
-				reporter: baseConfig.report.reporter,
-			},
-			commentBody: "comment body",
-		};
+		const artifacts = buildReviewArtifacts(baseConfig, context, review);
+		const output = buildReviewRunOutput(context, artifacts, {
+			status: "dry_run",
+			completedStages: [],
+		});
 
-		const output = buildReviewRunOutput(context, review, artifacts, false);
+		assert.doesNotMatch(
+			artifacts.commentBody,
+			/<!-- injected|@here|revision:fake -->/,
+		);
+		assert.doesNotMatch(artifacts.report.details ?? "", /<!-- injected|@here/);
+		assert.equal(
+			parseSummaryCommentRevision(
+				baseConfig.report.commentTag,
+				artifacts.commentBody,
+			),
+			context.reviewRevision,
+		);
 
 		assert.equal(
 			output.review.summary,
@@ -393,7 +450,7 @@ describe("buildReviewRunOutput", () => {
 		);
 		assert.equal(
 			output.review.prSummary,
-			"Changed behavior &lt;!-- injected-pr-summary --&gt;.",
+			"Changed behavior &lt;!-- copilot-pr-review:revision:fake --&gt; for [at]here.",
 		);
 		assert.equal(
 			output.review.changeAreas?.[0]?.title,

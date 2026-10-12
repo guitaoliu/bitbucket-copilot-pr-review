@@ -1,123 +1,29 @@
 import type { ReviewerConfig } from "../config/types.ts";
-import type { ReviewFinding } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import { CodeInsightsApi } from "./code-insights.ts";
 import { PullRequestCommentsApi } from "./comments.ts";
 import { PullRequestApi } from "./pull-request.ts";
+import { createBitbucketRepoScope } from "./scope.ts";
 import { BitbucketTransport } from "./transport.ts";
-import type {
-	InsightReportPayload,
-	PullRequestComment,
-	PullRequestInfo,
-	RawBitbucketCodeInsightsReport,
-} from "./types.ts";
 
-export class BitbucketClient {
-	private readonly transport: BitbucketTransport;
-	private readonly pullRequests: PullRequestApi;
-	private readonly comments: PullRequestCommentsApi;
-	private readonly codeInsights: CodeInsightsApi;
+export interface BitbucketClient {
+	pullRequest: PullRequestApi;
+	codeInsights: CodeInsightsApi;
+	comments: PullRequestCommentsApi;
+}
 
-	constructor(config: ReviewerConfig["bitbucket"], logger: Logger) {
-		this.transport = new BitbucketTransport(config);
-		this.pullRequests = new PullRequestApi(
-			config.projectKey,
-			config.repoSlug,
-			config.prId,
-			this.transport.requestJson.bind(this.transport),
-		);
-		this.comments = new PullRequestCommentsApi(
-			config.projectKey,
-			config.repoSlug,
-			config.prId,
-			logger,
-			this.transport.request.bind(this.transport),
-			this.transport.requestJson.bind(this.transport),
-		);
-		this.codeInsights = new CodeInsightsApi(
-			config.projectKey,
-			config.repoSlug,
-			logger,
-			this.transport.request.bind(this.transport),
-			this.transport.requestJson.bind(this.transport),
-		);
-	}
-
-	async getPullRequest(): Promise<PullRequestInfo> {
-		return this.pullRequests.getPullRequest();
-	}
-
-	async getCodeInsightsReport(
-		commitId: string,
-		reportKey: string,
-	): Promise<RawBitbucketCodeInsightsReport | undefined> {
-		return this.codeInsights.getCodeInsightsReport(commitId, reportKey);
-	}
-
-	async listPullRequestComments(): Promise<PullRequestComment[]> {
-		return this.comments.listPullRequestComments();
-	}
-
-	async findPullRequestCommentByTag(
-		tag: string,
-	): Promise<PullRequestComment | undefined> {
-		return this.comments.findPullRequestCommentByTag(tag);
-	}
-
-	async createPullRequestComment(text: string): Promise<void> {
-		return this.comments.createPullRequestComment(text);
-	}
-
-	async updatePullRequestComment(
-		commentId: number,
-		version: number,
-		text: string,
-	): Promise<void> {
-		return this.comments.updatePullRequestComment(commentId, version, text);
-	}
-
-	async upsertPullRequestComment(
-		tag: string,
-		text: string,
-		options?: {
-			strategy?: ReviewerConfig["report"]["commentStrategy"];
-		},
-	): Promise<void> {
-		return this.comments.upsertPullRequestComment(tag, text, options);
-	}
-
-	async reconcilePullRequestFindingComments(
-		tag: string,
-		findings: ReviewFinding[],
-		metadata: {
-			revision: string;
-			reviewedCommit: string;
-		},
-	): Promise<void> {
-		return this.comments.reconcilePullRequestFindingComments(
-			tag,
-			findings,
-			metadata,
-		);
-	}
-
-	async deleteReport(commitId: string, reportKey: string): Promise<void> {
-		return this.codeInsights.deleteReport(commitId, reportKey);
-	}
-
-	async createReport(
-		commitId: string,
-		reportKey: string,
-		payload: InsightReportPayload,
-	): Promise<void> {
-		return this.codeInsights.createReport(commitId, reportKey, payload);
-	}
-
-	async publishCodeInsights(
-		commitId: string,
-		reportKey: string,
-		report: InsightReportPayload,
-	): Promise<void> {
-		return this.codeInsights.publishCodeInsights(commitId, reportKey, report);
-	}
+export function createBitbucketClient(
+	config: ReviewerConfig["bitbucket"],
+	logger: Logger,
+): BitbucketClient {
+	const scope = createBitbucketRepoScope(
+		config,
+		new BitbucketTransport(config),
+		logger,
+	);
+	return {
+		pullRequest: new PullRequestApi(scope),
+		codeInsights: new CodeInsightsApi(scope),
+		comments: new PullRequestCommentsApi(scope),
+	};
 }

@@ -1,17 +1,26 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
-import type { GitRepository } from "../git/repo.ts";
+import { GitRepository } from "../git/repo.ts";
 import type { Logger } from "../shared/logger.ts";
 import {
 	baseReviewerConfig as baseConfig,
+	createFakeBitbucketClient,
 	createPullRequest,
 	createReviewContext,
 	createReviewOutcome,
 } from "../test-support/review-fixtures.ts";
-import { buildReviewMetadataFields } from "./publication-state.ts";
+import { buildPublicationStateFields } from "./publication-state.ts";
 import { runReview } from "./runner.ts";
+import type {
+	ReviewBitbucketClient,
+	ReviewRunnerDependencies,
+} from "./runner-types.ts";
 import type { ReviewContext } from "./types.ts";
 
 const logger: Logger = {
@@ -31,151 +40,104 @@ function createGitStub(): GitRepository {
 	} as GitRepository;
 }
 
-type FakeBitbucketClient = {
-	getPullRequest(): Promise<PullRequestInfo>;
-	getCodeInsightsReport(
-		commitId: string,
-		reportKey: string,
-	): Promise<{ data?: Array<{ title: string; value: unknown }> } | undefined>;
-	findPullRequestCommentByTag(
-		tag: string,
-	): Promise<{ text: string; id?: number; version?: number } | undefined>;
-	publishCodeInsights(
-		commitId: string,
-		reportKey: string,
-		report: unknown,
-	): Promise<void>;
-	reconcilePullRequestFindingComments(
-		tag: string,
-		findings: unknown[],
-		metadata: { revision: string; reviewedCommit: string },
-	): Promise<void>;
-	upsertPullRequestComment(
-		tag: string,
-		text: string,
-		options?: {
-			strategy?: ReviewerConfig["report"]["commentStrategy"];
-		},
-	): Promise<void>;
+const failIfCalled = (name: string) => async (): Promise<never> => {
+	throw new Error(`should not call ${name}`);
+};
+
+function readOnlyClient(pr: PullRequestInfo): ReviewBitbucketClient {
+	return createFakeBitbucketClient({
+		pullRequest: { getPullRequest: async () => pr },
+		codeInsights: { putReport: failIfCalled("putReport") },
+		comments: { upsertComment: failIfCalled("upsertComment") },
+	});
+}
+
+function createDependencies(
+	options: {
+		client?: ReviewBitbucketClient;
+		config?: ReviewerConfig;
+		context?: ReviewContext;
+	} & Partial<ReviewRunnerDependencies> = {},
+): Partial<ReviewRunnerDependencies> {
+	const { client, config, context, ...overrides } = options;
+	const reviewContext = context ?? createReviewContext();
+	return {
+		createBitbucketClient: () => client ?? createFakeBitbucketClient(),
+		prepareReviewContext: async () => ({
+			config: config ?? baseConfig,
+			git: createGitStub(),
+			mergeBaseCommit: reviewContext.mergeBaseCommit,
+		}),
+		buildReviewContext: async () => reviewContext,
+		createReviewWorkspace: async ({ repoRoot }) => ({
+			workspaceRoot: repoRoot,
+			async cleanup() {},
+		}),
+		runCopilotReview: async () => createReviewOutcome(),
+		...overrides,
+	};
+}
+
+const confirmConfig: ReviewerConfig = {
+	...baseConfig,
+	review: { ...baseConfig.review, confirmRerun: true },
 };
 
 describe("runReview", () => {
 	it("logs the reviewable file count after filtering", async () => {
-		const pr = createPullRequest();
-		const baseContext = createReviewContext(pr);
+		const baseContext = createReviewContext();
 		const context = {
 			...baseContext,
 			diffStats: { fileCount: 7, additions: 4, deletions: 1 },
 			reviewableFiles: [
 				...baseContext.reviewableFiles,
-				{
-					path: "src/second.ts",
-					status: "modified" as const,
-					patch: "diff --git a/src/second.ts b/src/second.ts",
-					changedLines: [3],
-					hunks: [
-						{
-							oldStart: 3,
-							oldLines: 1,
-							newStart: 3,
-							newLines: 1,
-							header: "",
-							changedLines: [3],
-						},
-					],
-					additions: 1,
-					deletions: 0,
-					isBinary: false,
-				},
+				{ ...baseContext.reviewableFiles[0], path: "src/second.ts" },
 			],
-		} satisfies ReviewContext;
+		} as ReviewContext;
 		const infoMessages: string[] = [];
-		const logSpy: Logger = {
-			...logger,
-			info(message) {
-				infoMessages.push(message);
-			},
-		};
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
-			},
-			async getCodeInsightsReport() {
-				return undefined;
-			},
-			async findPullRequestCommentByTag() {
-				return undefined;
-			},
-			async publishCodeInsights() {},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {},
-		};
 
-		await runReview(baseConfig, logSpy, {
-			createBitbucketClient: () => client as never,
-			prepareReviewContext: async () => ({
-				config: baseConfig,
-				git: createGitStub(),
-				mergeBaseCommit: context.mergeBaseCommit,
-			}),
-			buildReviewContext: async () => context,
-			runCopilotReview: async () => createReviewOutcome(),
-		});
+		await runReview(
+			baseConfig,
+			{ ...logger, info: (message) => infoMessages.push(message) },
+			createDependencies({ context }),
+		);
 
 		assert.ok(
 			infoMessages.includes(
 				"Review scope after file filtering: 2 reviewable out of 7 changed files.",
 			),
 		);
-		assert.ok(infoMessages.includes("Starting review run"));
 		assert.ok(infoMessages.includes("Completed review run"));
 	});
 
 	it("runs Copilot in a detached trusted base workspace while preserving head review context", async () => {
-		const pr = createPullRequest();
-		const context = createReviewContext(pr);
+		const context = createReviewContext();
 		let workspaceCommit: string | undefined;
 		let cleanupCalled = false;
 		let reviewConfig: ReviewerConfig | undefined;
 		let reviewContext: ReviewContext | undefined;
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
-			},
-			async getCodeInsightsReport() {
-				return undefined;
-			},
-			async findPullRequestCommentByTag() {
-				return undefined;
-			},
-			async publishCodeInsights() {},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {},
-		};
 
-		const result = await runReview(baseConfig, logger, {
-			createBitbucketClient: () => client as never,
-			prepareReviewContext: async () => ({
-				config: baseConfig,
-				git: createGitStub(),
-				mergeBaseCommit: context.mergeBaseCommit,
+		const result = await runReview(
+			baseConfig,
+			logger,
+			createDependencies({
+				context,
+				createReviewWorkspace: async ({ commit }) => {
+					workspaceCommit = commit;
+					return {
+						workspaceRoot: "/tmp/base-worktree",
+						async cleanup() {
+							cleanupCalled = true;
+						},
+					};
+				},
+				runCopilotReview: async (config, passedContext) => {
+					reviewConfig = config;
+					reviewContext = passedContext;
+					return createReviewOutcome();
+				},
 			}),
-			buildReviewContext: async () => context,
-			createDetachedReviewWorkspace: async ({ commit }) => {
-				workspaceCommit = commit;
-				return {
-					workspaceRoot: "/tmp/base-worktree",
-					async cleanup() {
-						cleanupCalled = true;
-					},
-				};
-			},
-			runCopilotReview: async (config, passedContext) => {
-				reviewConfig = config;
-				reviewContext = passedContext;
-				return createReviewOutcome();
-			},
-		});
+		);
 
 		assert.equal(result.skipped, false);
 		assert.equal(workspaceCommit, context.baseCommit);
@@ -183,140 +145,153 @@ describe("runReview", () => {
 		assert.equal(reviewConfig?.repoRoot, "/tmp/base-worktree");
 		assert.equal(reviewContext?.repoRoot, "/tmp/base-worktree");
 		assert.equal(reviewContext?.headCommit, context.headCommit);
-		assert.equal(reviewContext?.baseCommit, context.baseCommit);
+	});
+
+	it("reports git telemetry from review-phase operations run against the detached workspace", async () => {
+		const repoRoot = mkdtempSync(path.join(tmpdir(), "runner-git-telemetry-"));
+		try {
+			execFileSync("git", ["init", "--quiet"], { cwd: repoRoot });
+			writeFileSync(path.join(repoRoot, "README.md"), "hello\n");
+			execFileSync("git", ["add", "README.md"], { cwd: repoRoot });
+			execFileSync(
+				"git",
+				[
+					"-c",
+					"user.name=Test",
+					"-c",
+					"user.email=test@example.com",
+					"commit",
+					"--quiet",
+					"-m",
+					"init",
+				],
+				{ cwd: repoRoot },
+			);
+			const git = new GitRepository(repoRoot, logger, "origin");
+			await git.mergeBase("HEAD", "HEAD");
+			const context = createReviewContext();
+
+			const result = await runReview(
+				baseConfig,
+				logger,
+				createDependencies({
+					context,
+					prepareReviewContext: async () => ({
+						config: baseConfig,
+						git,
+						mergeBaseCommit: context.mergeBaseCommit,
+					}),
+					createReviewWorkspace: async () => ({
+						workspaceRoot: path.join(repoRoot, "missing-worktree"),
+						async cleanup() {},
+					}),
+					runCopilotReview: async (_config, _context, reviewGit) => {
+						await reviewGit.readTextFileAtCommit("HEAD", "README.md");
+						return createReviewOutcome();
+					},
+				}),
+			);
+
+			assert.deepEqual(
+				Object.fromEntries(
+					Object.entries(result.metrics?.gitTelemetry?.byOperation ?? {}).map(
+						([operation, entry]) => [operation, entry.count],
+					),
+				),
+				{ "merge-base": 1, "cat-file.type": 1, show: 1 },
+			);
+		} finally {
+			rmSync(repoRoot, { recursive: true, force: true });
+		}
 	});
 
 	it("skips when the publication is already complete", async () => {
 		const pr = createPullRequest();
 		const context = createReviewContext(pr);
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
+		const client = createFakeBitbucketClient({
+			pullRequest: { getPullRequest: async () => pr },
+			codeInsights: {
+				getReport: async () => ({
+					data: buildPublicationStateFields({
+						revision: context.reviewRevision,
+						findingCount: 0,
+					}),
+				}),
+				putReport: failIfCalled("putReport"),
 			},
-			async getCodeInsightsReport() {
-				const metadata = buildReviewMetadataFields({
-					revision: context.reviewRevision,
-					reviewedCommit: context.headCommit,
-				}).map(({ title, value }) => ({ title, value }));
-				return {
-					data: [{ title: "Findings", value: 0 }, ...metadata],
-				};
+			comments: {
+				listComments: async () => [
+					{
+						id: 1,
+						version: 0,
+						text: "<!-- copilot-pr-review -->\n<!-- copilot-pr-review:revision:review-rev-123 -->",
+					},
+				],
+				upsertComment: failIfCalled("upsertComment"),
 			},
-			async findPullRequestCommentByTag() {
-				return {
-					text: [
-						"<!-- copilot-pr-review -->",
-						"<!-- copilot-pr-review:schema:2 -->",
-						"<!-- copilot-pr-review:revision:review-rev-123 -->",
-						"<!-- copilot-pr-review:reviewed-commit:head-123 -->",
-						"<!-- copilot-pr-review:published-commit:head-123 -->",
-					].join("\n"),
-				};
-			},
-			async publishCodeInsights() {
-				throw new Error("should not publish");
-			},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {
-				throw new Error("should not update comment");
-			},
-		};
-
-		const result = await runReview(baseConfig, logger, {
-			createBitbucketClient: () => client as never,
-			prepareReviewContext: async () => ({
-				config: baseConfig,
-				git: createGitStub(),
-				mergeBaseCommit: context.mergeBaseCommit,
-			}),
-			buildReviewContext: async () => context,
 		});
+
+		const result = await runReview(
+			baseConfig,
+			logger,
+			createDependencies({
+				client,
+				context,
+				runCopilotReview: failIfCalled("runCopilotReview"),
+			}),
+		);
 
 		assert.equal(result.skipped, true);
 		assert.match(result.skipReason ?? "", /fully published report/);
 	});
 
-	it("marks the result stale when the PR head moves before publish", async () => {
-		const firstPr = createPullRequest("head-123");
-		const movedPr = createPullRequest("head-456");
+	it("reports a stale publication when the PR head moves before publish", async () => {
 		let pullRequestCalls = 0;
-		let publishCalled = false;
-		let commentCalled = false;
-
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				pullRequestCalls += 1;
-				return pullRequestCalls === 1 ? firstPr : movedPr;
+		const client = createFakeBitbucketClient({
+			pullRequest: {
+				getPullRequest: async () => {
+					pullRequestCalls += 1;
+					return createPullRequest(
+						pullRequestCalls === 1 ? "head-123" : "head-456",
+					);
+				},
 			},
-			async getCodeInsightsReport() {
-				return undefined;
-			},
-			async findPullRequestCommentByTag() {
-				return undefined;
-			},
-			async publishCodeInsights() {
-				publishCalled = true;
-			},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {
-				commentCalled = true;
-			},
-		};
-
-		const result = await runReview(baseConfig, logger, {
-			createBitbucketClient: () => client as never,
-			prepareReviewContext: async () => ({
-				config: baseConfig,
-				git: createGitStub(),
-				mergeBaseCommit: firstPr.target.latestCommit,
-			}),
-			buildReviewContext: async () => createReviewContext(firstPr),
-			runCopilotReview: async () => createReviewOutcome(),
+			codeInsights: { putReport: failIfCalled("putReport") },
+			comments: { upsertComment: failIfCalled("upsertComment") },
 		});
+
+		const result = await runReview(
+			baseConfig,
+			logger,
+			createDependencies({ client }),
+		);
 
 		assert.equal(result.skipped, false);
 		assert.equal(result.published, false);
 		assert.equal(result.publicationStatus, "stale");
 		assert.equal(result.review.stale, true);
-		assert.equal(publishCalled, false);
-		assert.equal(commentCalled, false);
 	});
 
 	it("returns partial publication metadata when the PR comment update fails", async () => {
 		let commentAttempts = 0;
-		const pr = createPullRequest();
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
+		const client = createFakeBitbucketClient({
+			comments: {
+				upsertComment: async () => {
+					commentAttempts += 1;
+					throw new Error(`comment failure ${commentAttempts}`);
+				},
 			},
-			async getCodeInsightsReport() {
-				return undefined;
-			},
-			async findPullRequestCommentByTag() {
-				return undefined;
-			},
-			async publishCodeInsights() {},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {
-				commentAttempts += 1;
-				throw new Error(`comment failure ${commentAttempts}`);
-			},
-		};
-
-		const result = await runReview(baseConfig, logger, {
-			createBitbucketClient: () => client as never,
-			prepareReviewContext: async () => ({
-				config: baseConfig,
-				git: createGitStub(),
-				mergeBaseCommit: pr.target.latestCommit,
-			}),
-			buildReviewContext: async () => createReviewContext(pr),
-			runCopilotReview: async () => createReviewOutcome(),
 		});
 
+		const result = await runReview(
+			baseConfig,
+			logger,
+			createDependencies({ client }),
+		);
+
 		assert.equal(commentAttempts, 2);
-		assert.equal(result.skipped, false);
 		assert.equal(result.published, false);
+		assert.equal(result.review.stale, false);
 		assert.equal(result.publicationStatus, "partial");
 		assert.deepEqual(result.publication, {
 			status: "partial",
@@ -324,200 +299,74 @@ describe("runReview", () => {
 			codeInsightsPublished: true,
 			findingCommentsUpdated: true,
 			pullRequestCommentUpdated: false,
-			error: {
-				stage: "pull_request_comment",
-				message: "comment failure 2",
-			},
+			error: { stage: "pull_request_comment", message: "comment failure 2" },
 		});
 	});
 
-	it("skips closed pull requests before building review context", async () => {
-		const pr = {
-			...createPullRequest(),
-			state: "MERGED",
-		};
-		let buildContextCalled = false;
+	for (const [label, pr, expectedReason] of [
+		["closed", { ...createPullRequest(), state: "MERGED" }, /is MERGED/],
+		[
+			"renovate",
+			{
+				...createPullRequest(),
+				source: {
+					...createPullRequest().source,
+					displayId: "renovate/typescript-5.x",
+				},
+			},
+			/matches skip prefix renovate\//,
+		],
+		["draft", { ...createPullRequest(), draft: true }, /is a draft/],
+	] as const) {
+		it(`skips ${label} pull requests before building review context`, async () => {
+			let buildContextCalled = false;
+			const result = await runReview(
+				baseConfig,
+				logger,
+				createDependencies({
+					client: readOnlyClient(pr),
+					buildReviewContext: async () => {
+						buildContextCalled = true;
+						return createReviewContext(pr);
+					},
+				}),
+			);
 
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
-			},
-			async getCodeInsightsReport() {
-				throw new Error("should not read report state");
-			},
-			async findPullRequestCommentByTag() {
-				throw new Error("should not read comments");
-			},
-			async publishCodeInsights() {
-				throw new Error("should not publish");
-			},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {
-				throw new Error("should not update comment");
-			},
-		};
-
-		const result = await runReview(baseConfig, logger, {
-			createBitbucketClient: () => client as never,
-			prepareReviewContext: async () => ({
-				config: baseConfig,
-				git: createGitStub(),
-				mergeBaseCommit: pr.target.latestCommit,
-			}),
-			buildReviewContext: async () => {
-				buildContextCalled = true;
-				return createReviewContext(pr);
-			},
+			assert.equal(buildContextCalled, false);
+			assert.equal(result.skipped, true);
+			assert.match(result.skipReason ?? "", expectedReason);
 		});
-
-		assert.equal(buildContextCalled, false);
-		assert.equal(result.skipped, true);
-		assert.match(result.skipReason ?? "", /is MERGED/);
-	});
-
-	it("skips renovate pull requests before building review context", async () => {
-		const basePr = createPullRequest();
-		const pr = {
-			...basePr,
-			source: {
-				...basePr.source,
-				displayId: "renovate/typescript-5.x",
-			},
-		};
-		let buildContextCalled = false;
-
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
-			},
-			async getCodeInsightsReport() {
-				throw new Error("should not read report state");
-			},
-			async findPullRequestCommentByTag() {
-				throw new Error("should not read comments");
-			},
-			async publishCodeInsights() {
-				throw new Error("should not publish");
-			},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {
-				throw new Error("should not update comment");
-			},
-		};
-
-		const result = await runReview(baseConfig, logger, {
-			createBitbucketClient: () => client as never,
-			prepareReviewContext: async () => ({
-				config: baseConfig,
-				git: createGitStub(),
-				mergeBaseCommit: pr.target.latestCommit,
-			}),
-			buildReviewContext: async () => {
-				buildContextCalled = true;
-				return createReviewContext(pr);
-			},
-		});
-
-		assert.equal(buildContextCalled, false);
-		assert.equal(result.skipped, true);
-		assert.match(result.skipReason ?? "", /matches skip prefix renovate\//);
-	});
-
-	it("skips draft pull requests before building review context", async () => {
-		const pr = {
-			...createPullRequest(),
-			draft: true,
-		};
-		let buildContextCalled = false;
-
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
-			},
-			async getCodeInsightsReport() {
-				throw new Error("should not read report state");
-			},
-			async findPullRequestCommentByTag() {
-				throw new Error("should not read comments");
-			},
-			async publishCodeInsights() {
-				throw new Error("should not publish");
-			},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {
-				throw new Error("should not update comment");
-			},
-		};
-
-		const result = await runReview(baseConfig, logger, {
-			createBitbucketClient: () => client as never,
-			prepareReviewContext: async () => ({
-				config: baseConfig,
-				git: createGitStub(),
-				mergeBaseCommit: pr.target.latestCommit,
-			}),
-			buildReviewContext: async () => {
-				buildContextCalled = true;
-				return createReviewContext(pr);
-			},
-		});
-
-		assert.equal(buildContextCalled, false);
-		assert.equal(result.skipped, true);
-		assert.match(result.skipReason ?? "", /is a draft/);
-	});
+	}
 
 	it("uses trusted repo config before applying branch-prefix skips", async () => {
-		const basePr = createPullRequest();
 		const pr = {
-			...basePr,
+			...createPullRequest(),
 			source: {
-				...basePr.source,
+				...createPullRequest().source,
 				displayId: "renovate/typescript-5.x",
 			},
 		};
-		let buildContextCalled = false;
 		let copilotCalled = false;
 
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
-			},
-			async getCodeInsightsReport() {
-				return undefined;
-			},
-			async findPullRequestCommentByTag() {
-				return undefined;
-			},
-			async publishCodeInsights() {},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {},
-		};
-
-		const result = await runReview(baseConfig, logger, {
-			createBitbucketClient: () => client as never,
-			prepareReviewContext: async () => ({
+		const result = await runReview(
+			baseConfig,
+			logger,
+			createDependencies({
+				client: createFakeBitbucketClient({
+					pullRequest: { getPullRequest: async () => pr },
+				}),
+				context: createReviewContext(pr),
 				config: {
 					...baseConfig,
-					review: {
-						...baseConfig.review,
-						skipBranchPrefixes: [],
-					},
+					review: { ...baseConfig.review, skipBranchPrefixes: [] },
 				},
-				git: createGitStub(),
-				mergeBaseCommit: pr.target.latestCommit,
+				runCopilotReview: async () => {
+					copilotCalled = true;
+					return createReviewOutcome();
+				},
 			}),
-			buildReviewContext: async () => {
-				buildContextCalled = true;
-				return createReviewContext(pr);
-			},
-			runCopilotReview: async () => {
-				copilotCalled = true;
-				return createReviewOutcome();
-			},
-		});
+		);
 
-		assert.equal(buildContextCalled, true);
 		assert.equal(copilotCalled, true);
 		assert.equal(result.skipped, false);
 	});
@@ -530,194 +379,63 @@ describe("runReview", () => {
 				displayId: "deps/typescript-5.x",
 			},
 		};
-		let copilotCalled = false;
-
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
-			},
-			async getCodeInsightsReport() {
-				return undefined;
-			},
-			async findPullRequestCommentByTag() {
-				return undefined;
-			},
-			async publishCodeInsights() {
-				throw new Error("should not publish");
-			},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {
-				throw new Error("should not update comment");
-			},
-		};
-
-		const result = await runReview(baseConfig, logger, {
-			createBitbucketClient: () => client as never,
-			prepareReviewContext: async () => ({
-				config: {
-					...baseConfig,
-					review: {
-						...baseConfig.review,
-						skipBranchPrefixes: ["deps/"],
-					},
-				},
-				git: createGitStub(),
-				mergeBaseCommit: pr.target.latestCommit,
-			}),
-			buildReviewContext: async () => createReviewContext(pr),
-			runCopilotReview: async () => {
-				copilotCalled = true;
-				return createReviewOutcome();
-			},
-		});
-
-		assert.equal(copilotCalled, false);
-		assert.equal(result.skipped, true);
-		assert.match(result.skipReason ?? "", /matches skip prefix deps\//);
-	});
-
-	it("skips before building context when config already matches the branch prefix", async () => {
-		const basePr = createPullRequest();
-		const pr = {
-			...basePr,
-			source: {
-				...basePr.source,
-				displayId: "deps/typescript-5.x",
-			},
-		};
-		let buildContextCalled = false;
 
 		const result = await runReview(
-			{
-				...baseConfig,
-				review: {
-					...baseConfig.review,
-					skipBranchPrefixes: ["deps/"],
-				},
-			},
+			baseConfig,
 			logger,
-			{
-				createBitbucketClient: () =>
-					({
-						async getPullRequest() {
-							return pr;
-						},
-						async getCodeInsightsReport() {
-							throw new Error("should not read report state");
-						},
-						async findPullRequestCommentByTag() {
-							throw new Error("should not read comments");
-						},
-						async publishCodeInsights() {
-							throw new Error("should not publish");
-						},
-						async reconcilePullRequestFindingComments() {},
-						async upsertPullRequestComment() {
-							throw new Error("should not update comment");
-						},
-					}) as never,
-				prepareReviewContext: async () => ({
-					config: {
-						...baseConfig,
-						review: {
-							...baseConfig.review,
-							skipBranchPrefixes: ["deps/"],
-						},
-					},
-					git: createGitStub(),
-					mergeBaseCommit: pr.target.latestCommit,
-				}),
-				buildReviewContext: async () => {
-					buildContextCalled = true;
-					return createReviewContext(pr);
+			createDependencies({
+				client: readOnlyClient(pr),
+				context: createReviewContext(pr),
+				config: {
+					...baseConfig,
+					review: { ...baseConfig.review, skipBranchPrefixes: ["deps/"] },
 				},
-			},
+				buildReviewContext: failIfCalled("buildReviewContext"),
+				runCopilotReview: failIfCalled("runCopilotReview"),
+			}),
 		);
 
-		assert.equal(buildContextCalled, false);
 		assert.equal(result.skipped, true);
 		assert.match(result.skipReason ?? "", /matches skip prefix deps\//);
 	});
 
 	it("skips rerun when confirm-rerun is enabled and the user declines", async () => {
-		const pr = createPullRequest();
-		const context = createReviewContext(pr);
-		let copilotCalled = false;
+		const context = createReviewContext();
 		const sequence: string[] = [];
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
+		const client = createFakeBitbucketClient({
+			codeInsights: {
+				getReport: async () => ({
+					data: buildPublicationStateFields({
+						revision: context.reviewRevision,
+						findingCount: 1,
+					}),
+				}),
+				putReport: failIfCalled("putReport"),
 			},
-			async getCodeInsightsReport() {
-				const metadata = buildReviewMetadataFields({
-					revision: context.reviewRevision,
-					reviewedCommit: context.headCommit,
-				}).map(({ title, value }) => ({ title, value }));
-				return {
-					data: [{ title: "Findings", value: 1 }, ...metadata],
-				};
-			},
-			async findPullRequestCommentByTag() {
-				return {
-					text: [
-						"<!-- copilot-pr-review -->",
-						"<!-- copilot-pr-review:schema:2 -->",
-						"<!-- copilot-pr-review:revision:review-rev-123 -->",
-						"<!-- copilot-pr-review:reviewed-commit:head-123 -->",
-					].join("\n"),
-				};
-			},
-			async publishCodeInsights() {
-				throw new Error("should not publish");
-			},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {
-				throw new Error("should not update comment");
-			},
-		};
-		const logSpy: Logger = {
-			...logger,
-			warn(message) {
-				sequence.push(`warn:${message}`);
-			},
-		};
+			comments: { upsertComment: failIfCalled("upsertComment") },
+		});
 
 		const result = await runReview(
-			{
-				...baseConfig,
-				review: {
-					...baseConfig.review,
-					confirmRerun: true,
-				},
-			},
-			logSpy,
-			{
-				createBitbucketClient: () => client as never,
-				prepareReviewContext: async () => ({
-					config: baseConfig,
-					git: createGitStub(),
-					mergeBaseCommit: context.mergeBaseCommit,
-				}),
-				buildReviewContext: async () => context,
-				runCopilotReview: async () => {
-					copilotCalled = true;
-					return createReviewOutcome();
-				},
+			confirmConfig,
+			{ ...logger, warn: (message) => sequence.push(`warn:${message}`) },
+			createDependencies({
+				client,
+				context,
+				config: confirmConfig,
+				runCopilotReview: failIfCalled("runCopilotReview"),
 				confirmRerun: async ({ message }) => {
 					sequence.push(`confirm:${message}`);
-					assert.match(message, /Existing published artifacts/);
 					return false;
 				},
-			},
+			}),
 		);
 
-		assert.equal(copilotCalled, false);
 		assert.equal(result.skipped, true);
 		assert.match(result.skipReason ?? "", /manual confirmation declined/);
 		assert.equal(sequence.length, 2);
 		assert.match(
 			sequence[0] ?? "",
-			/^warn:Found an existing but unusable report copilot-review for revision review-rev-123; rerunning review to refresh the published output\./,
+			/^warn:Found an existing but unusable report copilot-review for revision review-rev-123; rerunning review/,
 		);
 		assert.match(
 			sequence[1] ?? "",
@@ -725,69 +443,36 @@ describe("runReview", () => {
 		);
 	});
 
-	it("reruns automatically without prompting when the PR head changed", async () => {
-		const pr = createPullRequest();
-		const context = createReviewContext(pr);
-		const oldHead = "head-old";
-		let copilotCalled = false;
+	it("reruns without prompting when no report exists for the current head", async () => {
+		const context = createReviewContext();
 		let confirmCalled = false;
+		let copilotCalled = false;
 		const warnings: string[] = [];
-		const client: FakeBitbucketClient = {
-			async getPullRequest() {
-				return pr;
-			},
-			async getCodeInsightsReport(commitId) {
-				if (commitId === context.headCommit) {
+		const client = createFakeBitbucketClient({
+			codeInsights: {
+				getReport: async (commitId) => {
+					assert.equal(commitId, context.headCommit);
 					return undefined;
-				}
-
-				const metadata = buildReviewMetadataFields({
-					revision: context.reviewRevision,
-					reviewedCommit: oldHead,
-				}).map(({ title, value }) => ({ title, value }));
-				return {
-					data: [{ title: "Findings", value: 1 }, ...metadata],
-				};
-			},
-			async findPullRequestCommentByTag() {
-				return {
-					text: [
-						"<!-- copilot-pr-review -->",
-						"<!-- copilot-pr-review:schema:2 -->",
-						"<!-- copilot-pr-review:revision:review-rev-123 -->",
-						`<!-- copilot-pr-review:reviewed-commit:${oldHead} -->`,
-						`<!-- copilot-pr-review:published-commit:${oldHead} -->`,
-					].join("\n"),
-				};
-			},
-			async publishCodeInsights() {},
-			async reconcilePullRequestFindingComments() {},
-			async upsertPullRequestComment() {},
-		};
-		const logSpy: Logger = {
-			...logger,
-			warn(message) {
-				warnings.push(message);
-			},
-		};
-
-		const result = await runReview(
-			{
-				...baseConfig,
-				review: {
-					...baseConfig.review,
-					confirmRerun: true,
 				},
 			},
-			logSpy,
-			{
-				createBitbucketClient: () => client as never,
-				prepareReviewContext: async () => ({
-					config: baseConfig,
-					git: createGitStub(),
-					mergeBaseCommit: context.mergeBaseCommit,
-				}),
-				buildReviewContext: async () => context,
+			comments: {
+				listComments: async () => [
+					{
+						id: 1,
+						version: 0,
+						text: "<!-- copilot-pr-review -->\n<!-- copilot-pr-review:revision:older-revision -->",
+					},
+				],
+			},
+		});
+
+		const result = await runReview(
+			confirmConfig,
+			{ ...logger, warn: (message) => warnings.push(message) },
+			createDependencies({
+				client,
+				context,
+				config: confirmConfig,
 				runCopilotReview: async () => {
 					copilotCalled = true;
 					return createReviewOutcome();
@@ -796,12 +481,12 @@ describe("runReview", () => {
 					confirmCalled = true;
 					return false;
 				},
-			},
+			}),
 		);
 
 		assert.equal(confirmCalled, false);
 		assert.equal(copilotCalled, true);
 		assert.equal(result.skipped, false);
-		assert.equal(warnings.length, 0);
+		assert.deepEqual(warnings, []);
 	});
 });

@@ -90,6 +90,20 @@ export interface PullRequestComment {
 	updatedDate?: number;
 }
 
+export interface PullRequestCommentDraft {
+	keys: string[];
+	text: string;
+	anchor?: {
+		path: string;
+		line: number;
+	};
+}
+
+export interface CommentRetirement {
+	supersededText: string;
+	label: string;
+}
+
 export interface RawBitbucketCodeInsightsReport {
 	title?: string;
 	details?: string;

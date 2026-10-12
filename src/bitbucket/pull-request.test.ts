@@ -1,14 +1,32 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import type { Logger } from "../shared/logger.ts";
 import { PullRequestApi } from "./pull-request.ts";
+import { createBitbucketRepoScope } from "./scope.ts";
+
+const logger: Logger = {
+	debug() {},
+	info() {},
+	warn() {},
+	error() {},
+	trace() {},
+	json() {},
+};
+
+function createApi(requestJson: () => Promise<never>): PullRequestApi {
+	return new PullRequestApi(
+		createBitbucketRepoScope(
+			{ projectKey: "PROJ", repoSlug: "repo", prId: 123 },
+			{ request: async () => "", requestJson },
+			logger,
+		),
+	);
+}
 
 describe("PullRequestApi", () => {
 	it("normalizes pull request payloads and prefers HTTP clone URLs", async () => {
-		const api = new PullRequestApi(
-			"PROJ",
-			"repo",
-			123,
+		const api = createApi(
 			async () =>
 				({
 					id: 123,
@@ -93,10 +111,7 @@ describe("PullRequestApi", () => {
 	});
 
 	it("preserves the pull request state for downstream review guards", async () => {
-		const api = new PullRequestApi(
-			"PROJ",
-			"repo",
-			123,
+		const api = createApi(
 			async () =>
 				({
 					id: 123,
@@ -133,10 +148,7 @@ describe("PullRequestApi", () => {
 	});
 
 	it("preserves the draft flag for downstream review guards", async () => {
-		const api = new PullRequestApi(
-			"PROJ",
-			"repo",
-			123,
+		const api = createApi(
 			async () =>
 				({
 					id: 123,

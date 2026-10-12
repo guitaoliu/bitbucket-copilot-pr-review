@@ -39,7 +39,6 @@ function normalizeMultilineSummaryText(
 		.replace(/\r\n?/g, "\n")
 		.split("\n")
 		.map((line) => collapseWhitespace(line))
-		.map((line) => sanitizeModelAuthoredText(line))
 		.filter((line) => line.length > 0)
 		.join("\n");
 	if (normalized.length === 0) {

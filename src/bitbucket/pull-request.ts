@@ -1,4 +1,5 @@
 import { omitUndefined } from "../shared/object.ts";
+import type { BitbucketRepoScope } from "./scope.ts";
 import type {
 	PullRequestInfo,
 	PullRequestSide,
@@ -55,29 +56,17 @@ function normalizePullRequest(
 }
 
 export class PullRequestApi {
-	private readonly projectKey: string;
-	private readonly repoSlug: string;
-	private readonly prId: number;
-	private readonly requestJson: <T>(
-		pathname: string,
-		init?: RequestInit,
-	) => Promise<T>;
+	private readonly scope: BitbucketRepoScope;
 
-	constructor(
-		projectKey: string,
-		repoSlug: string,
-		prId: number,
-		requestJson: <T>(pathname: string, init?: RequestInit) => Promise<T>,
-	) {
-		this.projectKey = projectKey;
-		this.repoSlug = repoSlug;
-		this.prId = prId;
-		this.requestJson = requestJson;
+	constructor(scope: BitbucketRepoScope) {
+		this.scope = scope;
 	}
 
 	async getPullRequest(): Promise<PullRequestInfo> {
-		const pathname = `/rest/api/latest/projects/${encodeURIComponent(this.projectKey)}/repos/${encodeURIComponent(this.repoSlug)}/pull-requests/${this.prId}`;
-		const payload = await this.requestJson<RawBitbucketPullRequest>(pathname);
+		const payload =
+			await this.scope.transport.requestJson<RawBitbucketPullRequest>(
+				this.scope.pullRequestPath,
+			);
 		return normalizePullRequest(payload);
 	}
 }

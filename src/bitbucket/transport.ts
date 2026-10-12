@@ -4,10 +4,17 @@ import https from "node:https";
 import type { ReviewerConfig } from "../config/types.ts";
 import { omitUndefined } from "../shared/object.ts";
 
+const REQUEST_TIMEOUT_MS = 30_000;
+
 interface HttpResponseData {
 	statusCode: number;
 	statusMessage: string;
 	body: string;
+}
+
+export interface BitbucketRequest {
+	method?: "GET" | "POST" | "PUT" | "DELETE";
+	json?: unknown;
 }
 
 interface BitbucketTransportDependencies {
@@ -64,45 +71,19 @@ export class BitbucketTransport {
 			dependencies.sendRequest ?? this.sendRequest.bind(this);
 	}
 
-	private buildUrl(pathname: string): string {
-		return new URL(pathname, `${this.config.baseUrl}/`).toString();
-	}
-
-	private buildHeaders(hasJsonBody: boolean): Headers {
-		const headers = new Headers({ Accept: "application/json;charset=UTF-8" });
-
-		if (hasJsonBody) {
-			headers.set("Content-Type", "application/json");
-		}
-
-		if (this.config.auth.type === "bearer") {
-			headers.set("Authorization", `Bearer ${this.config.auth.token}`);
-		} else {
-			const encoded = Buffer.from(
-				`${this.config.auth.username}:${this.config.auth.password}`,
-				"utf8",
-			).toString("base64");
-			headers.set("Authorization", `Basic ${encoded}`);
-		}
-
-		return headers;
-	}
-
-	private mergeHeaders(
-		baseHeaders: Headers,
-		overrideHeaders: HeadersInit | undefined,
-	): Headers {
-		const headers = new Headers(baseHeaders);
-		if (!overrideHeaders) {
-			return headers;
-		}
-
-		const overrides = new Headers(overrideHeaders);
-		overrides.forEach((value, key) => {
-			headers.set(key, value);
-		});
-
-		return headers;
+	private buildHeaders(hasJsonBody: boolean): Record<string, string> {
+		const authorization =
+			this.config.auth.type === "bearer"
+				? `Bearer ${this.config.auth.token}`
+				: `Basic ${Buffer.from(
+						`${this.config.auth.username}:${this.config.auth.password}`,
+						"utf8",
+					).toString("base64")}`;
+		return {
+			accept: "application/json;charset=UTF-8",
+			...(hasJsonBody ? { "content-type": "application/json" } : {}),
+			authorization,
+		};
 	}
 
 	private async loadCaCertificate(): Promise<string | undefined> {
@@ -113,14 +94,6 @@ export class BitbucketTransport {
 		}
 
 		return this.caCertPromise;
-	}
-
-	private toHeaderRecord(headers: Headers): Record<string, string> {
-		const result: Record<string, string> = {};
-		headers.forEach((value, key) => {
-			result[key] = value;
-		});
-		return result;
 	}
 
 	private formatNetworkError(
@@ -218,10 +191,10 @@ export class BitbucketTransport {
 				});
 			});
 
-			request.setTimeout(30000, () => {
+			request.setTimeout(REQUEST_TIMEOUT_MS, () => {
 				request.destroy(
 					new Error(
-						`Timed out after 30000ms while contacting ${url.toString()}`,
+						`Timed out after ${REQUEST_TIMEOUT_MS}ms while contacting ${url.toString()}`,
 					),
 				);
 			});
@@ -238,18 +211,15 @@ export class BitbucketTransport {
 		});
 	}
 
-	async request(pathname: string, init?: RequestInit): Promise<string> {
-		const url = new URL(this.buildUrl(pathname));
-		const method = init?.method ?? "GET";
+	async request(
+		pathname: string,
+		options: BitbucketRequest = {},
+	): Promise<string> {
+		const url = new URL(pathname, `${this.config.baseUrl}/`);
+		const method = options.method ?? "GET";
 		const body =
-			init?.body === undefined
-				? undefined
-				: typeof init.body === "string"
-					? init.body
-					: String(init.body);
-		const headers = this.toHeaderRecord(
-			this.mergeHeaders(this.buildHeaders(body !== undefined), init?.headers),
-		);
+			options.json === undefined ? undefined : JSON.stringify(options.json);
+		const headers = this.buildHeaders(body !== undefined);
 
 		try {
 			const response = await this.sendRequestImpl(url, method, headers, body);
@@ -276,8 +246,10 @@ export class BitbucketTransport {
 		}
 	}
 
-	async requestJson<T>(pathname: string, init?: RequestInit): Promise<T> {
-		const responseText = await this.request(pathname, init);
-		return JSON.parse(responseText) as T;
+	async requestJson<T>(
+		pathname: string,
+		options?: BitbucketRequest,
+	): Promise<T> {
+		return JSON.parse(await this.request(pathname, options)) as T;
 	}
 }

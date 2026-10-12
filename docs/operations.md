@@ -245,8 +245,8 @@ pnpm review -- https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-re
 
 What to expect:
 
-- `--dry-run` prints the report and annotations JSON to stdout and does not modify Bitbucket
-- without `--dry-run`, the script publishes a Code Insights report and annotations to the PR's latest source commit
+- `--dry-run` prints the review result, Code Insights report payload, and summary comment body as JSON to stdout and does not modify Bitbucket
+- without `--dry-run`, the script publishes a Code Insights report to the PR's latest source commit, reconciles one inline comment per finding, and updates the tagged summary comment
 - if the PR head changed while you were testing, the script skips publish to avoid posting stale results
 
 Common local test issues:
@@ -299,6 +299,6 @@ After that, bump `package.json`, create a matching tag like `v0.1.1`, and push t
 ## Notes
 
 - the reviewer intentionally blocks Copilot from using general shell or edit tools during automated review runs
-- only annotations that land on changed lines are published
+- only findings that land on changed lines of reviewable files are published, as inline PR comments; no Code Insights annotations are created
 - the reviewer also upserts one tagged pull-request summary comment by default
-- for reruns, the script replaces the prior report for the same report key
+- for reruns, the script replaces the prior report for the same report key and commit with a single `PUT`, so a failed publish never leaves the commit without its previous report

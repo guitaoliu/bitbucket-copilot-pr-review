@@ -4,1142 +4,400 @@ import { describe, it } from "node:test";
 import type { Logger } from "../shared/logger.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
 import { PullRequestCommentsApi } from "./comments.ts";
-import { BitbucketApiError } from "./transport.ts";
+import { createBitbucketRepoScope } from "./scope.ts";
+import { BitbucketApiError, type BitbucketRequest } from "./transport.ts";
+import type {
+	PullRequestComment,
+	RawBitbucketCommentActivity,
+} from "./types.ts";
 
-type JsonResponder = <T>(pathname: string) => Promise<T>;
-type RequestResponder = (
-	pathname: string,
-	init?: RequestInit,
-) => Promise<string>;
+const COMMENTS_PATH =
+	"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments";
+const retirement = { label: "test comment", supersededText: "_Superseded._" };
 
-const logger: Logger = {
-	debug() {},
-	info() {},
-	warn() {},
-	error() {},
-	trace() {},
-	json() {},
-};
+interface RecordedRequest {
+	method: string;
+	pathname: string;
+	json?: unknown;
+}
 
-const SUPERSEDED_PULL_REQUEST_COMMENT_TEXT =
-	"_Superseded by a newer automated PR review summary. This thread is preserved because Bitbucket will not delete it._";
-
-describe("PullRequestCommentsApi.listPullRequestComments", () => {
-	it("follows pagination and keeps the newest comment version", async () => {
-		const requestedPaths: string[] = [];
-
-		const requestJson: JsonResponder = async (pathname) => {
-			requestedPaths.push(pathname);
-			if (pathname.includes("start=0")) {
-				return {
-					values: [
-						{
-							action: "COMMENTED",
-							comment: { id: 100, text: "old text", version: 1 },
-						},
-					],
-					isLastPage: false,
-					nextPageStart: 25,
-				} as never;
-			}
-
-			return {
-				values: [
-					{
-						action: "COMMENTED",
-						comment: { id: 100, text: "new text", version: 2 },
-					},
-					{
-						action: "COMMENTED",
-						comment: { id: 200, text: "marker", version: 1 },
-					},
-				],
-				isLastPage: true,
-			} as never;
-		};
-		const request: RequestResponder = async () => "";
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
+function createApi(
+	options: {
+		pages?: RawBitbucketCommentActivity[][];
+		respond?: (request: RecordedRequest) => void;
+		logger?: Partial<Logger>;
+	} = {},
+): {
+	api: PullRequestCommentsApi;
+	requests: RecordedRequest[];
+	listed: string[];
+} {
+	const requests: RecordedRequest[] = [];
+	const listed: string[] = [];
+	const pages = options.pages ?? [[]];
+	const logger: Logger = {
+		debug() {},
+		info() {},
+		warn() {},
+		error() {},
+		trace() {},
+		json() {},
+		...options.logger,
+	};
+	const api = new PullRequestCommentsApi(
+		createBitbucketRepoScope(
+			{ projectKey: "PROJ", repoSlug: "repo", prId: 123 },
+			{
+				request: async (pathname: string, request?: BitbucketRequest) => {
+					const recorded = {
+						method: request?.method ?? "GET",
+						pathname: pathname.replace(COMMENTS_PATH, ""),
+						...(request?.json === undefined ? {} : { json: request.json }),
+					};
+					requests.push(recorded);
+					options.respond?.(recorded);
+					return "";
+				},
+				requestJson: async <T>(pathname: string) => {
+					listed.push(pathname);
+					const index = listed.length - 1;
+					return {
+						values: pages[index] ?? [],
+						isLastPage: index >= pages.length - 1,
+						...(index < pages.length - 1
+							? { nextPageStart: (index + 1) * 25 }
+							: {}),
+					} as T;
+				},
+			},
 			logger,
-			request,
-			requestJson,
-		);
+		),
+	);
+	return { api, requests, listed };
+}
 
-		const comments = await commentsApi.listPullRequestComments();
+function activity(
+	id: number,
+	text: string,
+	options: { version?: number; date?: number } = {},
+): RawBitbucketCommentActivity {
+	return {
+		action: "COMMENTED",
+		comment: {
+			id,
+			text,
+			version: options.version ?? 0,
+			...(options.date === undefined
+				? {}
+				: { createdDate: options.date, updatedDate: options.date }),
+		},
+	};
+}
 
-		assert.deepEqual(requestedPaths, [
+function comment(id: number, text: string, version = 0): PullRequestComment {
+	return { id, text, version };
+}
+
+function bitbucketError(statusCode: number, body: string): BitbucketApiError {
+	return new BitbucketApiError(
+		statusCode,
+		"Error",
+		"DELETE",
+		"https://example.test",
+		body,
+	);
+}
+
+const keyOf = (text: string) => /key:(\w+)/.exec(text)?.[1];
+
+describe("PullRequestCommentsApi.listComments", () => {
+	it("follows pagination, keeps the newest version, and sorts newest first", async () => {
+		const { api, listed, requests } = createApi({
+			pages: [
+				[activity(100, "old text", { version: 1, date: 100 })],
+				[
+					activity(100, "new text", { version: 2, date: 100 }),
+					activity(200, "newer comment", { version: 1, date: 300 }),
+					{ action: "APPROVED" },
+				],
+			],
+		});
+
+		const comments = await api.listComments();
+
+		assert.deepEqual(listed, [
 			"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/activities?limit=1000&start=0",
 			"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/activities?limit=1000&start=25",
 		]);
-		assert.deepEqual(comments, [
-			{ id: 100, text: "new text", version: 2 },
-			{ id: 200, text: "marker", version: 1 },
-		]);
+		assert.deepEqual(
+			comments.map(({ id, text }) => [id, text]),
+			[
+				[200, "newer comment"],
+				[100, "new text"],
+			],
+		);
+		assert.deepEqual(requests, []);
 	});
 
-	it("prefers the newest tagged comment by timestamp across comments", async () => {
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			logger,
-			async () => "",
-			async () =>
-				({
-					values: [
-						{
-							action: "COMMENTED",
-							createdDate: 100,
-							comment: {
-								id: 10,
-								text: "<!-- copilot-pr-review -->\nold",
-								version: 9,
-								createdDate: 100,
-								updatedDate: 100,
-							},
-						},
-						{
-							action: "COMMENTED",
-							createdDate: 200,
-							comment: {
-								id: 11,
-								text: "<!-- copilot-pr-review -->\nnew",
-								version: 1,
-								createdDate: 200,
-								updatedDate: 200,
-							},
-						},
-					],
-					isLastPage: true,
-				}) as never,
-		);
-
-		const comment =
-			await commentsApi.findPullRequestCommentByTag("copilot-pr-review");
-
-		assert.deepEqual(comment, {
-			id: 11,
-			text: "<!-- copilot-pr-review -->\nnew",
-			version: 1,
-			createdDate: 200,
-			updatedDate: 200,
+	it("does not delete duplicate tagged comments while listing", async () => {
+		const { api, requests } = createApi({
+			pages: [[activity(1, "key:a"), activity(2, "key:a")]],
 		});
+
+		await api.listComments();
+
+		assert.deepEqual(requests, []);
 	});
 });
 
-describe("PullRequestCommentsApi.upsertPullRequestComment", () => {
-	it("rejects oversized comments before sending the request", async () => {
-		let requestCount = 0;
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			logger,
-			async () => {
-				requestCount += 1;
-				return "";
-			},
-			async () => ({ values: [], isLastPage: true }) as never,
-		);
+describe("PullRequestCommentsApi.upsertComment", () => {
+	it("rejects oversized and empty comments before sending the request", async () => {
+		const { api, requests } = createApi();
 
 		await assert.rejects(
-			commentsApi.upsertPullRequestComment(
-				"copilot-pr-review",
-				"x".repeat(BITBUCKET_PR_COMMENT_MAX_CHARS + 1),
-			),
+			api.upsertComment([], "x".repeat(BITBUCKET_PR_COMMENT_MAX_CHARS + 1), {
+				strategy: "recreate",
+				retirement,
+			}),
 			/exceeds the local Bitbucket safety limit/,
 		);
-		assert.equal(requestCount, 0);
-	});
-
-	it("rejects empty comments before sending the request", async () => {
-		let requestCount = 0;
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			logger,
-			async () => {
-				requestCount += 1;
-				return "";
-			},
-			async () => ({ values: [], isLastPage: true }) as never,
-		);
-
 		await assert.rejects(
-			commentsApi.upsertPullRequestComment("copilot-pr-review", "   \n\t "),
+			api.upsertComment([], "   \n\t ", { strategy: "recreate", retirement }),
 			/must not be empty/,
 		);
-		assert.equal(requestCount, 0);
+		assert.deepEqual(requests, []);
 	});
 
-	it("recreates the tagged comment and deletes older tagged comments", async () => {
-		const requestCalls: Array<{
-			pathname: string;
-			method: string | undefined;
-			body: string | undefined;
-		}> = [];
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			logger,
-			async (pathname, init) => {
-				requestCalls.push({
-					pathname,
-					method: init?.method,
-					body: typeof init?.body === "string" ? init.body : undefined,
-				});
-				return "";
-			},
-			async () =>
-				({
-					values: [
-						{
-							action: "COMMENTED",
-							createdDate: 100,
-							comment: {
-								id: 10,
-								text: "<!-- copilot-pr-review -->\noldest",
-								version: 2,
-								createdDate: 100,
-								updatedDate: 100,
-							},
-						},
-						{
-							action: "COMMENTED",
-							createdDate: 200,
-							comment: {
-								id: 11,
-								text: "<!-- copilot-pr-review -->\nold",
-								version: 3,
-								createdDate: 200,
-								updatedDate: 200,
-							},
-						},
-					],
-					isLastPage: true,
-				}) as never,
+	it("recreates the comment and deletes every superseded one", async () => {
+		const { api, requests } = createApi();
+
+		await api.upsertComment(
+			[comment(11, "old", 3), comment(10, "oldest", 2)],
+			"replacement",
+			{ strategy: "recreate", retirement },
 		);
 
-		await commentsApi.upsertPullRequestComment(
-			"copilot-pr-review",
-			"<!-- copilot-pr-review -->\nreplacement",
-			{ strategy: "recreate" },
-		);
-
-		assert.deepEqual(requestCalls, [
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments",
-				method: "POST",
-				body: JSON.stringify({
-					text: "<!-- copilot-pr-review -->\nreplacement",
-				}),
-			},
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/11?version=3",
-				method: "DELETE",
-				body: undefined,
-			},
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
-				method: "DELETE",
-				body: undefined,
-			},
+		assert.deepEqual(requests, [
+			{ method: "POST", pathname: "", json: { text: "replacement" } },
+			{ method: "DELETE", pathname: "/11?version=3" },
+			{ method: "DELETE", pathname: "/10?version=2" },
 		]);
 	});
 
-	it("warns and continues when deleting a superseded comment fails", async () => {
-		const warnMessages: string[] = [];
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
+	it("updates the newest comment in place with the update strategy", async () => {
+		const { api, requests } = createApi();
+
+		await api.upsertComment(
+			[comment(11, "old", 3), comment(10, "oldest", 2)],
+			"replacement",
+			{ strategy: "update", retirement },
+		);
+
+		assert.deepEqual(requests, [
 			{
-				...logger,
-				warn(message) {
-					warnMessages.push(message);
-				},
+				method: "PUT",
+				pathname: "/11",
+				json: { version: 3, text: "replacement" },
 			},
-			async (pathname, init) => {
-				if (
-					init?.method === "DELETE" &&
-					pathname.endsWith("/comments/10?version=2")
-				) {
-					throw new Error("delete failed");
-				}
-				return "";
-			},
-			async () =>
-				({
-					values: [
-						{
-							action: "COMMENTED",
-							createdDate: 100,
-							comment: {
-								id: 10,
-								text: "<!-- copilot-pr-review -->\nold",
-								version: 2,
-								createdDate: 100,
-								updatedDate: 100,
-							},
-						},
-					],
-					isLastPage: true,
-				}) as never,
-		);
-
-		await commentsApi.upsertPullRequestComment(
-			"copilot-pr-review",
-			"<!-- copilot-pr-review -->\nreplacement",
-			{ strategy: "recreate" },
-		);
-
-		assert.deepEqual(warnMessages, [
-			"Failed to delete superseded pull request summary comment 10 tagged copilot-pr-review: delete failed",
 		]);
 	});
 
 	it("archives a superseded comment when delete is blocked by replies", async () => {
-		const requestCalls: Array<{
-			pathname: string;
-			method: string | undefined;
-			body: string | undefined;
-		}> = [];
-		const warnMessages: string[] = [];
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			{
-				...logger,
-				warn(message) {
-					warnMessages.push(message);
-				},
-			},
-			async (pathname, init) => {
-				requestCalls.push({
-					pathname,
-					method: init?.method,
-					body: typeof init?.body === "string" ? init.body : undefined,
-				});
-
-				if (
-					init?.method === "DELETE" &&
-					pathname.endsWith("/comments/10?version=2")
-				) {
-					throw new BitbucketApiError(
+		const { api, requests } = createApi({
+			respond: (request) => {
+				if (request.method === "DELETE") {
+					throw bitbucketError(
 						409,
-						"Conflict",
-						"DELETE",
-						"https://bitbucket.example.com/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
-						JSON.stringify({
-							errors: [
-								{
-									message:
-										"This comment has replies which must be deleted first.",
-									exceptionName:
-										"com.atlassian.bitbucket.comment.CommentDeletionException",
-								},
-							],
-						}),
+						"com.atlassian.bitbucket.comment.CommentDeletionException: replies which must be deleted first",
 					);
 				}
+			},
+		});
 
-				return "";
-			},
-			async () =>
-				({
-					values: [
-						{
-							action: "COMMENTED",
-							createdDate: 100,
-							comment: {
-								id: 10,
-								text: "<!-- copilot-pr-review -->\nold",
-								version: 2,
-								createdDate: 100,
-								updatedDate: 100,
-							},
-						},
-					],
-					isLastPage: true,
-				}) as never,
-		);
+		await api.upsertComment([comment(11, "old", 3)], "replacement", {
+			strategy: "recreate",
+			retirement,
+		});
 
-		await commentsApi.upsertPullRequestComment(
-			"copilot-pr-review",
-			"<!-- copilot-pr-review -->\nreplacement",
-			{ strategy: "recreate" },
-		);
-
-		assert.deepEqual(requestCalls, [
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments",
-				method: "POST",
-				body: JSON.stringify({
-					text: "<!-- copilot-pr-review -->\nreplacement",
-				}),
-			},
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
-				method: "DELETE",
-				body: undefined,
-			},
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
-				method: "PUT",
-				body: JSON.stringify({
-					version: 2,
-					text: SUPERSEDED_PULL_REQUEST_COMMENT_TEXT,
-				}),
-			},
-		]);
-		assert.deepEqual(warnMessages, []);
+		assert.deepEqual(requests.at(-1), {
+			method: "PUT",
+			pathname: "/11",
+			json: { version: 3, text: "_Superseded._" },
+		});
 	});
 
-	it("does not warn when a resolved-thread comment cannot be deleted", async () => {
-		const requestCalls: Array<{
-			pathname: string;
-			method: string | undefined;
-			body: string | undefined;
-		}> = [];
-		const warnMessages: string[] = [];
-		const debugMessages: string[] = [];
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			{
-				...logger,
-				warn(message) {
-					warnMessages.push(message);
-				},
-				debug(message) {
-					debugMessages.push(message);
-				},
-			},
-			async (pathname, init) => {
-				requestCalls.push({
-					pathname,
-					method: init?.method,
-					body: typeof init?.body === "string" ? init.body : undefined,
-				});
-
-				if (
-					init?.method === "DELETE" &&
-					pathname.endsWith("/comments/10?version=2")
-				) {
-					throw new BitbucketApiError(
+	it("leaves resolved-thread comments in place without warning", async () => {
+		const warnings: string[] = [];
+		const { api, requests } = createApi({
+			logger: { warn: (message) => warnings.push(message) },
+			respond: (request) => {
+				if (request.method === "DELETE") {
+					throw bitbucketError(
 						400,
-						"Bad Request",
-						"DELETE",
-						"https://bitbucket.example.com/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
-						JSON.stringify({
-							errors: [
-								{
-									message: "Comment cannot be deleted from resolved thread.",
-									exceptionName:
-										"com.atlassian.bitbucket.validation.ArgumentValidationException",
-								},
-							],
-						}),
+						"Comments cannot be deleted from resolved thread",
 					);
 				}
+			},
+		});
 
-				if (init?.method === "PUT" && pathname.endsWith("/comments/10")) {
-					throw new Error("archive failed");
+		await api.upsertComment([comment(11, "old", 3)], "replacement", {
+			strategy: "recreate",
+			retirement,
+		});
+
+		assert.deepEqual(
+			requests.map(({ method }) => method),
+			["POST", "DELETE"],
+		);
+		assert.deepEqual(warnings, []);
+	});
+
+	it("warns and continues when deleting a superseded comment fails", async () => {
+		const warnings: string[] = [];
+		const { api, requests } = createApi({
+			logger: { warn: (message) => warnings.push(message) },
+			respond: (request) => {
+				if (request.method === "DELETE") {
+					throw new Error("network down");
 				}
-
-				return "";
 			},
-			async () =>
-				({
-					values: [
-						{
-							action: "COMMENTED",
-							createdDate: 100,
-							comment: {
-								id: 10,
-								text: "<!-- copilot-pr-review -->\nold",
-								version: 2,
-								createdDate: 100,
-								updatedDate: 100,
-							},
-						},
-					],
-					isLastPage: true,
-				}) as never,
+		});
+
+		await api.upsertComment(
+			[comment(11, "old", 3), comment(10, "oldest", 2)],
+			"replacement",
+			{ strategy: "recreate", retirement },
 		);
 
-		await commentsApi.upsertPullRequestComment(
-			"copilot-pr-review",
-			"<!-- copilot-pr-review -->\nreplacement",
-			{ strategy: "recreate" },
+		assert.equal(requests.length, 3);
+		assert.match(
+			warnings[0] ?? "",
+			/Failed to delete test comment 11: network down/,
 		);
-
-		assert.deepEqual(requestCalls, [
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments",
-				method: "POST",
-				body: JSON.stringify({
-					text: "<!-- copilot-pr-review -->\nreplacement",
-				}),
-			},
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
-				method: "DELETE",
-				body: undefined,
-			},
-		]);
-		assert.deepEqual(warnMessages, []);
-		assert.deepEqual(debugMessages, [
-			"Superseded pull request summary comment 10 tagged copilot-pr-review is in a resolved thread and cannot be deleted or archived; leaving it in place.",
-		]);
 	});
 });
 
-describe("PullRequestCommentsApi.reconcilePullRequestFindingComments", () => {
-	it("creates anchored inline finding comments for line-level findings", async () => {
-		const requestCalls: Array<{
-			pathname: string;
-			method: string | undefined;
-			body: unknown;
-		}> = [];
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			logger,
-			async (pathname, init) => {
-				requestCalls.push({
-					pathname,
-					method: init?.method,
-					body:
-						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-				});
-				return "";
-			},
-			async () =>
-				({
-					values: [],
-					isLastPage: true,
-				}) as never,
-		);
+describe("PullRequestCommentsApi.reconcileKeyedComments", () => {
+	it("creates anchored comments for drafts with a location and top-level ones otherwise", async () => {
+		const { api, requests } = createApi();
 
-		await commentsApi.reconcilePullRequestFindingComments(
-			"copilot-pr-review",
-			[
-				{
-					externalId: "finding-1",
-					threadKey: "thread-1",
-					path: "src/example.ts",
-					line: 10,
-					severity: "LOW",
-					type: "BUG",
-					confidence: "high",
-					title: "Null handling is broken",
-					details: "The new branch dereferences a possibly null response.",
-				},
-			],
-			{ revision: "review-rev-123", reviewedCommit: "head-123" },
-		);
-
-		assert.deepEqual(requestCalls, [
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments",
-				method: "POST",
-				body: {
-					text: [
-						"<!-- copilot-pr-review:finding:finding-1 -->",
-						"<!-- copilot-pr-review:finding-thread:thread-1 -->",
-						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
-						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
-						"**Type:** BUG | **Severity:** LOW | **Confidence:** high",
-						"",
-						"**Null handling is broken**",
-						"",
-						"Location: `src/example.ts:10`",
-						"",
-						"The new branch dereferences a possibly null response.",
-					].join("\n"),
-					anchor: {
-						diffType: "EFFECTIVE",
-						path: "src/example.ts",
-						line: 10,
-						lineType: "ADDED",
-						fileType: "TO",
-					},
-				},
-			},
-		]);
-	});
-
-	it("creates top-level finding comments for file-level findings", async () => {
-		const requestBodies: unknown[] = [];
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			logger,
-			async (_pathname, init) => {
-				requestBodies.push(
-					typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-				);
-				return "";
-			},
-			async () =>
-				({
-					values: [],
-					isLastPage: true,
-				}) as never,
-		);
-
-		await commentsApi.reconcilePullRequestFindingComments(
-			"copilot-pr-review",
-			[
-				{
-					externalId: "finding-file",
-					threadKey: "thread-file",
-					path: "src/example.ts",
-					line: 0,
-					severity: "MEDIUM",
-					type: "CODE_SMELL",
-					confidence: "medium",
-					title: "File-level issue",
-					details: "",
-				},
-			],
-			{ revision: "review-rev-123", reviewedCommit: "head-123" },
-		);
-
-		assert.deepEqual(requestBodies, [
-			{
-				text: [
-					"<!-- copilot-pr-review:finding:finding-file -->",
-					"<!-- copilot-pr-review:finding-thread:thread-file -->",
-					"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
-					"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
-					"**Type:** CODE_SMELL | **Severity:** MEDIUM | **Confidence:** medium",
-					"",
-					"**File-level issue**",
-					"",
-					"Location: `src/example.ts`",
-				].join("\n"),
-			},
-		]);
-	});
-
-	it("updates active finding comments and deletes stale ones", async () => {
-		const requestCalls: Array<{
-			pathname: string;
-			method: string | undefined;
-			body: unknown;
-		}> = [];
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			logger,
-			async (pathname, init) => {
-				requestCalls.push({
-					pathname,
-					method: init?.method,
-					body:
-						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-				});
-				return "";
-			},
-			async () =>
-				({
-					values: [
-						{
-							action: "COMMENTED",
-							createdDate: 100,
-							comment: {
-								id: 10,
-								text: [
-									"<!-- copilot-pr-review:finding:finding-keep -->",
-									"<!-- copilot-pr-review:finding-thread:thread-keep -->",
-									"old finding",
-								].join("\n"),
-								version: 2,
-								createdDate: 100,
-								updatedDate: 100,
-							},
-						},
-						{
-							action: "COMMENTED",
-							createdDate: 90,
-							comment: {
-								id: 9,
-								text: [
-									"<!-- copilot-pr-review:finding:finding-stale -->",
-									"<!-- copilot-pr-review:finding-thread:thread-stale -->",
-									"stale finding",
-								].join("\n"),
-								version: 1,
-								createdDate: 90,
-								updatedDate: 90,
-							},
-						},
-					],
-					isLastPage: true,
-				}) as never,
-		);
-
-		await commentsApi.reconcilePullRequestFindingComments(
-			"copilot-pr-review",
-			[
-				{
-					externalId: "finding-keep",
-					threadKey: "thread-keep",
-					path: "src/example.ts",
-					line: 10,
-					severity: "HIGH",
-					type: "BUG",
-					confidence: "high",
-					title: "Updated title",
-					details: "Updated details.",
-				},
-			],
-			{ revision: "review-rev-123", reviewedCommit: "head-123" },
-		);
-
-		assert.deepEqual(requestCalls, [
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
-				method: "PUT",
-				body: {
-					version: 2,
-					text: [
-						"<!-- copilot-pr-review:finding:finding-keep -->",
-						"<!-- copilot-pr-review:finding-thread:thread-keep -->",
-						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
-						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
-						"**Type:** BUG | **Severity:** HIGH | **Confidence:** high",
-						"",
-						"**Updated title**",
-						"",
-						"Location: `src/example.ts:10`",
-						"",
-						"Updated details.",
-					].join("\n"),
-				},
-			},
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/9?version=1",
-				method: "DELETE",
-				body: undefined,
-			},
-		]);
-	});
-
-	it("recreates active finding comments when update is blocked by a resolved thread", async () => {
-		const requestCalls: Array<{
-			pathname: string;
-			method: string | undefined;
-			body: unknown;
-		}> = [];
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			logger,
-			async (pathname, init) => {
-				requestCalls.push({
-					pathname,
-					method: init?.method,
-					body:
-						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-				});
-
-				if (init?.method === "PUT") {
-					throw new BitbucketApiError(
-						400,
-						"",
-						"PUT",
-						"https://bitbucket.example.com/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
-						JSON.stringify({
-							errors: [
-								{
-									message: "Changes cannot be made to resolved thread.",
-									exceptionName:
-										"com.atlassian.bitbucket.validation.ArgumentValidationException",
-								},
-							],
-						}),
-					);
-				}
-
-				return "";
-			},
-			async () =>
-				({
-					values: [
-						{
-							action: "COMMENTED",
-							createdDate: 100,
-							comment: {
-								id: 10,
-								text: [
-									"<!-- copilot-pr-review:finding:finding-keep -->",
-									"<!-- copilot-pr-review:finding-thread:thread-keep -->",
-									"old finding",
-								].join("\n"),
-								version: 2,
-								createdDate: 100,
-								updatedDate: 100,
-							},
-						},
-					],
-					isLastPage: true,
-				}) as never,
-		);
-
-		await commentsApi.reconcilePullRequestFindingComments(
-			"copilot-pr-review",
-			[
-				{
-					externalId: "finding-keep",
-					threadKey: "thread-keep",
-					path: "src/example.ts",
-					line: 10,
-					severity: "HIGH",
-					type: "BUG",
-					confidence: "high",
-					title: "Updated title",
-					details: "Updated details.",
-				},
-			],
-			{ revision: "review-rev-123", reviewedCommit: "head-123" },
-		);
-
-		assert.deepEqual(requestCalls, [
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
-				method: "PUT",
-				body: {
-					version: 2,
-					text: [
-						"<!-- copilot-pr-review:finding:finding-keep -->",
-						"<!-- copilot-pr-review:finding-thread:thread-keep -->",
-						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
-						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
-						"**Type:** BUG | **Severity:** HIGH | **Confidence:** high",
-						"",
-						"**Updated title**",
-						"",
-						"Location: `src/example.ts:10`",
-						"",
-						"Updated details.",
-					].join("\n"),
-				},
-			},
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments",
-				method: "POST",
-				body: {
-					text: [
-						"<!-- copilot-pr-review:finding:finding-keep -->",
-						"<!-- copilot-pr-review:finding-thread:thread-keep -->",
-						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
-						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
-						"**Type:** BUG | **Severity:** HIGH | **Confidence:** high",
-						"",
-						"**Updated title**",
-						"",
-						"Location: `src/example.ts:10`",
-						"",
-						"Updated details.",
-					].join("\n"),
-					anchor: {
-						diffType: "EFFECTIVE",
-						path: "src/example.ts",
-						line: 10,
-						lineType: "ADDED",
-						fileType: "TO",
-					},
-				},
-			},
-		]);
-	});
-
-	it("archives stale finding comments when delete is blocked by replies", async () => {
-		const requestCalls: Array<{
-			pathname: string;
-			method: string | undefined;
-			body: unknown;
-		}> = [];
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			logger,
-			async (pathname, init) => {
-				requestCalls.push({
-					pathname,
-					method: init?.method,
-					body:
-						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-				});
-
-				if (init?.method === "DELETE") {
-					throw new BitbucketApiError(
-						409,
-						"Conflict",
-						"DELETE",
-						"https://bitbucket.example.com/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
-						JSON.stringify({
-							errors: [
-								{
-									message:
-										"This comment has replies which must be deleted first.",
-									exceptionName:
-										"com.atlassian.bitbucket.comment.CommentDeletionException",
-								},
-							],
-						}),
-					);
-				}
-
-				return "";
-			},
-			async () =>
-				({
-					values: [
-						{
-							action: "COMMENTED",
-							comment: {
-								id: 10,
-								text: "<!-- copilot-pr-review:finding:finding-stale -->\nstale finding",
-								version: 2,
-							},
-						},
-					],
-					isLastPage: true,
-				}) as never,
-		);
-
-		await commentsApi.reconcilePullRequestFindingComments(
-			"copilot-pr-review",
+		await api.reconcileKeyedComments(
 			[],
-			{ revision: "review-rev-123", reviewedCommit: "head-123" },
-		);
-
-		assert.deepEqual(requestCalls, [
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
-				method: "DELETE",
-				body: undefined,
-			},
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
-				method: "PUT",
-				body: {
-					version: 2,
-					text: "_Superseded by a newer automated PR review finding. This thread is preserved because Bitbucket will not delete it._",
-				},
-			},
-		]);
-	});
-
-	it("creates a new thread when a legacy finding has a different externalId", async () => {
-		const requestCalls: Array<{
-			pathname: string;
-			method: string | undefined;
-			body: unknown;
-		}> = [];
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			logger,
-			async (pathname, init) => {
-				requestCalls.push({
-					pathname,
-					method: init?.method,
-					body:
-						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-				});
-				return "";
-			},
-			async () =>
-				({
-					values: [
-						{
-							action: "COMMENTED",
-							createdDate: 100,
-							comment: {
-								id: 10,
-								text: "<!-- copilot-pr-review:finding:finding-old -->\nlegacy finding",
-								version: 2,
-								createdDate: 100,
-								updatedDate: 100,
-							},
-						},
-					],
-					isLastPage: true,
-				}) as never,
-		);
-
-		await commentsApi.reconcilePullRequestFindingComments(
-			"copilot-pr-review",
 			[
-				{
-					externalId: "finding-new",
-					threadKey: "thread-keep",
-					path: "src/example.ts",
-					line: 10,
-					severity: "HIGH",
-					type: "BUG",
-					confidence: "high",
-					title: "Updated title",
-					details: "Updated details.",
-				},
+				{ keys: ["a"], text: "key:a", anchor: { path: "src/a.ts", line: 7 } },
+				{ keys: ["b"], text: "key:b" },
 			],
-			{
-				revision: "review-rev-123",
-				reviewedCommit: "head-123",
-			},
+			{ keyOf, retirement },
 		);
 
-		assert.deepEqual(requestCalls, [
+		assert.deepEqual(requests, [
 			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments",
 				method: "POST",
-				body: {
-					text: [
-						"<!-- copilot-pr-review:finding:finding-new -->",
-						"<!-- copilot-pr-review:finding-thread:thread-keep -->",
-						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
-						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
-						"**Type:** BUG | **Severity:** HIGH | **Confidence:** high",
-						"",
-						"**Updated title**",
-						"",
-						"Location: `src/example.ts:10`",
-						"",
-						"Updated details.",
-					].join("\n"),
+				pathname: "",
+				json: {
+					text: "key:a",
 					anchor: {
 						diffType: "EFFECTIVE",
-						path: "src/example.ts",
-						line: 10,
+						path: "src/a.ts",
+						line: 7,
 						lineType: "ADDED",
 						fileType: "TO",
 					},
 				},
 			},
+			{ method: "POST", pathname: "", json: { text: "key:b" } },
+		]);
+	});
+
+	it("updates matching comments, retires duplicates and unmatched ones, and ignores untagged comments", async () => {
+		const { api, requests } = createApi();
+
+		await api.reconcileKeyedComments(
+			[
+				comment(3, "key:a newest", 4),
+				comment(2, "key:a duplicate", 1),
+				comment(1, "key:stale", 2),
+				comment(9, "human comment", 1),
+			],
+			[{ keys: ["a"], text: "key:a updated" }],
+			{ keyOf, retirement },
+		);
+
+		assert.deepEqual(requests, [
 			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10?version=2",
-				method: "DELETE",
-				body: undefined,
+				method: "PUT",
+				pathname: "/3",
+				json: { version: 4, text: "key:a updated" },
+			},
+			{ method: "DELETE", pathname: "/2?version=1" },
+			{ method: "DELETE", pathname: "/1?version=2" },
+		]);
+	});
+
+	it("falls back to a later key such as a legacy identifier", async () => {
+		const { api, requests } = createApi();
+
+		await api.reconcileKeyedComments(
+			[comment(5, "key:legacy", 1)],
+			[{ keys: ["thread", "legacy"], text: "key:thread" }],
+			{ keyOf, retirement },
+		);
+
+		assert.deepEqual(requests, [
+			{
+				method: "PUT",
+				pathname: "/5",
+				json: { version: 1, text: "key:thread" },
 			},
 		]);
 	});
 
-	it("updates a legacy finding thread in place by externalId when prior metadata is unavailable", async () => {
-		const requestCalls: Array<{
-			pathname: string;
-			method: string | undefined;
-			body: unknown;
-		}> = [];
-		const commentsApi = new PullRequestCommentsApi(
-			"PROJ",
-			"repo",
-			123,
-			logger,
-			async (pathname, init) => {
-				requestCalls.push({
-					pathname,
-					method: init?.method,
-					body:
-						typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-				});
-				return "";
+	it("creates a replacement when the matching comment is in a resolved thread", async () => {
+		const { api, requests } = createApi({
+			respond: (request) => {
+				if (request.method === "PUT") {
+					throw bitbucketError(
+						400,
+						"Changes cannot be made to resolved thread",
+					);
+				}
 			},
-			async () =>
-				({
-					values: [
-						{
-							action: "COMMENTED",
-							createdDate: 100,
-							comment: {
-								id: 10,
-								text: "<!-- copilot-pr-review:finding:finding-old -->\nlegacy finding",
-								version: 2,
-								createdDate: 100,
-								updatedDate: 100,
-							},
-						},
-					],
-					isLastPage: true,
-				}) as never,
-		);
+		});
 
-		await commentsApi.reconcilePullRequestFindingComments(
-			"copilot-pr-review",
+		await api.reconcileKeyedComments(
+			[comment(3, "key:a", 4)],
 			[
 				{
-					externalId: "finding-old",
-					threadKey: "thread-keep",
-					path: "src/example.ts",
-					line: 10,
-					severity: "HIGH",
-					type: "BUG",
-					confidence: "high",
-					title: "Updated title",
-					details: "Updated details.",
+					keys: ["a"],
+					text: "key:a updated",
+					anchor: { path: "src/a.ts", line: 1 },
 				},
 			],
-			{
-				revision: "review-rev-123",
-				reviewedCommit: "head-123",
-			},
+			{ keyOf, retirement },
 		);
 
-		assert.deepEqual(requestCalls, [
-			{
-				pathname:
-					"/rest/api/latest/projects/PROJ/repos/repo/pull-requests/123/comments/10",
-				method: "PUT",
-				body: {
-					version: 2,
-					text: [
-						"<!-- copilot-pr-review:finding:finding-old -->",
-						"<!-- copilot-pr-review:finding-thread:thread-keep -->",
-						"<!-- copilot-pr-review:finding-revision:review-rev-123 -->",
-						"<!-- copilot-pr-review:finding-reviewed-commit:head-123 -->",
-						"**Type:** BUG | **Severity:** HIGH | **Confidence:** high",
-						"",
-						"**Updated title**",
-						"",
-						"Location: `src/example.ts:10`",
-						"",
-						"Updated details.",
-					].join("\n"),
-				},
+		assert.deepEqual(
+			requests.map(({ method, pathname }) => `${method} ${pathname}`),
+			["PUT /3", "POST "],
+		);
+	});
+
+	it("propagates update failures other than resolved threads", async () => {
+		const { api } = createApi({
+			respond: (request) => {
+				if (request.method === "PUT") {
+					throw bitbucketError(409, "stale version");
+				}
 			},
-		]);
+		});
+
+		await assert.rejects(
+			api.reconcileKeyedComments(
+				[comment(3, "key:a", 4)],
+				[{ keys: ["a"], text: "key:a updated" }],
+				{ keyOf, retirement },
+			),
+			/stale version/,
+		);
 	});
 });

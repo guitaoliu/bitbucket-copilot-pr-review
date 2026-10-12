@@ -62,23 +62,19 @@ export type ReviewPublicationStatus =
 	| "partial"
 	| "failed";
 
-type ReviewPublicationFailureStage =
-	| "review"
+export type PublicationStage =
 	| "code_insights"
 	| "finding_comments"
 	| "pull_request_comment";
 
 export interface ReviewPublicationError {
-	stage: ReviewPublicationFailureStage;
+	stage: "review" | PublicationStage;
 	message: string;
 }
 
-export interface ReviewPublication {
+export interface PublicationResult {
 	status: ReviewPublicationStatus;
-	attempted: boolean;
-	codeInsightsPublished: boolean;
-	findingCommentsUpdated: boolean;
-	pullRequestCommentUpdated: boolean;
+	completedStages: PublicationStage[];
 	error?: ReviewPublicationError;
 }
 
@@ -135,5 +131,4 @@ export interface ReviewOutcome {
 	gitTelemetry?: ReviewGitTelemetry;
 	toolTelemetry?: ReviewToolTelemetry;
 	copilotUsage?: ReviewCopilotUsage;
-	stale: boolean;
 }

@@ -45,7 +45,29 @@ describe("BitbucketTransport", () => {
 		);
 	});
 
-	it("merges caller headers into authenticated requests", async () => {
+	it("sends authenticated JSON requests with a JSON content type", async () => {
+		let recorded:
+			| { method: string; headers: Record<string, string>; body?: string }
+			| undefined;
+		const transport = new BitbucketTransport(baseConfig, {
+			sendRequest: async (_url, method, headers, body) => {
+				recorded = { method, headers, ...(body ? { body } : {}) };
+				return { statusCode: 200, statusMessage: "OK", body: "{}" };
+			},
+		});
+
+		await transport.request("/rest/api/latest/test", {
+			method: "POST",
+			json: { text: "hello" },
+		});
+
+		assert.equal(recorded?.method, "POST");
+		assert.equal(recorded?.body, '{"text":"hello"}');
+		assert.equal(recorded?.headers.authorization, "Bearer secret-token");
+		assert.equal(recorded?.headers["content-type"], "application/json");
+	});
+
+	it("omits the content type for requests without a body", async () => {
 		let recordedHeaders: Record<string, string> | undefined;
 		const transport = new BitbucketTransport(baseConfig, {
 			sendRequest: async (_url, _method, headers) => {
@@ -54,32 +76,9 @@ describe("BitbucketTransport", () => {
 			},
 		});
 
-		await transport.request("/rest/api/latest/test", {
-			headers: {
-				"X-Trace-Id": "trace-123",
-				Accept: "application/json",
-			},
-		});
+		await transport.requestJson("/rest/api/latest/test");
 
-		assert.equal(recordedHeaders?.authorization, "Bearer secret-token");
-		assert.equal(recordedHeaders?.accept, "application/json");
-		assert.equal(recordedHeaders?.["x-trace-id"], "trace-123");
-	});
-
-	it("stringifies non-string request bodies before sending", async () => {
-		let recordedBody: string | undefined;
-		const transport = new BitbucketTransport(baseConfig, {
-			sendRequest: async (_url, _method, _headers, body) => {
-				recordedBody = body;
-				return { statusCode: 200, statusMessage: "OK", body: "{}" };
-			},
-		});
-
-		await transport.request("/rest/api/latest/test", {
-			method: "POST",
-			body: { toString: () => '{"text":"hello"}' } as BodyInit,
-		});
-
-		assert.equal(recordedBody, '{"text":"hello"}');
+		assert.equal(recordedHeaders?.["content-type"], undefined);
+		assert.equal(recordedHeaders?.accept, "application/json;charset=UTF-8");
 	});
 });
