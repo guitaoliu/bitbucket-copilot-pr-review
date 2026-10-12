@@ -1,10 +1,10 @@
-import { matchesGlob } from "node:path";
 import { z } from "zod";
 
+import { filterFilesByPathPattern } from "../../policy/path-access.ts";
 import type { ReviewToolContext } from "./context.ts";
 import { defineReviewTool, rejectToolCall } from "./define.ts";
 
-function resolveReviewedPathReference(
+function resolvePathReference(
 	pathExpression: string,
 	{ context, reviewedFiles }: ReviewToolContext,
 ): string | undefined {
@@ -13,14 +13,10 @@ function resolveReviewedPathReference(
 		return file.path;
 	}
 
-	const matchesReviewedFile = context.reviewableFiles.some(
-		(candidate) =>
-			matchesGlob(candidate.path, pathExpression) ||
-			(candidate.oldPath !== undefined &&
-				reviewedFiles.get(candidate.oldPath) === candidate &&
-				matchesGlob(candidate.oldPath, pathExpression)),
-	);
-	return matchesReviewedFile ? pathExpression : undefined;
+	return filterFilesByPathPattern(context.reviewableFiles, pathExpression)
+		.length > 0
+		? pathExpression
+		: undefined;
 }
 
 export function createRecordChangeAreaSummaryTool(
@@ -43,7 +39,7 @@ export function createRecordChangeAreaSummaryTool(
 				.array(z.string().min(1))
 				.min(1)
 				.describe(
-					"Exact reviewed file paths or path globs that belong to this area. Patterns are validated only within the reviewed scope.",
+					"Reviewed file paths, directory prefixes, or globs that belong to this area. Each entry must match at least one reviewed file.",
 				),
 			summary: z
 				.string()
@@ -56,10 +52,7 @@ export function createRecordChangeAreaSummaryTool(
 		handler: async ({ title, paths, summary }) => {
 			const references = new Set<string>();
 			for (const pathExpression of paths) {
-				const reference = resolveReviewedPathReference(
-					pathExpression,
-					toolContext,
-				);
+				const reference = resolvePathReference(pathExpression, toolContext);
 				if (reference === undefined) {
 					return rejectToolCall(
 						`The path ${pathExpression} does not match any reviewed file.`,

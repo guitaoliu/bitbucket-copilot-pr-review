@@ -238,76 +238,84 @@ describe("buildPullRequestComment", () => {
 		);
 	});
 
-	it("renders explicit change area summaries", () => {
-		const baseContext = createContext(
-			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
-		);
-		const context: ReviewContext = {
-			...baseContext,
-			reviewableFiles: [
-				...baseContext.reviewableFiles,
-				{
-					path: "pages/[id].tsx",
-					status: "modified",
-					additions: 1,
-					deletions: 0,
-					isBinary: false,
-				},
-			],
+	function contextWithFiles(paths: string[]): ReviewContext {
+		return {
+			...createContext(
+				"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
+			),
+			reviewableFiles: paths.map((path) => ({
+				path,
+				status: "modified",
+				additions: 1,
+				deletions: 0,
+				isBinary: false,
+			})),
 		};
+	}
+
+	function renderChangeArea(context: ReviewContext, paths: string[]): string {
 		const comment = buildPullRequestComment(config, context, {
 			...createOutcome(),
-			changeAreas: [
-				{
-					title: "Authentication flow",
-					paths: ["src/service.ts", "src/new-file.ts"],
-					summary: "Threads stricter validation through the request path.",
-				},
-				{
-					title: "Rename cleanup",
-					paths: ["src/new-name.ts"],
-					summary: "Moves the renamed module wiring to the new path.",
-				},
-				{
-					title: "Dynamic route",
-					paths: ["pages/[id].tsx"],
-					summary: "Updates the dynamic route loader.",
-				},
-				{
-					title: "Package updates",
-					paths: ["packages/*/src/**/*.ts"],
-					summary: "Applies the same package-level wiring update.",
-				},
-				{
-					title: "Unsafe glob",
-					paths: ["{src/*.ts,`@here`}"],
-					summary: "Keeps malicious glob inert.",
-				},
-			],
+			changeAreas: [{ title: "Area *one*", paths, summary: "Does a thing." }],
 		});
+		const line = comment
+			.split("\n")
+			.find((entry) => entry.startsWith("- **Area"));
+		assert.ok(line, comment);
+		return line;
+	}
 
-		assert.match(comment, /### Change Areas/);
-		assert.match(
-			comment,
-			/- Authentication flow \(`src\/{service\.ts,new-file\.ts}`\): Threads stricter validation through the request path\./,
+	it("labels a change area by its shared directory and file count", () => {
+		const context = contextWithFiles([
+			"web/src/features/account/settings/panels/ProfileTab.tsx",
+			"web/src/features/account/settings/panels/components/Picker.tsx",
+			"lib/service/Api.java",
+			"lib/service/ApiTest.java",
+		]);
+
+		assert.equal(
+			renderChangeArea(context, [
+				"web/src/features/account/settings/panels/ProfileTab.tsx",
+				"web/src/features/account/settings/panels/components/Picker.tsx",
+			]),
+			"- **Area \\*one\\*** (`web/…/panels/`; 2 files): Does a thing.",
 		);
-		assert.match(
-			comment,
-			/- Rename cleanup \(\[src\/new-name\.ts\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#src%2Fnew-name\.ts\)\): Moves the renamed module wiring to the new path\./,
+		assert.equal(
+			renderChangeArea(context, ["lib/service/*.java"]),
+			"- **Area \\*one\\*** (`lib/service/`; 2 files): Does a thing.",
 		);
-		assert.match(
-			comment,
-			/- Dynamic route \(\[pages\/\\\[id\\\]\.tsx\]\(https:\/\/bitbucket\.example\.com\/projects\/PROJ\/repos\/repo\/pull-requests\/123\/diff#pages%2F%5Bid%5D\.tsx\)\): Updates the dynamic route loader\./,
+	});
+
+	it("labels a change area spanning modules by its top-level directories", () => {
+		const context = contextWithFiles([
+			"core/src/main/java/models/Entity.java",
+			"users/src/main/java/service/Service.java",
+			"users/src/test/java/service/ServiceTest.java",
+			"ui/a.ts",
+			"README.md",
+		]);
+
+		assert.equal(
+			renderChangeArea(context, [
+				"core/src/main/java/models/Entity.java",
+				"users/src/main/java/service/Service.java",
+				"users/src/test/java/service/ServiceTest.java",
+			]),
+			"- **Area \\*one\\*** (`core/`, `users/`; 3 files): Does a thing.",
 		);
-		assert.match(
-			comment,
-			/- Package updates \(`packages\/\*\/src\/\*\*\/\*\.ts`\): Applies the same package-level wiring update\./,
+		assert.equal(
+			renderChangeArea(context, ["."]),
+			"- **Area \\*one\\*** (`core/`, `users/`, `ui/`, …; 5 files): Does a thing.",
 		);
-		assert.match(
-			comment,
-			/- Unsafe glob \(`` \{src\/\*\.ts,`@here`\} ``\): Keeps malicious glob inert\./,
+	});
+
+	it("links a single-file change area to its diff by file name", () => {
+		const context = contextWithFiles(["pages/[id].tsx", "src/other.ts"]);
+
+		assert.equal(
+			renderChangeArea(context, ["pages/[id].tsx"]),
+			"- **Area \\*one\\*** ([\\[id\\].tsx](https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123/diff#pages%2F%5Bid%5D.tsx)): Does a thing.",
 		);
-		assert.doesNotMatch(comment, /### File Changes/);
 	});
 
 	it("adds taxonomy detail to the insight report summary", () => {

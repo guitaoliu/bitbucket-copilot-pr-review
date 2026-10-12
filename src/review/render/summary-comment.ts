@@ -1,5 +1,6 @@
 import type { CommentRetirement } from "../../bitbucket/types.ts";
 import type { ReviewerConfig } from "../../config/types.ts";
+import { filterFilesByPathPattern } from "../../policy/path-access.ts";
 import type { ReviewFinding } from "../../policy/types.ts";
 import {
 	BITBUCKET_PR_COMMENT_MAX_CHARS,
@@ -41,42 +42,80 @@ function buildFindingHeaderLines(findings: ReviewFinding[]): string[] {
 	];
 }
 
-function getDirectoryName(path: string): string {
-	const lastSeparatorIndex = path.lastIndexOf("/");
-	return lastSeparatorIndex >= 0 ? path.slice(0, lastSeparatorIndex) : "";
+const MAX_SCOPE_ROOTS = 3;
+const MAX_SCOPE_DIRECTORY_SEGMENTS = 3;
+
+function parentDirectorySegments(filePath: string): string[] {
+	return filePath.split("/").slice(0, -1);
 }
 
-function formatGroupedPathLabel(paths: string[]): string {
-	const firstDirectory = getDirectoryName(paths[0] ?? "");
-	if (paths.some((path) => getDirectoryName(path) !== firstDirectory)) {
-		return `{${paths.join(",")}}`;
+function commonPrefix(segmentLists: string[][]): string[] {
+	const [first = [], ...rest] = segmentLists;
+	let length = first.length;
+	for (const segments of rest) {
+		let shared = 0;
+		while (shared < length && segments[shared] === first[shared]) {
+			shared += 1;
+		}
+		length = shared;
 	}
-
-	const names = paths
-		.map((path) => path.slice(path.lastIndexOf("/") + 1))
-		.join(",");
-	return firstDirectory ? `${firstDirectory}/{${names}}` : `{${names}}`;
+	return first.slice(0, length);
 }
 
-function formatChangeAreaPathReference(
+function abbreviateDirectory(segments: string[]): string {
+	return segments.length > MAX_SCOPE_DIRECTORY_SEGMENTS
+		? `${segments[0]}/…/${segments.at(-1)}/`
+		: `${segments.join("/")}/`;
+}
+
+function formatChangeAreaScope(
 	area: ChangeAreaSummary,
 	context: ReviewContext,
 ): string {
-	if (area.paths.length !== 1) {
+	const files = [
+		...new Set(
+			area.paths.flatMap((entry) =>
+				filterFilesByPathPattern(context.reviewableFiles, entry).map(
+					(file) => file.path,
+				),
+			),
+		),
+	];
+	const [onlyFile] = files;
+	if (onlyFile === undefined) {
+		return formatCommentReference(area.paths.join(", "), undefined);
+	}
+	if (files.length === 1) {
 		return formatCommentReference(
-			formatGroupedPathLabel(area.paths),
-			undefined,
+			onlyFile.slice(onlyFile.lastIndexOf("/") + 1),
+			buildPullRequestDiffLink(context.pr.link, onlyFile),
 		);
 	}
 
-	const path = area.paths[0] ?? "";
-	const reviewedFile = context.reviewableFiles.some(
-		(file) => file.path === path,
-	);
-	return formatCommentReference(
-		path,
-		reviewedFile ? buildPullRequestDiffLink(context.pr.link, path) : undefined,
-	);
+	const common = commonPrefix(files.map(parentDirectorySegments));
+	const roots =
+		common.length > 0
+			? [abbreviateDirectory(common)]
+			: [
+					...new Set(
+						files.map((file) => {
+							const [root = file, ...rest] = file.split("/");
+							return rest.length > 0 ? `${root}/` : root;
+						}),
+					),
+				];
+	const visibleRoots = roots
+		.slice(0, MAX_SCOPE_ROOTS)
+		.map((root) => formatCommentReference(root, undefined));
+	const more = roots.length > MAX_SCOPE_ROOTS ? ", …" : "";
+	return `${visibleRoots.join(", ")}${more}; ${files.length} ${pluralize(files.length, "file")}`;
+}
+
+function formatChangeAreaLine(
+	area: ChangeAreaSummary,
+	context: ReviewContext,
+): string {
+	return `- **${area.title.replace(/\*/g, "\\*")}** (${formatChangeAreaScope(area, context)}): ${area.summary}`;
 }
 
 function joinSections(sections: string[]): string {
@@ -168,10 +207,7 @@ export function buildPullRequestComment(
 	const changeAreasSection = fitCommentSection({
 		baseSections: [...sectionsWithFindings, reviewScope],
 		heading: "### Change Areas",
-		lines: changeAreas.map(
-			(area) =>
-				`- ${area.title} (${formatChangeAreaPathReference(area, context)}): ${area.summary}`,
-		),
+		lines: changeAreas.map((area) => formatChangeAreaLine(area, context)),
 		omittedLabel: pluralize(changeAreas.length, "change area"),
 	});
 

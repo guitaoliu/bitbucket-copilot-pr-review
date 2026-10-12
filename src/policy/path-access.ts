@@ -249,6 +249,17 @@ export function matchesRepoPathPattern(
 	);
 }
 
+export function filterFilesByPathPattern<
+	T extends { path: string; oldPath?: string },
+>(files: readonly T[], pattern: string): T[] {
+	return files.filter(
+		(file) =>
+			matchesRepoPathPattern(file.path, pattern) ||
+			(file.oldPath !== undefined &&
+				matchesRepoPathPattern(file.oldPath, pattern)),
+	);
+}
+
 function getRejectionReason(normalizedPath: string): string | undefined {
 	const segments = normalizedPath.split("/");
 	const filename = segments.at(-1) ?? normalizedPath;
