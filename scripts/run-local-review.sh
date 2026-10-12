@@ -61,7 +61,7 @@ REVIEWER_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 [[ -x "$REVIEWER_ROOT/node_modules/.bin/tsdown" ]] || die "Run pnpm install in $REVIEWER_ROOT first"
 
 TARGET_REPO_INPUT="$1"
-PR_URL_RAW="$2"
+PR_URL="$2"
 
 TARGET_REPO_ROOT="$(cd -- "$TARGET_REPO_INPUT" && pwd -P)" || die "Repository path does not exist: $TARGET_REPO_INPUT"
 
@@ -69,14 +69,6 @@ git -C "$TARGET_REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "Not a git
 
 if [[ -z "${BITBUCKET_TOKEN:-}" && ( -z "${BITBUCKET_USERNAME:-}" || -z "${BITBUCKET_PASSWORD:-}" ) ]]; then
   die "Set BITBUCKET_TOKEN or BITBUCKET_USERNAME and BITBUCKET_PASSWORD before running this script"
-fi
-
-PR_URL="${PR_URL_RAW%%\?*}"
-PR_URL="${PR_URL%%#*}"
-PR_URL="${PR_URL%/}"
-
-if [[ ! "$PR_URL" =~ ^https?://.+/projects/[^/]+/repos/[^/]+/pull-requests/[0-9]+$ ]]; then
-  die "Bitbucket PR URL must look like https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123"
 fi
 
 export REPO_ROOT="$TARGET_REPO_ROOT"
