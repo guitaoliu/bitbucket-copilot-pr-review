@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import packageJson from "../../package.json" with { type: "json" };
+import { buildFindingThreadKey } from "../policy/finding-identity.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
 import {
 	baseReviewerConfig as baseConfig,
 	createPullRequest,
 } from "../test-support/review-fixtures.ts";
-import { buildFindingThreadKey } from "./finding-identity.ts";
 import { parseSummaryCommentRevision } from "./markers.ts";
 import {
 	buildReviewArtifacts,

@@ -2,8 +2,8 @@ import type {
 	CommentRetirement,
 	PullRequestCommentDraft,
 } from "../../bitbucket/types.ts";
+import type { ReviewFinding } from "../../policy/types.ts";
 import { findingCommentKeys, formatFindingThreadMarker } from "../markers.ts";
-import type { ReviewFinding } from "../types.ts";
 import { formatFindingBadge, formatFindingLocation } from "./markdown.ts";
 
 export const FINDING_COMMENT_RETIREMENT: CommentRetirement = {

@@ -10,6 +10,7 @@ import {
 	createReviewedFileLookup,
 	validateFindingLocation,
 } from "../policy/findings.ts";
+import type { FindingDraft } from "../policy/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import {
 	baseReviewerConfig,
@@ -17,7 +18,6 @@ import {
 } from "../test-support/review-fixtures.ts";
 import { buildReviewContext } from "./context.ts";
 import { buildReviewRevision } from "./revision.ts";
-import type { FindingDraft } from "./types.ts";
 
 const logger: Logger = {
 	debug() {},

@@ -1,5 +1,5 @@
 import type { PullRequestComment } from "../bitbucket/types.ts";
-import type { ReviewFinding } from "./types.ts";
+import type { ReviewFinding } from "../policy/types.ts";
 
 function escapeRegexLiteral(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

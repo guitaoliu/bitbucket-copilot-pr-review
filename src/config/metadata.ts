@@ -1,7 +1,7 @@
+import { CONFIDENCE_VALUES } from "../policy/types.ts";
 import { LOG_LEVEL_VALUES } from "../shared/types.ts";
 import {
 	BITBUCKET_AUTH_TYPE_VALUES,
-	CONFIDENCE_VALUES,
 	REASONING_EFFORT_VALUES,
 	REPORT_COMMENT_STRATEGY_VALUES,
 } from "./types.ts";

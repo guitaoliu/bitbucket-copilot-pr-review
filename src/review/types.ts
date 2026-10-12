@@ -1,16 +1,11 @@
 import type { CopilotSession } from "@github/copilot-sdk";
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { DiffStats, ReviewableFile } from "../git/types.ts";
+import type { ReviewFinding } from "../policy/types.ts";
 
 type CopilotModelMetrics = Awaited<
 	ReturnType<CopilotSession["rpc"]["usage"]["getMetrics"]>
 >["modelMetrics"];
-
-type Severity = "LOW" | "MEDIUM" | "HIGH";
-
-export type AnnotationType = "BUG" | "CODE_SMELL" | "VULNERABILITY";
-
-export type Confidence = "low" | "medium" | "high";
 
 export interface ReviewToolTelemetryCounter {
 	requested: number;
@@ -90,22 +85,6 @@ export interface ReviewContext {
 	/** Unified diff with three context lines over the reviewable files only. */
 	readonly reviewDiff: string;
 	ciSummary?: string;
-}
-
-export interface FindingDraft {
-	path: string;
-	line: number;
-	severity: Severity;
-	type: AnnotationType;
-	confidence: Confidence;
-	title: string;
-	details: string;
-	category?: string;
-}
-
-export interface ReviewFinding extends FindingDraft {
-	externalId: string;
-	threadKey: string;
 }
 
 export interface ChangeAreaSummary {

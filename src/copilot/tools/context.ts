@@ -4,11 +4,8 @@ import {
 	createReviewedFileLookup,
 	type FindingRejectionReason,
 } from "../../policy/findings.ts";
-import type {
-	FindingDraft,
-	ReviewContext,
-	ReviewSummaryDrafts,
-} from "../../review/types.ts";
+import type { FindingDraft } from "../../policy/types.ts";
+import type { ReviewContext, ReviewSummaryDrafts } from "../../review/types.ts";
 import type { Logger } from "../../shared/logger.ts";
 import type { ReviewBundle } from "../review-bundle.ts";
 

@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { ReviewableFile } from "../git/types.ts";
-import type { FindingDraft } from "../review/types.ts";
 import {
 	createReviewedFileLookup,
 	finalizeFindings,
 	findingDraftSchema,
 	validateFindingLocation,
 } from "./findings.ts";
+import type { FindingDraft } from "./types.ts";
 
 const reviewedFile: ReviewableFile = {
 	path: "src/service.ts",

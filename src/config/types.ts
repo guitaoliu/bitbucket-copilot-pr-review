@@ -1,5 +1,5 @@
 import type { SessionConfig } from "@github/copilot-sdk";
-import type { Confidence } from "../review/types.ts";
+import type { Confidence } from "../policy/types.ts";
 import type { LogLevel } from "../shared/types.ts";
 import type { RepoReviewConfig } from "./repo-config.ts";
 
@@ -17,12 +17,6 @@ export const REPORT_COMMENT_STRATEGY_VALUES = ["update", "recreate"] as const;
 
 export type PullRequestCommentStrategy =
 	(typeof REPORT_COMMENT_STRATEGY_VALUES)[number];
-
-export const CONFIDENCE_VALUES = [
-	"low",
-	"medium",
-	"high",
-] as const satisfies readonly Confidence[];
 
 export const BITBUCKET_AUTH_TYPE_VALUES = ["basic", "bearer"] as const;
 

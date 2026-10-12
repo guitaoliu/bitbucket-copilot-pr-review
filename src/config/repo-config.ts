@@ -1,8 +1,8 @@
 import { z } from "zod";
 
+import { CONFIDENCE_VALUES } from "../policy/types.ts";
 import { CliUserError } from "./errors.ts";
 import {
-	CONFIDENCE_VALUES,
 	REASONING_EFFORT_VALUES,
 	REPORT_COMMENT_STRATEGY_VALUES,
 } from "./types.ts";

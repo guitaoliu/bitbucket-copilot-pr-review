@@ -2,15 +2,18 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 import type { ReviewableFile } from "../git/types.ts";
-import { buildFindingThreadKey } from "../review/finding-identity.ts";
-import type {
-	Confidence,
-	FindingDraft,
-	ReviewFinding,
-} from "../review/types.ts";
 import { omitUndefined } from "../shared/object.ts";
 import { sanitizeModelAuthoredText } from "../shared/text.ts";
+import { buildFindingThreadKey } from "./finding-identity.ts";
 import { formatLineRanges } from "./line-ranges.ts";
+import {
+	ANNOTATION_TYPE_VALUES,
+	CONFIDENCE_VALUES,
+	type Confidence,
+	type FindingDraft,
+	type ReviewFinding,
+	SEVERITY_VALUES,
+} from "./types.ts";
 
 const CONFIDENCE_RANK: Record<Confidence, number> = {
 	low: 1,
@@ -62,9 +65,9 @@ export const findingDraftSchema = z
 			.int()
 			.min(0)
 			.describe("Head-side line number. Use 0 only for a file-level issue."),
-		severity: z.enum(["LOW", "MEDIUM", "HIGH"]),
-		type: z.enum(["BUG", "CODE_SMELL", "VULNERABILITY"]),
-		confidence: z.enum(["low", "medium", "high"]),
+		severity: z.enum(SEVERITY_VALUES),
+		type: z.enum(ANNOTATION_TYPE_VALUES),
+		confidence: z.enum(CONFIDENCE_VALUES),
 		title: z.string().min(1).max(200).describe("A short issue title."),
 		details: z
 			.string()

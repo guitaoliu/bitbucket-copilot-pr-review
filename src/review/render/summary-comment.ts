@@ -1,5 +1,6 @@
 import type { CommentRetirement } from "../../bitbucket/types.ts";
 import type { ReviewerConfig } from "../../config/types.ts";
+import type { ReviewFinding } from "../../policy/types.ts";
 import {
 	BITBUCKET_PR_COMMENT_MAX_CHARS,
 	truncateText,
@@ -9,7 +10,6 @@ import { buildDefaultPullRequestSummary } from "../summary.ts";
 import type {
 	ChangeAreaSummary,
 	ReviewContext,
-	ReviewFinding,
 	ReviewOutcome,
 } from "../types.ts";
 import {

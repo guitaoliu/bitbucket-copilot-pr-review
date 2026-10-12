@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ReviewerConfig } from "../../config/types.ts";
+import { buildFindingThreadKey } from "../../policy/finding-identity.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../../shared/text.ts";
-import { buildFindingThreadKey } from "../finding-identity.ts";
 import { parseFindingCommentKey } from "../markers.ts";
 import type { ReviewContext, ReviewOutcome } from "../types.ts";
 import { buildFindingCommentDraft } from "./finding-comment.ts";

@@ -7,11 +7,11 @@ import { CopilotClient, ToolSet } from "@github/copilot-sdk";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import { finalizeFindings } from "../policy/findings.ts";
+import type { ReviewFinding } from "../policy/types.ts";
 import { finalizeReviewSummary } from "../review/summary.ts";
 import type {
 	ReviewContext,
 	ReviewCopilotUsage,
-	ReviewFinding,
 	ReviewOutcome,
 } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";

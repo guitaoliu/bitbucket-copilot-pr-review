@@ -1,4 +1,4 @@
-import type { ReviewFinding } from "../types.ts";
+import type { ReviewFinding } from "../../policy/types.ts";
 
 const FINDING_TYPE_ORDER = ["BUG", "VULNERABILITY", "CODE_SMELL"] as const;
 
