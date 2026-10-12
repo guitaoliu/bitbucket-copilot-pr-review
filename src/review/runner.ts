@@ -22,15 +22,13 @@ import {
 	getExistingPublicationStatus,
 	type ReviewRerunPlan,
 } from "./skip-policy.ts";
-import type { ReviewContext, ReviewOutcome } from "./types.ts";
-import { createDetachedReviewWorkspace } from "./workspace.ts";
+import type { ReviewContext } from "./types.ts";
 
 const DEFAULT_DEPENDENCIES: ReviewRunnerDependencies = {
 	createBitbucketClient,
 	prepareReviewContext,
 	buildReviewContext,
 	runCopilotReview,
-	createReviewWorkspace: createDetachedReviewWorkspace,
 	confirmRerun,
 };
 
@@ -131,35 +129,12 @@ export async function runReview(
 		});
 	}
 
-	const workspace = await dependencies.createReviewWorkspace({
-		repoRoot: effectiveConfig.repoRoot,
-		commit: context.baseCommit,
+	const review = await dependencies.runCopilotReview(
+		effectiveConfig,
+		context,
+		git,
 		logger,
-	});
-	logger.info(
-		`Using detached review workspace ${workspace.workspaceRoot} for trusted base ${context.baseCommit}`,
 	);
-	let review: ReviewOutcome;
-	try {
-		review = await dependencies.runCopilotReview(
-			{ ...effectiveConfig, repoRoot: workspace.workspaceRoot },
-			{ ...context, repoRoot: workspace.workspaceRoot },
-			git,
-			logger,
-		);
-	} finally {
-		try {
-			await workspace.cleanup();
-			logger.info(
-				`Removed detached review workspace ${workspace.workspaceRoot}`,
-			);
-		} catch (error) {
-			logger.warn(
-				`Failed to clean up detached review workspace ${workspace.workspaceRoot}`,
-				error,
-			);
-		}
-	}
 	const artifacts = buildReviewArtifacts(effectiveConfig, context, {
 		...review,
 		gitTelemetry: git.getTelemetrySnapshot(),

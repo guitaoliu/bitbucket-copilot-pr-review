@@ -1,4 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type {
@@ -43,9 +45,10 @@ type CopilotStage = "client startup" | "session creation" | "review request";
 export function buildCopilotClientOptions(
 	config: ReviewerConfig,
 	gitHubToken: string | undefined,
+	runtimeDirectory: string,
 ): CopilotClientOptions {
 	return omitUndefined({
-		workingDirectory: config.repoRoot,
+		workingDirectory: runtimeDirectory,
 		mode: "copilot-cli",
 		connection: RuntimeConnection.forStdio({
 			path: copilotCliPath,
@@ -56,7 +59,7 @@ export function buildCopilotClientOptions(
 				"--disable-builtin-mcps",
 				"--no-custom-instructions",
 				"--no-auto-update",
-				`--log-dir=${path.join(config.repoRoot, ".copilot-runtime-logs")}`,
+				`--log-dir=${path.join(runtimeDirectory, "logs")}`,
 			],
 		}),
 		logLevel: config.logLevel === "debug" ? "debug" : "error",
@@ -97,6 +100,31 @@ export function wrapCopilotStageError(
 	}
 
 	return new Error(`Copilot ${stage} failed: ${cause.message}`, { cause });
+}
+
+/**
+ * The runtime reads instruction files from its working directory, so it runs in
+ * an empty directory; repository content is reachable only through review tools.
+ */
+export async function withRuntimeDirectory<T>(
+	logger: Logger,
+	run: (runtimeDirectory: string) => Promise<T>,
+): Promise<T> {
+	const runtimeDirectory = await mkdtemp(
+		path.join(tmpdir(), "bitbucket-copilot-pr-review-runtime-"),
+	);
+	try {
+		return await run(runtimeDirectory);
+	} finally {
+		try {
+			await rm(runtimeDirectory, { recursive: true, force: true });
+		} catch (error) {
+			logger.warn(
+				`Failed to remove Copilot runtime directory ${runtimeDirectory}`,
+				error,
+			);
+		}
+	}
 }
 
 export async function withCopilotSession<T>(

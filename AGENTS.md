@@ -1,7 +1,7 @@
 # AGENTS.md
 
 This repository is a Node.js + TypeScript CLI for Bitbucket Data Center PR review automation.
-It computes a PR diff locally, asks GitHub Copilot to review only the changed scope, and publishes Code Insights reports, annotations, and one tagged PR comment.
+It computes a PR diff locally, asks GitHub Copilot to review only the changed scope, and publishes a Code Insights report, inline finding comments, and one tagged PR comment.
 
 This file is for agentic coding assistants working in this repository.
 

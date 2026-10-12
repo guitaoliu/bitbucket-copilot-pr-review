@@ -69,10 +69,6 @@ function createDependencies(
 			mergeBaseCommit: reviewContext.mergeBaseCommit,
 		}),
 		buildReviewContext: async () => reviewContext,
-		createReviewWorkspace: async ({ repoRoot }) => ({
-			workspaceRoot: repoRoot,
-			async cleanup() {},
-		}),
 		runCopilotReview: async () => createReviewOutcome(),
 		...overrides,
 	};
@@ -110,44 +106,7 @@ describe("runReview", () => {
 		assert.ok(infoMessages.includes("Completed review run"));
 	});
 
-	it("runs Copilot in a detached trusted base workspace while preserving head review context", async () => {
-		const context = createReviewContext();
-		let workspaceCommit: string | undefined;
-		let cleanupCalled = false;
-		let reviewConfig: ReviewerConfig | undefined;
-		let reviewContext: ReviewContext | undefined;
-
-		const result = await runReview(
-			baseConfig,
-			logger,
-			createDependencies({
-				context,
-				createReviewWorkspace: async ({ commit }) => {
-					workspaceCommit = commit;
-					return {
-						workspaceRoot: "/tmp/base-worktree",
-						async cleanup() {
-							cleanupCalled = true;
-						},
-					};
-				},
-				runCopilotReview: async (config, passedContext) => {
-					reviewConfig = config;
-					reviewContext = passedContext;
-					return createReviewOutcome();
-				},
-			}),
-		);
-
-		assert.equal(result.skipped, false);
-		assert.equal(workspaceCommit, context.baseCommit);
-		assert.equal(cleanupCalled, true);
-		assert.equal(reviewConfig?.repoRoot, "/tmp/base-worktree");
-		assert.equal(reviewContext?.repoRoot, "/tmp/base-worktree");
-		assert.equal(reviewContext?.headCommit, context.headCommit);
-	});
-
-	it("reports git telemetry from review-phase operations run against the detached workspace", async () => {
+	it("reports git telemetry from review-phase git operations", async () => {
 		const repoRoot = mkdtempSync(path.join(tmpdir(), "runner-git-telemetry-"));
 		try {
 			execFileSync("git", ["init", "--quiet"], { cwd: repoRoot });
@@ -180,10 +139,6 @@ describe("runReview", () => {
 						config: baseConfig,
 						git,
 						mergeBaseCommit: context.mergeBaseCommit,
-					}),
-					createReviewWorkspace: async () => ({
-						workspaceRoot: path.join(repoRoot, "missing-worktree"),
-						async cleanup() {},
 					}),
 					runCopilotReview: async (_config, _context, reviewGit) => {
 						await reviewGit.readTextFileAtCommit("HEAD", "README.md");

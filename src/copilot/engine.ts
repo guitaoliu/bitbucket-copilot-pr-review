@@ -30,6 +30,7 @@ import {
 	type CopilotReply,
 	type CopilotSessionLike,
 	withCopilotSession,
+	withRuntimeDirectory,
 	wrapCopilotStageError,
 } from "./runtime.ts";
 import {
@@ -71,6 +72,7 @@ const COMPLETION_PROMPT =
 function buildSessionConfig(
 	conversation: ReviewConversation,
 	git: GitRepository,
+	runtimeDirectory: string,
 ): SessionConfig {
 	const { config, context, logger, reviewBundle, toolState, tracker } =
 		conversation;
@@ -138,7 +140,7 @@ function buildSessionConfig(
 				return { errorHandling: "abort" as const };
 			},
 		},
-		workingDirectory: config.repoRoot,
+		workingDirectory: runtimeDirectory,
 		includeSubAgentStreamingEvents: true,
 		infiniteSessions: { enabled: false },
 	};
@@ -287,18 +289,31 @@ export async function runCopilotReview(
 	const gitHubToken = await (
 		dependencies.resolveGitHubToken ?? resolveCopilotGitHubToken
 	)(config, logger);
-	const clientOptions = buildCopilotClientOptions(config, gitHubToken);
-	const { assistantMessage, copilotUsage } = await withCopilotSession(
-		{
-			config,
-			logger,
-			client:
-				dependencies.createCopilotClient?.(clientOptions) ??
-				new CopilotClient(clientOptions),
-			sessionConfig: buildSessionConfig(conversation, git),
-			onCleanupError: () => tracker.recordError(),
+	const { assistantMessage, copilotUsage } = await withRuntimeDirectory(
+		logger,
+		(runtimeDirectory) => {
+			const clientOptions = buildCopilotClientOptions(
+				config,
+				gitHubToken,
+				runtimeDirectory,
+			);
+			return withCopilotSession(
+				{
+					config,
+					logger,
+					client:
+						dependencies.createCopilotClient?.(clientOptions) ??
+						new CopilotClient(clientOptions),
+					sessionConfig: buildSessionConfig(
+						conversation,
+						git,
+						runtimeDirectory,
+					),
+					onCleanupError: () => tracker.recordError(),
+				},
+				(session) => converse(session, conversation),
+			);
 		},
-		(session) => converse(session, conversation),
 	);
 	const toolTelemetry = tracker.snapshot({
 		sessionDurationMs: Date.now() - reviewStartedAt,

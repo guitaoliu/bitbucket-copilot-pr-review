@@ -84,6 +84,8 @@ export function buildSystemMessage(
 				action: "replace",
 				content: TOOL_EFFICIENCY_INSTRUCTIONS,
 			},
+			custom_instructions: { action: "remove" },
+			environment_context: { action: "remove" },
 		},
 		content: reviewPromptTemplate
 			.replace("{{minConfidence}}", config.review.minConfidence)

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { describe, it } from "node:test";
 import type {
@@ -391,10 +392,6 @@ describe("runCopilotReview", () => {
 		);
 		assert.equal(connection?.args?.includes("--sandbox"), false);
 		assert.ok(connection?.args?.includes("--no-custom-instructions"));
-		assert.ok(
-			connection?.args?.includes("--log-dir=/tmp/repo/.copilot-runtime-logs"),
-		);
-		assert.equal(clientOptions?.workingDirectory, config.repoRoot);
 		assert.equal(clientOptions?.mode, "copilot-cli");
 		assert.equal(outcome.findings.length, 0);
 		assert.equal(
@@ -471,6 +468,37 @@ describe("runCopilotReview", () => {
 			"custom:emit_finding",
 		]);
 		assert.deepEqual(sessionConfig.largeOutput, { enabled: false });
+	});
+
+	it("runs the Copilot runtime in an empty directory outside the repository and removes it afterwards", async () => {
+		let runtimeDirectoryEntries: string[] | undefined;
+		const copilot = createFakeCopilot([
+			async (runtime) => {
+				runtimeDirectoryEntries = readdirSync(
+					String(runtime.sessionConfig.workingDirectory),
+				);
+				await runtime.inspectAllPages();
+				await runtime.recordSummary();
+			},
+		]);
+
+		await runCopilotReview(
+			config,
+			createReviewContext(),
+			createGitStub(),
+			createLoggerSpy().logger,
+			copilot.dependencies,
+		);
+
+		const runtimeDirectory = copilot.createdOptions[0]?.workingDirectory;
+		assert.ok(runtimeDirectory);
+		assert.notEqual(runtimeDirectory, config.repoRoot);
+		assert.equal(
+			copilot.runtime.sessionConfig.workingDirectory,
+			runtimeDirectory,
+		);
+		assert.deepEqual(runtimeDirectoryEntries, []);
+		assert.equal(existsSync(runtimeDirectory), false);
 	});
 
 	it("passes a resolved GitHub token into the created Copilot client", async () => {

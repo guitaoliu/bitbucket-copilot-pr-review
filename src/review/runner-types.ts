@@ -11,7 +11,6 @@ import type { GitRepository } from "../git/repo.ts";
 import type { Logger } from "../shared/logger.ts";
 import type { PreparedReviewContext } from "./context.ts";
 import type { ReviewContext, ReviewOutcome } from "./types.ts";
-import type { DetachedReviewWorkspace } from "./workspace.ts";
 
 export interface ReviewBitbucketClient {
 	pullRequest: Pick<PullRequestApi, "getPullRequest">;
@@ -50,10 +49,5 @@ export interface ReviewRunnerDependencies {
 		git: GitRepository,
 		logger: Logger,
 	) => Promise<ReviewOutcome>;
-	createReviewWorkspace: (options: {
-		repoRoot: string;
-		commit: string;
-		logger: Logger;
-	}) => Promise<DetachedReviewWorkspace>;
 	confirmRerun: (options: { message: string }) => Promise<boolean>;
 }
