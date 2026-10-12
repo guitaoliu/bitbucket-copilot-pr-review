@@ -1,5 +1,6 @@
 import { BitbucketClient } from "../bitbucket/client.ts";
-import type { ReviewerConfig } from "../config/types.ts";
+import { resolveReviewerConfig } from "../config/load.ts";
+import type { OperatorConfig } from "../config/types.ts";
 import { runCopilotReview } from "../copilot/engine.ts";
 import { GitRepository } from "../git/repo.ts";
 import {
@@ -24,10 +25,11 @@ import {
 import { createDetachedReviewWorkspace } from "./workspace.ts";
 
 export async function runReview(
-	config: ReviewerConfig,
+	operatorConfig: OperatorConfig,
 	logger: Logger,
 	dependencies: ReviewRunnerDependencies = {},
 ): Promise<ReviewRunOutput> {
+	const config = resolveReviewerConfig(operatorConfig);
 	const bitbucket =
 		dependencies.createBitbucketClient?.(config.bitbucket, logger) ??
 		new BitbucketClient(config.bitbucket, logger);
@@ -60,7 +62,11 @@ export async function runReview(
 		return buildSkippedReviewOutput(config, initialPullRequest, skipReason);
 	}
 
-	const prepared = await prepareContext(config, logger, initialPullRequest);
+	const prepared = await prepareContext(
+		operatorConfig,
+		logger,
+		initialPullRequest,
+	);
 	const effectiveConfig = prepared.config;
 	const branchSkipReason = getPullRequestBranchSkipReason(
 		initialPullRequest,

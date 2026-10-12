@@ -1,11 +1,7 @@
 import process from "node:process";
 
 import { BitbucketApiError } from "./bitbucket/transport.ts";
-import {
-	getHelpText,
-	isReviewCliOptions,
-	parseCliArgs,
-} from "./config/args.ts";
+import { getHelpText, parseCliArgs } from "./config/args.ts";
 import { isCliUserError } from "./config/errors.ts";
 import { loadConfig } from "./config/load.ts";
 import type { ReviewRunOutput } from "./review/output-types.ts";
@@ -47,21 +43,15 @@ export function shouldExitNonZeroForReview(
 }
 
 async function main(): Promise<void> {
-	const argv = process.argv.slice(2);
-	const cliOptions = parseCliArgs(argv);
-	if (!("command" in cliOptions) && cliOptions.help) {
-		console.log(getHelpText(cliOptions.commandName));
+	const cliArgs = parseCliArgs(process.argv.slice(2));
+	if (cliArgs.command === "help") {
+		console.log(getHelpText(cliArgs.commandName));
 		return;
 	}
 
-	if (!isReviewCliOptions(cliOptions)) {
-		throw new Error("Unable to resolve CLI command.");
-	}
-
-	const config = loadConfig(argv, process.env, cliOptions);
+	const config = loadConfig(cliArgs, process.env);
 	const logger = createLogger(config.logLevel);
 	const output = await runReview(config, logger);
-	delete config.internal;
 	logger.json(`${JSON.stringify(output, null, 2)}\n`);
 	if (shouldExitNonZeroForReview(output)) {
 		process.exitCode = 1;

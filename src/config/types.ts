@@ -1,49 +1,41 @@
 import type { SessionConfig } from "@github/copilot-sdk";
 import type { Confidence } from "../review/types.ts";
 import type { LogLevel } from "../shared/types.ts";
+import type { RepoReviewConfig } from "./repo-config.ts";
 
-export type ReasoningEffort = NonNullable<SessionConfig["reasoningEffort"]>;
-export type PullRequestCommentStrategy = "update" | "recreate";
+export const REASONING_EFFORT_VALUES = [
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+] as const satisfies readonly NonNullable<SessionConfig["reasoningEffort"]>[];
 
-export interface ReviewerConfigRepoOverrides {
-	copilot: {
-		model?: string | undefined;
-		reasoningEffort?: ReasoningEffort | undefined;
-		timeoutMs?: number | undefined;
-	};
-	report: {
-		title?: string | undefined;
-		commentStrategy?: PullRequestCommentStrategy | undefined;
-	};
-	review: {
-		minConfidence?: Confidence | undefined;
-		ignorePaths?: string[] | undefined;
-		skipBranchPrefixes?: string[] | undefined;
-	};
-}
+type ReasoningEffort = (typeof REASONING_EFFORT_VALUES)[number];
 
-interface ReviewerConfigInternal {
-	envRepoOverrides: ReviewerConfigRepoOverrides;
-	trustedRepoConfig?:
-		| {
-				path: string;
-				commit: string;
-		  }
-		| undefined;
-}
+export const REPORT_COMMENT_STRATEGY_VALUES = ["update", "recreate"] as const;
 
-interface BearerAuthConfig {
-	type: "bearer";
-	token: string;
-}
+export type PullRequestCommentStrategy =
+	(typeof REPORT_COMMENT_STRATEGY_VALUES)[number];
 
-interface BasicAuthConfig {
-	type: "basic";
-	username: string;
-	password: string;
-}
+export const CONFIDENCE_VALUES = [
+	"low",
+	"medium",
+	"high",
+] as const satisfies readonly Confidence[];
 
-export type BitbucketAuthConfig = BearerAuthConfig | BasicAuthConfig;
+export const BITBUCKET_AUTH_TYPE_VALUES = ["basic", "bearer"] as const;
+
+export type BitbucketAuthConfig =
+	| {
+			type: "bearer";
+			token: string;
+	  }
+	| {
+			type: "basic";
+			username: string;
+			password: string;
+	  };
 
 export interface ReviewerConfig {
 	repoRoot: string;
@@ -83,7 +75,25 @@ export interface ReviewerConfig {
 		skipBranchPrefixes: string[];
 	};
 	ciSummaryPath?: string | undefined;
-	internal?: ReviewerConfigInternal | undefined;
 }
 
-export type { Confidence, LogLevel };
+type RepoOverridableGroup = "copilot" | "report" | "review";
+
+type RepoOverridableKey<TGroup extends RepoOverridableGroup> =
+	keyof NonNullable<RepoReviewConfig[TGroup]> & keyof ReviewerConfig[TGroup];
+
+type WithOptional<T, TKey extends keyof T> = Omit<T, TKey> & {
+	[K in TKey]?: T[K] | undefined;
+};
+
+/**
+ * Settings fixed by the operator through CLI flags and environment variables.
+ * Repo-overridable fields stay unset unless the operator set them, so the
+ * trusted repo config and built-in defaults can fill them in later.
+ */
+export type OperatorConfig = Omit<ReviewerConfig, RepoOverridableGroup> & {
+	[TGroup in RepoOverridableGroup]: WithOptional<
+		ReviewerConfig[TGroup],
+		RepoOverridableKey<TGroup>
+	>;
+};

@@ -3,7 +3,7 @@ import type {
 	PullRequestInfo,
 	RawBitbucketCodeInsightsReport,
 } from "../bitbucket/types.ts";
-import type { ReviewerConfig } from "../config/types.ts";
+import type { OperatorConfig, ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import type { Logger } from "../shared/logger.ts";
 import type { PreparedReviewContext } from "./context.ts";
@@ -52,7 +52,7 @@ export interface ReviewRunnerDependencies {
 		logger: Logger,
 	) => ReviewBitbucketClient;
 	prepareReviewContext?: (
-		config: ReviewerConfig,
+		operatorConfig: OperatorConfig,
 		logger: Logger,
 		pr: PullRequestInfo,
 	) => Promise<PreparedReviewContext>;

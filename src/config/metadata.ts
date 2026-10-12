@@ -1,104 +1,30 @@
-import type {
-	Confidence,
-	LogLevel,
-	PullRequestCommentStrategy,
-	ReasoningEffort,
+import { LOG_LEVEL_VALUES } from "../shared/types.ts";
+import {
+	BITBUCKET_AUTH_TYPE_VALUES,
+	CONFIDENCE_VALUES,
+	REASONING_EFFORT_VALUES,
+	REPORT_COMMENT_STRATEGY_VALUES,
 } from "./types.ts";
 
-export const CONFIDENCE_VALUES = [
-	"low",
-	"medium",
-	"high",
-] as const satisfies readonly Confidence[];
+export type EnvParser =
+	| { kind: "string" }
+	| { kind: "host" }
+	| { kind: "enum"; values: readonly [string, ...string[]] }
+	| { kind: "positiveInteger" }
+	| { kind: "boolean" }
+	| { kind: "stringArray" };
 
-export const LOG_LEVEL_VALUES = [
-	"debug",
-	"info",
-	"warn",
-	"error",
-] as const satisfies readonly LogLevel[];
+export type EnvDefaultValue = string | number | boolean | readonly string[];
 
-const BITBUCKET_AUTH_TYPE_VALUES = ["basic", "bearer"] as const;
-
-export const REASONING_EFFORT_VALUES = [
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-] as const satisfies readonly ReasoningEffort[];
-
-export const REPORT_COMMENT_STRATEGY_VALUES = [
-	"update",
-	"recreate",
-] as const satisfies readonly PullRequestCommentStrategy[];
-
-export interface ConfigFieldMetadata {
-	path: string;
-	env?: string;
+/**
+ * `default` is the built-in value used when neither the operator nor the
+ * trusted repo config sets the field; `docsDefault` documents variables
+ * without a static default.
+ */
+export type EnvVariableMetadata = {
+	parser: EnvParser;
 	description: string;
-	envParser?: ConfigFieldEnvParser;
-	repoOverride?: true;
-	docs?: {
-		order: number;
-		defaultValuePath?: readonly string[];
-		defaultText?: string;
-	};
-}
-
-export type ConfigFieldEnvParser =
-	| {
-			kind: "string";
-	  }
-	| {
-			kind: "host";
-	  }
-	| {
-			kind: "enum";
-			values: readonly [string, ...string[]];
-	  }
-	| {
-			kind: "positiveInteger";
-	  }
-	| {
-			kind: "boolean";
-	  }
-	| {
-			kind: "stringArray";
-	  };
-
-export type ConfigFieldEnvValue<TParser extends ConfigFieldEnvParser> =
-	TParser extends { kind: "string" }
-		? string | undefined
-		: TParser extends { kind: "host" }
-			? string | undefined
-			: TParser extends {
-						kind: "enum";
-						values: readonly [string, ...string[]];
-					}
-				? TParser["values"][number] | undefined
-				: TParser extends { kind: "positiveInteger" }
-					? number | undefined
-					: TParser extends { kind: "boolean" }
-						? boolean | undefined
-						: TParser extends { kind: "stringArray" }
-							? string[] | undefined
-							: never;
-
-export type EnvConfigFieldMetadata<
-	TParser extends ConfigFieldEnvParser = ConfigFieldEnvParser,
-> = ConfigFieldMetadata & {
-	env: string;
-	envParser: TParser;
-};
-
-export type RepoOverrideFieldMetadata = ConfigFieldMetadata & {
-	repoOverride: true;
-};
-
-export type EnvRepoOverrideFieldMetadata = EnvConfigFieldMetadata & {
-	repoOverride: true;
-};
+} & ({ default: EnvDefaultValue } | { docsDefault: string });
 
 export interface CliOptionMetadata {
 	flags: readonly [string, ...string[]];
@@ -113,279 +39,165 @@ export interface CliCommandMetadata {
 	argumentDescription?: string;
 }
 
-export interface ReviewCliOptionMetadataMap {
-	dryRun: CliOptionMetadata;
-	forceReview: CliOptionMetadata;
-	confirmRerun: CliOptionMetadata;
-	repoRoot: CliOptionMetadata;
-	help: CliOptionMetadata;
-}
+type CliCommandName = "review";
 
-export function isEnvConfigField(
-	field: ConfigFieldMetadata,
-): field is EnvConfigFieldMetadata {
-	return field.env !== undefined && field.envParser !== undefined;
-}
+type ReviewCliOptionName =
+	| "dryRun"
+	| "forceReview"
+	| "confirmRerun"
+	| "repoRoot"
+	| "help";
 
-export function isRepoOverrideField(
-	field: ConfigFieldMetadata,
-): field is RepoOverrideFieldMetadata {
-	return field.repoOverride === true;
-}
+const STRING_PARSER = { kind: "string" } as const;
 
-export function isEnvRepoOverrideField(
-	field: ConfigFieldMetadata,
-): field is EnvRepoOverrideFieldMetadata {
-	return isEnvConfigField(field) && isRepoOverrideField(field);
-}
-
-function envDoc(
-	order: number,
-	options: {
-		defaultValuePath?: readonly string[];
-		defaultText?: string;
-	} = {},
-) {
-	return {
-		docs: {
-			order,
-			...options,
-		},
-	};
-}
-
-function envParser<TParser extends ConfigFieldEnvParser>(parser: TParser) {
-	return {
-		envParser: parser,
-	};
-}
-
-function repoOverride() {
-	return {
-		repoOverride: true as const,
-	};
-}
-
-export const CONFIG_FIELD_METADATA = {
-	repoRoot: {
-		path: "repoRoot",
-		env: "REPO_ROOT",
+/** Declaration order is the order of the generated docs table. */
+export const ENV_VARIABLES = {
+	BITBUCKET_TOKEN: {
+		parser: STRING_PARSER,
+		description: "Bitbucket bearer token.",
+		docsDefault: "required unless basic auth vars are used",
+	},
+	BITBUCKET_USERNAME: {
+		parser: STRING_PARSER,
+		description: "Bitbucket basic auth username.",
+		docsDefault: "required with `BITBUCKET_PASSWORD` for basic auth",
+	},
+	BITBUCKET_PASSWORD: {
+		parser: STRING_PARSER,
+		description: "Bitbucket basic auth password.",
+		docsDefault: "required with `BITBUCKET_USERNAME` for basic auth",
+	},
+	REPO_ROOT: {
+		parser: STRING_PARSER,
 		description: "Path to the repository under review.",
-		...envParser({ kind: "string" }),
-		...envDoc(9, { defaultText: "current working directory" }),
+		docsDefault: "current working directory",
 	},
-	gitRemoteName: {
-		path: "gitRemoteName",
-		env: "GIT_REMOTE_NAME",
+	GIT_REMOTE_NAME: {
+		parser: STRING_PARSER,
 		description: "Git remote name used to fetch PR commits.",
-		...envParser({ kind: "string" }),
-		...envDoc(10, { defaultValuePath: ["gitRemoteName"] }),
+		default: "origin",
 	},
-	logLevel: {
-		path: "logLevel",
-		env: "LOG_LEVEL",
+	LOG_LEVEL: {
+		parser: { kind: "enum", values: LOG_LEVEL_VALUES },
 		description: "Logger verbosity.",
-		...envParser({ kind: "enum", values: LOG_LEVEL_VALUES }),
-		...envDoc(11, { defaultValuePath: ["logLevel"] }),
+		default: "info",
 	},
-	githubHost: {
-		path: "githubHost",
-		env: "GH_HOST",
+	GH_HOST: {
+		parser: { kind: "host" },
 		description:
 			"GitHub host used for Copilot authentication and API requests, for example `mycompany.ghe.com`.",
-		...envParser({ kind: "host" }),
-		...envDoc(11.5, { defaultText: "`github.com`" }),
+		docsDefault: "`github.com`",
 	},
-	bitbucketAuthType: {
-		path: "bitbucket.auth.type",
-		env: "BITBUCKET_AUTH_TYPE",
+	BITBUCKET_AUTH_TYPE: {
+		parser: { kind: "enum", values: BITBUCKET_AUTH_TYPE_VALUES },
 		description: "Bitbucket authentication strategy.",
-		...envParser({ kind: "enum", values: BITBUCKET_AUTH_TYPE_VALUES }),
-		...envDoc(12, { defaultText: "auto-detected from provided credentials" }),
+		docsDefault: "auto-detected from provided credentials",
 	},
-	bitbucketToken: {
-		path: "bitbucket.auth.token",
-		env: "BITBUCKET_TOKEN",
-		description: "Bitbucket bearer token.",
-		...envParser({ kind: "string" }),
-		...envDoc(6, { defaultText: "required unless basic auth vars are used" }),
-	},
-	bitbucketUsername: {
-		path: "bitbucket.auth.username",
-		env: "BITBUCKET_USERNAME",
-		description: "Bitbucket basic auth username.",
-		...envParser({ kind: "string" }),
-		...envDoc(7, {
-			defaultText: "required with `BITBUCKET_PASSWORD` for basic auth",
-		}),
-	},
-	bitbucketPassword: {
-		path: "bitbucket.auth.password",
-		env: "BITBUCKET_PASSWORD",
-		description: "Bitbucket basic auth password.",
-		...envParser({ kind: "string" }),
-		...envDoc(8, {
-			defaultText: "required with `BITBUCKET_USERNAME` for basic auth",
-		}),
-	},
-	bitbucketCaCertPath: {
-		path: "bitbucket.tls.caCertPath",
-		env: "BITBUCKET_CA_CERT_PATH",
+	BITBUCKET_CA_CERT_PATH: {
+		parser: STRING_PARSER,
 		description: "PEM CA bundle path for Bitbucket TLS.",
-		...envParser({ kind: "string" }),
-		...envDoc(13, { defaultText: "-" }),
+		docsDefault: "-",
 	},
-	bitbucketInsecureTls: {
-		path: "bitbucket.tls.insecureSkipVerify",
-		env: "BITBUCKET_INSECURE_TLS",
+	BITBUCKET_INSECURE_TLS: {
+		parser: { kind: "boolean" },
 		description:
 			"Disable TLS certificate verification for Bitbucket (not recommended).",
-		...envParser({ kind: "boolean" }),
-		...envDoc(14, {
-			defaultValuePath: ["bitbucket", "tls", "insecureSkipVerify"],
-		}),
+		default: false,
 	},
-	copilotModel: {
-		path: "copilot.model",
-		env: "COPILOT_MODEL",
+	COPILOT_MODEL: {
+		parser: STRING_PARSER,
 		description: "Copilot model override.",
-		...envParser({ kind: "string" }),
-		...repoOverride(),
-		...envDoc(15, { defaultValuePath: ["copilot", "model"] }),
+		default: "gpt-5.6-sol",
 	},
-	copilotReasoningEffort: {
-		path: "copilot.reasoningEffort",
-		env: "COPILOT_REASONING_EFFORT",
+	COPILOT_REASONING_EFFORT: {
+		parser: { kind: "enum", values: REASONING_EFFORT_VALUES },
 		description: "Copilot reasoning effort.",
-		...envParser({ kind: "enum", values: REASONING_EFFORT_VALUES }),
-		...repoOverride(),
-		...envDoc(16, { defaultValuePath: ["copilot", "reasoningEffort"] }),
+		default: "medium",
 	},
-	copilotTimeoutMs: {
-		path: "copilot.timeoutMs",
-		env: "COPILOT_TIMEOUT_MS",
+	COPILOT_TIMEOUT_MS: {
+		parser: { kind: "positiveInteger" },
 		description: "Copilot timeout in milliseconds.",
-		...envParser({ kind: "positiveInteger" }),
-		...repoOverride(),
-		...envDoc(17, { defaultValuePath: ["copilot", "timeoutMs"] }),
+		default: 1_800_000,
 	},
-	reportKey: {
-		path: "report.key",
-		env: "REPORT_KEY",
+	CI_SUMMARY_PATH: {
+		parser: STRING_PARSER,
+		description: "Path to a CI summary file included in review context.",
+		docsDefault: "-",
+	},
+	REPORT_KEY: {
+		parser: STRING_PARSER,
 		description: "Code Insights report key.",
-		...envParser({ kind: "string" }),
-		...envDoc(19, { defaultValuePath: ["report", "key"] }),
+		default: "copilot-pr-review",
 	},
-	reportTitle: {
-		path: "report.title",
-		env: "REPORT_TITLE",
+	REPORT_TITLE: {
+		parser: STRING_PARSER,
 		description: "Code Insights report title.",
-		...envParser({ kind: "string" }),
-		...repoOverride(),
-		...envDoc(20, { defaultValuePath: ["report", "title"] }),
+		default: "Copilot PR Review",
 	},
-	reporterName: {
-		path: "report.reporter",
-		env: "REPORTER_NAME",
+	REPORTER_NAME: {
+		parser: STRING_PARSER,
 		description: "Displayed report publisher name.",
-		...envParser({ kind: "string" }),
-		...envDoc(21, { defaultValuePath: ["report", "reporter"] }),
+		default: "GitHub Copilot",
 	},
-	reportCommentTag: {
-		path: "report.commentTag",
-		env: "REPORT_COMMENT_TAG",
+	REPORT_COMMENT_TAG: {
+		parser: STRING_PARSER,
 		description: "Tag used to locate the PR summary comment.",
-		...envParser({ kind: "string" }),
-		...envDoc(22, { defaultValuePath: ["report", "commentTag"] }),
+		default: "copilot-pr-review",
 	},
-	reportCommentStrategy: {
-		path: "report.commentStrategy",
-		env: "REPORT_COMMENT_STRATEGY",
+	REPORT_COMMENT_STRATEGY: {
+		parser: { kind: "enum", values: REPORT_COMMENT_STRATEGY_VALUES },
 		description: "How the tagged PR summary comment is updated.",
-		...envParser({ kind: "enum", values: REPORT_COMMENT_STRATEGY_VALUES }),
-		...repoOverride(),
-		...envDoc(23, { defaultValuePath: ["report", "commentStrategy"] }),
+		default: "recreate",
 	},
-	reportLink: {
-		path: "report.link",
-		env: "REPORT_LINK",
+	REPORT_LINK: {
+		parser: STRING_PARSER,
 		description: "Code Insights report link.",
-		...envParser({ kind: "string" }),
-		...envDoc(24, { defaultText: "falls back to `BUILD_URL` when present" }),
+		docsDefault: "falls back to `BUILD_URL` when present",
 	},
-	buildUrl: {
-		path: "report.link",
-		env: "BUILD_URL",
+	BUILD_URL: {
+		parser: STRING_PARSER,
 		description: "Fallback report link from CI build URL.",
-		...envParser({ kind: "string" }),
-		...envDoc(24.1, { defaultText: "used when `REPORT_LINK` is unset" }),
+		docsDefault: "used when `REPORT_LINK` is unset",
 	},
-	reviewDryRun: {
-		path: "review.dryRun",
-		description: "Run without publishing results to Bitbucket.",
-	},
-	reviewForce: {
-		path: "review.forceReview",
-		env: "REVIEW_FORCE",
+	REVIEW_FORCE: {
+		parser: { kind: "boolean" },
 		description: "Force review even when the revision was already published.",
-		...envParser({ kind: "boolean" }),
-		...envDoc(25, { defaultValuePath: ["review", "forceReview"] }),
+		default: false,
 	},
-	reviewConfirmRerun: {
-		path: "review.confirmRerun",
-		description: "Prompt before rerunning unusable cached artifacts.",
-	},
-	reviewMinConfidence: {
-		path: "review.minConfidence",
-		env: "REVIEW_MIN_CONFIDENCE",
+	REVIEW_MIN_CONFIDENCE: {
+		parser: { kind: "enum", values: CONFIDENCE_VALUES },
 		description: "Minimum confidence threshold for findings.",
-		...envParser({ kind: "enum", values: CONFIDENCE_VALUES }),
-		...repoOverride(),
-		...envDoc(28, { defaultValuePath: ["review", "minConfidence"] }),
+		default: "medium",
 	},
-	reviewIgnorePaths: {
-		path: "review.ignorePaths",
-		env: "REVIEW_IGNORE_PATHS",
+	REVIEW_IGNORE_PATHS: {
+		parser: { kind: "stringArray" },
 		description:
 			"Comma-separated repo-relative glob patterns excluded from reportable finding scope.",
-		...envParser({ kind: "stringArray" }),
-		...repoOverride(),
-		...envDoc(29, { defaultValuePath: ["review", "ignorePaths"] }),
+		default: [],
 	},
-	reviewSkipBranchPrefixes: {
-		path: "review.skipBranchPrefixes",
-		env: "REVIEW_SKIP_BRANCH_PREFIXES",
+	REVIEW_SKIP_BRANCH_PREFIXES: {
+		parser: { kind: "stringArray" },
 		description:
 			"Comma-separated source branch prefixes that should be skipped.",
-		...envParser({ kind: "stringArray" }),
-		...repoOverride(),
-		...envDoc(30, { defaultValuePath: ["review", "skipBranchPrefixes"] }),
+		default: ["renovate/"],
 	},
-	ciSummaryPath: {
-		path: "ciSummaryPath",
-		env: "CI_SUMMARY_PATH",
-		description: "Path to a CI summary file included in review context.",
-		...envParser({ kind: "string" }),
-		...envDoc(18, { defaultText: "-" }),
-	},
-} as const satisfies Record<string, ConfigFieldMetadata>;
+} as const satisfies Record<string, EnvVariableMetadata>;
 
-const HELP_CLI_OPTION_METADATA = {
-	flags: ["-h", "--help"],
-	description: "Show this help text",
-} as const satisfies CliOptionMetadata;
+export const CLI_COMMAND_METADATA: Record<CliCommandName, CliCommandMetadata> =
+	{
+		review: {
+			usage: "review <pull-request-url> [options]",
+			description: "Review one pull request from an explicit Bitbucket URL",
+			argumentLabel: "<pull-request-url>",
+			argumentDescription:
+				"Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pull-requests/123 or a PR tab URL like /overview, /diff, /commits, or /builds.",
+		},
+	};
 
-export const CLI_COMMAND_METADATA = {
-	review: {
-		usage: "review <pull-request-url> [options]",
-		description: "Review one pull request from an explicit Bitbucket URL",
-		argumentLabel: "<pull-request-url>",
-		argumentDescription:
-			"Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pull-requests/123 or a PR tab URL like /overview, /diff, /commits, or /builds.",
-	},
-} as const satisfies Record<string, CliCommandMetadata>;
-
-export const REVIEW_CLI_OPTION_METADATA: ReviewCliOptionMetadataMap = {
+export const REVIEW_CLI_OPTION_METADATA: Record<
+	ReviewCliOptionName,
+	CliOptionMetadata
+> = {
 	dryRun: {
 		flags: ["--dry-run"],
 		description: "Run without publishing results to Bitbucket",
@@ -405,5 +217,8 @@ export const REVIEW_CLI_OPTION_METADATA: ReviewCliOptionMetadataMap = {
 		description: "Use a different local checkout as the repository root",
 		valueLabel: "<path>",
 	},
-	help: HELP_CLI_OPTION_METADATA,
+	help: {
+		flags: ["-h", "--help"],
+		description: "Show this help text",
+	},
 };

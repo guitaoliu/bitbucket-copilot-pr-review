@@ -1,75 +1,39 @@
-import { REVIEWER_CONFIG_DEFAULTS } from "./defaults.ts";
 import type {
 	CliCommandMetadata,
 	CliOptionMetadata,
-	ConfigFieldMetadata,
+	EnvDefaultValue,
+	EnvVariableMetadata,
 } from "./metadata.ts";
 import {
 	CLI_COMMAND_METADATA,
-	CONFIG_FIELD_METADATA,
-	isEnvConfigField,
+	ENV_VARIABLES,
 	REVIEW_CLI_OPTION_METADATA,
 } from "./metadata.ts";
-import { getConfigPathValue } from "./path.ts";
 
-function formatDefaultValue(value: unknown): string {
+function formatDefaultValue(value: EnvDefaultValue): string {
 	if (Array.isArray(value)) {
 		return value.length === 0 ? "[]" : `\`${value.join(", ")}\``;
 	}
 
-	if (typeof value === "string") {
-		return `\`${value}\``;
-	}
-
-	if (typeof value === "boolean" || typeof value === "number") {
-		return `\`${String(value)}\``;
-	}
-
-	return "-";
-}
-
-function getDefaultValueByPath(pathSegments: readonly string[]): unknown {
-	return getConfigPathValue(REVIEWER_CONFIG_DEFAULTS, pathSegments);
-}
-
-function formatFieldDefault(field: ConfigFieldMetadata): string {
-	if (field.docs?.defaultText !== undefined) {
-		return field.docs.defaultText;
-	}
-
-	if (field.docs?.defaultValuePath !== undefined) {
-		return formatDefaultValue(
-			getDefaultValueByPath(field.docs.defaultValuePath),
-		);
-	}
-
-	return "-";
-}
-
-function hasDocs(field: ConfigFieldMetadata): field is ConfigFieldMetadata & {
-	docs: NonNullable<ConfigFieldMetadata["docs"]>;
-} {
-	return field.docs !== undefined;
-}
-
-function getDocumentedEnvFields(): ConfigFieldMetadata[] {
-	return Object.values(CONFIG_FIELD_METADATA)
-		.filter((field) => isEnvConfigField(field) && hasDocs(field))
-		.sort((left, right) => (left.docs?.order ?? 0) - (right.docs?.order ?? 0));
+	return `\`${String(value)}\``;
 }
 
 function buildEnvRows(): string[] {
-	return getDocumentedEnvFields().map((field) => {
-		const envName = field.env ?? "-";
-		const defaultValue = formatFieldDefault(field);
-		return `| \`${envName}\` | ${defaultValue} | ${field.description} |`;
-	});
+	return Object.entries(ENV_VARIABLES).map(
+		([name, variable]: [string, EnvVariableMetadata]) => {
+			const defaultText =
+				"default" in variable
+					? formatDefaultValue(variable.default)
+					: variable.docsDefault;
+			return `| \`${name}\` | ${defaultText} | ${variable.description} |`;
+		},
+	);
 }
 
 function buildCliRows(options: readonly CliOptionMetadata[]): string[] {
-	return options.map((option: CliOptionMetadata) => {
+	return options.map((option) => {
 		const flags = option.flags
-			.map((flag: string) =>
+			.map((flag) =>
 				option.valueLabel && flag === option.flags[0]
 					? `\`${flag} ${option.valueLabel}\``
 					: `\`${flag}\``,

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import type { PullRequestInfo } from "../bitbucket/types.ts";
-import type { ReviewerConfig } from "../config/types.ts";
+import type { OperatorConfig, ReviewerConfig } from "../config/types.ts";
 import { applyNumstatDiff } from "../git/diff.ts";
 import { GitRepository } from "../git/repo.ts";
 import { filterChangedFiles } from "../policy/files.ts";
@@ -40,26 +40,30 @@ async function loadCiSummary(
 }
 
 export async function prepareReviewContext(
-	config: ReviewerConfig,
+	operatorConfig: OperatorConfig,
 	logger: Logger,
 	pr: PullRequestInfo,
 ): Promise<PreparedReviewContext> {
-	const git = new GitRepository(config.repoRoot, logger, config.gitRemoteName);
+	const git = new GitRepository(
+		operatorConfig.repoRoot,
+		logger,
+		operatorConfig.gitRemoteName,
+	);
 
 	await git.ensurePullRequestCommits(pr);
 	const mergeBaseCommit = await git.mergeBase(
 		pr.target.latestCommit,
 		pr.source.latestCommit,
 	);
-	const effectiveConfig = await loadTrustedRepoConfig(
-		config,
+	const config = await loadTrustedRepoConfig(
+		operatorConfig,
 		git,
 		pr.target.latestCommit,
 		logger,
 	);
 
 	return {
-		config: effectiveConfig,
+		config,
 		git,
 		mergeBaseCommit,
 	};

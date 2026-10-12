@@ -1,454 +1,280 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-	parseBitbucketPullRequestUrl,
-	resolveBitbucketConfig,
-} from "./bitbucket-resolver.ts";
-import { REVIEWER_CONFIG_DEFAULTS } from "./defaults.ts";
-import {
-	getEnvRepoOverrides,
-	normalizeReportKey,
-	parseEnvironment,
-} from "./env.ts";
-import { loadConfig } from "./load.ts";
-import { CONFIG_FIELD_METADATA } from "./metadata.ts";
-import { mergeRepoReviewConfig, parseRepoReviewConfig } from "./repo-config.ts";
-import { resolveRuntimeConfigGroups } from "./runtime-resolver.ts";
+import type { ReviewCliOptions } from "./args.ts";
+import { loadConfig, resolveReviewerConfig } from "./load.ts";
+import { parseRepoReviewConfig } from "./repo-config.ts";
+import type { ReviewerConfig } from "./types.ts";
 
 const pullRequestUrl =
 	"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123";
 
-describe("normalizeReportKey", () => {
-	it("keeps short report keys unchanged", () => {
-		assert.equal(
-			normalizeReportKey("copilot-local-review"),
-			"copilot-local-review",
-		);
+function cliOptions(
+	overrides: Partial<ReviewCliOptions> = {},
+): ReviewCliOptions {
+	return {
+		command: "review",
+		pullRequestUrl,
+		dryRun: false,
+		forceReview: false,
+		confirmRerun: false,
+		...overrides,
+	};
+}
+
+function resolveFromEnv(
+	env: NodeJS.ProcessEnv,
+	repoConfigJson?: string,
+): ReviewerConfig {
+	const operatorConfig = loadConfig(cliOptions(), {
+		BITBUCKET_TOKEN: "token",
+		...env,
 	});
+	return resolveReviewerConfig(
+		operatorConfig,
+		repoConfigJson === undefined
+			? undefined
+			: parseRepoReviewConfig(repoConfigJson),
+	);
+}
 
-	it("shortens long report keys to fit Bitbucket limits", () => {
-		const normalized = normalizeReportKey(
-			"com.github.copilot.bitbucket-pr-review.local.Guitao.Liu",
-		);
+describe("loadConfig", () => {
+	it("resolves the pull request location, auth, and built-in defaults", () => {
+		const config = resolveFromEnv({});
 
-		assert.ok(normalized.length <= 50);
-		assert.match(normalized, /^[A-Za-z0-9._-]+$/);
-		assert.notEqual(
-			normalized,
-			"com.github.copilot.bitbucket-pr-review.local.Guitao.Liu",
-		);
-	});
-
-	it("sanitizes unsupported characters", () => {
-		assert.equal(
-			normalizeReportKey(" local review / test "),
-			"local-review-test",
-		);
-	});
-});
-
-describe("parseEnvironment", () => {
-	it("uses metadata-driven parsers for normalized strings and scalars", () => {
-		const env = parseEnvironment({
-			BITBUCKET_TOKEN: "token",
-			BITBUCKET_INSECURE_TLS: "false",
-			LOG_LEVEL: "debug",
-			REVIEW_IGNORE_PATHS: "a/**, b/**",
-		});
-
-		assert.equal(env.BITBUCKET_INSECURE_TLS, false);
-		assert.equal(env.LOG_LEVEL, "debug");
-		assert.deepEqual(env.REVIEW_IGNORE_PATHS, ["a/**", "b/**"]);
-	});
-
-	it("normalizes GH_HOST from a GitHub Enterprise Cloud URL", () => {
-		const env = parseEnvironment({
-			BITBUCKET_TOKEN: "token",
-			GH_HOST: "https://tenant.ghe.com",
-		});
-
-		assert.equal(env.GH_HOST, "tenant.ghe.com");
-	});
-
-	it("keeps metadata-backed enum validation errors", () => {
-		assert.throws(
-			() =>
-				parseEnvironment({
-					BITBUCKET_TOKEN: "token",
-					LOG_LEVEL: "verbose",
-				}),
-			new RegExp(`${CONFIG_FIELD_METADATA.logLevel.env} must be one of:`),
-		);
-	});
-
-	it("rejects malformed GH_HOST values", () => {
-		assert.throws(
-			() =>
-				parseEnvironment({
-					BITBUCKET_TOKEN: "token",
-					GH_HOST: "tenant.ghe.com/settings",
-				}),
-			/without any path, query, or hash/,
-		);
-	});
-
-	it("derives repo override values from metadata-marked env fields", () => {
-		const env = parseEnvironment({
-			BITBUCKET_TOKEN: "token",
-			COPILOT_MODEL: "env-model",
-			COPILOT_REASONING_EFFORT: "max",
-			REPORT_COMMENT_STRATEGY: "update",
-			REVIEW_IGNORE_PATHS: "generated/**, docs/**",
-			REVIEW_SKIP_BRANCH_PREFIXES: "renovate/, deps/",
-		});
-
-		assert.deepEqual(getEnvRepoOverrides(env), {
-			copilot: {
-				model: "env-model",
-				reasoningEffort: "max",
-			},
-			report: {
-				commentStrategy: "update",
-			},
-			review: {
-				ignorePaths: ["generated/**", "docs/**"],
-				skipBranchPrefixes: ["renovate/", "deps/"],
-			},
-		});
-	});
-
-	it("allows clearing env-based list overrides with blank values", () => {
-		const env = parseEnvironment({
-			BITBUCKET_TOKEN: "token",
-			REVIEW_IGNORE_PATHS: " , ",
-			REVIEW_SKIP_BRANCH_PREFIXES: " , ",
-		});
-
-		assert.deepEqual(getEnvRepoOverrides(env), {
-			copilot: {},
-			report: {},
-			review: {
-				ignorePaths: [],
-				skipBranchPrefixes: [],
-			},
-		});
-	});
-
-	it("applies repo-config bounds to env-based repo overrides", () => {
-		assert.throws(
-			() =>
-				getEnvRepoOverrides(
-					parseEnvironment({
-						BITBUCKET_TOKEN: "token",
-						COPILOT_TIMEOUT_MS: "999999999",
-					}),
-				),
-			/copilot\.timeoutMs: copilot\.timeoutMs must be at most 7200000\./,
-		);
-	});
-});
-
-describe("parseBitbucketPullRequestUrl", () => {
-	it("parses pull request urls with optional query and hash", () => {
-		const parsed = parseBitbucketPullRequestUrl(
-			`${pullRequestUrl}/?foo=1#activity`,
-		);
-
-		assert.deepEqual(parsed, {
+		assert.deepEqual(config.bitbucket, {
 			baseUrl: "https://bitbucket.example.com",
 			projectKey: "PROJ",
 			repoSlug: "repo",
 			prId: 123,
-			repositoryUrl: "https://bitbucket.example.com/projects/PROJ/repos/repo",
-			pullRequestUrl,
+			auth: { type: "bearer", token: "token" },
+			tls: { caCertPath: undefined, insecureSkipVerify: false },
 		});
-	});
-
-	it("parses pull request urls from Bitbucket PR tabs", () => {
-		const tabUrls = [
-			"https://bitbucket.example.com:8443/projects/PROJ/repos/repo/pull-requests/13616/overview",
-			"https://bitbucket.example.com:8443/projects/PROJ/repos/repo/pull-requests/13616/diff#src%2Fcomponents%2FPermissionsEditor.tsx",
-			"https://bitbucket.example.com:8443/projects/PROJ/repos/repo/pull-requests/13616/commits",
-			"https://bitbucket.example.com:8443/projects/PROJ/repos/repo/pull-requests/13616/builds",
-		];
-
-		for (const tabUrl of tabUrls) {
-			assert.deepEqual(parseBitbucketPullRequestUrl(tabUrl), {
-				baseUrl: "https://bitbucket.example.com:8443",
-				projectKey: "PROJ",
-				repoSlug: "repo",
-				prId: 13616,
-				repositoryUrl:
-					"https://bitbucket.example.com:8443/projects/PROJ/repos/repo",
-				pullRequestUrl:
-					"https://bitbucket.example.com:8443/projects/PROJ/repos/repo/pull-requests/13616",
-			});
-		}
-	});
-
-	it("parses pull request urls under a path prefix", () => {
-		const parsed = parseBitbucketPullRequestUrl(
-			"https://host.example.com:8443/bitbucket/projects/PROJ/repos/repo/pull-requests/123",
-		);
-
-		assert.equal(parsed.baseUrl, "https://host.example.com:8443/bitbucket");
-	});
-
-	it("rejects non-pull-request urls", () => {
-		assert.throws(
-			() =>
-				parseBitbucketPullRequestUrl(
-					"https://bitbucket.example.com/projects/PROJ/repos/repo",
-				),
-			/Pull request URL must point to a pull request page/,
-		);
-	});
-});
-
-describe("resolveRuntimeConfigGroups", () => {
-	it("resolves copilot report and review groups from metadata-driven sources", () => {
-		const env = parseEnvironment({
-			BITBUCKET_TOKEN: "token",
-			COPILOT_MODEL: "env-model",
-			REPORT_KEY: " team/report ",
-			BUILD_URL: "https://ci.example.com/build/1",
+		assert.equal(config.repoRoot, process.cwd());
+		assert.equal(config.gitRemoteName, "origin");
+		assert.equal(config.logLevel, "info");
+		assert.deepEqual(config.copilot, {
+			model: "gpt-5.6-sol",
+			reasoningEffort: "medium",
+			timeoutMs: 1_800_000,
 		});
-
-		const resolved = resolveRuntimeConfigGroups(env, {
-			command: "review",
-			pullRequestUrl,
-			dryRun: false,
-			forceReview: true,
-			confirmRerun: false,
-			help: false,
-		});
-
-		assert.equal(resolved.copilot.model, "env-model");
-		assert.equal(
-			resolved.bitbucket.tls.insecureSkipVerify,
-			REVIEWER_CONFIG_DEFAULTS.bitbucket.tls.insecureSkipVerify,
-		);
-		assert.equal(resolved.report.key, "team-report");
-		assert.equal(resolved.report.link, "https://ci.example.com/build/1");
-		assert.equal(resolved.review.forceReview, true);
-	});
-
-	it("resolves bitbucket runtime fields from env with default fallback", () => {
-		const env = parseEnvironment({
-			BITBUCKET_TOKEN: "token",
-			BITBUCKET_INSECURE_TLS: "false",
-		});
-
-		const resolved = resolveRuntimeConfigGroups(env, {
-			command: "review",
-			pullRequestUrl,
-			dryRun: false,
-			forceReview: false,
-			confirmRerun: false,
-			help: false,
-		});
-
-		assert.equal(resolved.bitbucket.tls.insecureSkipVerify, false);
-	});
-
-	it("resolves top-level config from env and cli inputs", () => {
-		const env = parseEnvironment({
-			REPO_ROOT: ".",
-			GIT_REMOTE_NAME: "upstream",
-			LOG_LEVEL: "warn",
-			CI_SUMMARY_PATH: "/tmp/summary.txt",
-			BITBUCKET_TOKEN: "token",
-		});
-
-		const resolved = resolveRuntimeConfigGroups(env, {
-			command: "review",
-			pullRequestUrl,
-			dryRun: false,
-			forceReview: false,
-			confirmRerun: false,
-			repoRoot: process.cwd(),
-			help: false,
-		});
-
-		assert.equal(resolved.repoRoot, process.cwd());
-		assert.equal(resolved.gitRemoteName, "upstream");
-		assert.equal(resolved.logLevel, "warn");
-		assert.equal(resolved.ciSummaryPath, "/tmp/summary.txt");
-	});
-
-	it("resolves GH_HOST as a top-level runtime setting", () => {
-		const env = parseEnvironment({
-			BITBUCKET_TOKEN: "token",
-			GH_HOST: "tenant.ghe.com",
-		});
-
-		const resolved = resolveRuntimeConfigGroups(env, {
-			command: "review",
-			pullRequestUrl,
-			dryRun: false,
-			forceReview: false,
-			confirmRerun: false,
-			help: false,
-		});
-
-		assert.equal(resolved.githubHost, "tenant.ghe.com");
-	});
-});
-
-describe("resolveBitbucketConfig", () => {
-	it("builds the full bitbucket config from resolved identity and env", () => {
-		const env = parseEnvironment({
-			BITBUCKET_TOKEN: "token",
-		});
-
-		assert.deepEqual(
-			resolveBitbucketConfig({
-				location: parseBitbucketPullRequestUrl(pullRequestUrl),
-				env,
-				runtimeConfig: { tls: { insecureSkipVerify: true } },
-				caCertPath: "/tmp/cert.pem",
-			}),
-			{
-				baseUrl: "https://bitbucket.example.com",
-				projectKey: "PROJ",
-				repoSlug: "repo",
-				prId: 123,
-				auth: {
-					type: "bearer",
-					token: "token",
-				},
-				tls: {
-					caCertPath: "/tmp/cert.pem",
-					insecureSkipVerify: true,
-				},
-			},
-		);
-	});
-});
-
-describe("loadConfig feature flags", () => {
-	it("uses simplified defaults", () => {
-		const config = loadConfig(["review", pullRequestUrl], {
-			BITBUCKET_TOKEN: "token",
-		});
-
-		assert.equal(config.bitbucket.baseUrl, "https://bitbucket.example.com");
-		assert.equal(config.bitbucket.projectKey, "PROJ");
-		assert.equal(config.bitbucket.repoSlug, "repo");
-		assert.equal(config.bitbucket.prId, 123);
-		assert.equal(config.bitbucket.tls.insecureSkipVerify, false);
-		assert.equal(config.copilot.model, "gpt-5.6-sol");
-		assert.equal(config.copilot.reasoningEffort, "medium");
 		assert.equal(config.report.key, "copilot-pr-review");
+		assert.equal(config.report.title, "Copilot PR Review");
+		assert.equal(config.report.commentStrategy, "recreate");
+		assert.equal(config.review.minConfidence, "medium");
+		assert.deepEqual(config.review.ignorePaths, []);
+		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/"]);
 		assert.equal(config.review.forceReview, false);
 		assert.equal(config.review.confirmRerun, false);
 	});
 
-	it("loads GH_HOST into the direct review config", () => {
-		const config = loadConfig(["review", pullRequestUrl], {
+	it("leaves repo-overridable fields unset when the operator did not set them", () => {
+		const operatorConfig = loadConfig(cliOptions(), {
 			BITBUCKET_TOKEN: "token",
-			GH_HOST: "tenant.ghe.com",
 		});
 
-		assert.equal(config.githubHost, "tenant.ghe.com");
+		assert.deepEqual(operatorConfig.copilot, {
+			model: undefined,
+			reasoningEffort: undefined,
+			timeoutMs: undefined,
+		});
+		assert.equal(operatorConfig.report.title, undefined);
+		assert.equal(operatorConfig.review.skipBranchPrefixes, undefined);
 	});
 
-	it("parses ignored review path globs from env", () => {
-		const config = loadConfig(["review", pullRequestUrl], {
+	it("lets --repo-root win over REPO_ROOT and rejects unreadable roots", () => {
+		const config = loadConfig(cliOptions({ repoRoot: "." }), {
 			BITBUCKET_TOKEN: "token",
-			REVIEW_IGNORE_PATHS: "i18n/locales/**/*.json, docs/generated/**",
-			REVIEW_SKIP_BRANCH_PREFIXES: "renovate/, deps/",
+			REPO_ROOT: "/definitely/missing/root",
 		});
 
-		assert.deepEqual(config.review.ignorePaths, [
-			"i18n/locales/**/*.json",
-			"docs/generated/**",
-		]);
-		assert.deepEqual(config.review.skipBranchPrefixes, ["renovate/", "deps/"]);
+		assert.equal(config.repoRoot, process.cwd());
+		assert.throws(
+			() =>
+				loadConfig(cliOptions(), {
+					BITBUCKET_TOKEN: "token",
+					REPO_ROOT: "/definitely/missing/root",
+				}),
+			/Repository root is not readable: \/definitely\/missing\/root/,
+		);
 	});
 
-	it("allows overriding the pull request comment strategy from env", () => {
-		const config = loadConfig(["review", pullRequestUrl], {
-			BITBUCKET_TOKEN: "token",
-			REPORT_COMMENT_STRATEGY: "update",
-		});
-
-		assert.equal(config.report.commentStrategy, "update");
+	it("rejects an unreadable BITBUCKET_CA_CERT_PATH", () => {
+		assert.throws(
+			() =>
+				loadConfig(cliOptions(), {
+					BITBUCKET_TOKEN: "token",
+					BITBUCKET_CA_CERT_PATH: "/definitely/missing/ca.pem",
+				}),
+			/BITBUCKET_CA_CERT_PATH is not readable: \/definitely\/missing\/ca\.pem/,
+		);
 	});
 
-	it("allows forcing a rerun from env or CLI", () => {
-		const fromEnv = loadConfig(["review", pullRequestUrl], {
+	it("falls back to BUILD_URL for the report link", () => {
+		assert.equal(
+			resolveFromEnv({ BUILD_URL: "https://ci.example.com/build/1" }).report
+				.link,
+			"https://ci.example.com/build/1",
+		);
+		assert.equal(
+			resolveFromEnv({
+				REPORT_LINK: "https://ci.example.com/report",
+				BUILD_URL: "https://ci.example.com/build/1",
+			}).report.link,
+			"https://ci.example.com/report",
+		);
+	});
+
+	it("sanitizes report keys and shortens them to Bitbucket's limit", () => {
+		const longKey = "com.github.copilot.bitbucket-pr-review.local.Guitao.Liu";
+
+		assert.equal(
+			resolveFromEnv({ REPORT_KEY: "local review / test" }).report.key,
+			"local-review-test",
+		);
+		assert.equal(
+			resolveFromEnv({ REPORT_KEY: "copilot-local-review" }).report.key,
+			"copilot-local-review",
+		);
+		assert.equal(
+			resolveFromEnv({ REPORT_KEY: "///" }).report.key,
+			"copilot-pr-review",
+		);
+		const shortened = resolveFromEnv({ REPORT_KEY: longKey }).report.key;
+		assert.equal(shortened.length, 50);
+		assert.match(
+			shortened,
+			/^com\.github\.copilot\.bitbucket-pr-review\.-[0-9a-f]{10}$/,
+		);
+	});
+
+	it("enables forced reviews from either REVIEW_FORCE or --force-review", () => {
+		const fromEnv = loadConfig(cliOptions(), {
 			BITBUCKET_TOKEN: "token",
 			REVIEW_FORCE: "1",
 		});
-		const fromCli = loadConfig(["review", pullRequestUrl, "--force-review"], {
+		const fromCli = loadConfig(cliOptions({ forceReview: true }), {
 			BITBUCKET_TOKEN: "token",
+			REVIEW_FORCE: "0",
 		});
 
 		assert.equal(fromEnv.review.forceReview, true);
 		assert.equal(fromCli.review.forceReview, true);
 	});
 
-	it("allows enabling rerun confirmation from CLI", () => {
-		const config = loadConfig(["review", pullRequestUrl, "--confirm-rerun"], {
-			BITBUCKET_TOKEN: "token",
-		});
+	it("does not bound env values by repo config limits", () => {
+		const config = resolveFromEnv(
+			{ COPILOT_TIMEOUT_MS: "30000", COPILOT_MODEL: "m".repeat(200) },
+			'{"report":{"title":"Repo title"}}',
+		);
 
+		assert.equal(config.copilot.timeoutMs, 30000);
+		assert.equal(config.copilot.model, "m".repeat(200));
+		assert.equal(config.report.title, "Repo title");
+	});
+});
+
+describe("resolveReviewerConfig precedence", () => {
+	const repoConfigJson = `{
+	  "copilot": { "model": "repo-model", "reasoningEffort": "high", "timeoutMs": 600000 },
+	  "report": { "title": "Repo title", "commentStrategy": "update" },
+	  "review": {
+	    "minConfidence": "low",
+	    "ignorePaths": ["generated/**"],
+	    "skipBranchPrefixes": ["deps/"]
+	  }
+	}`;
+
+	it("applies trusted repo config where the operator set nothing", () => {
+		const config = resolveFromEnv({}, repoConfigJson);
+
+		assert.deepEqual(config.copilot, {
+			model: "repo-model",
+			reasoningEffort: "high",
+			timeoutMs: 600000,
+		});
+		assert.equal(config.report.title, "Repo title");
+		assert.equal(config.report.commentStrategy, "update");
+		assert.equal(config.review.minConfidence, "low");
+		assert.deepEqual(config.review.ignorePaths, ["generated/**"]);
+		assert.deepEqual(config.review.skipBranchPrefixes, ["deps/"]);
+	});
+
+	it("never lets repo config override env values", () => {
+		const config = resolveFromEnv(
+			{
+				COPILOT_MODEL: "env-model",
+				COPILOT_REASONING_EFFORT: "max",
+				COPILOT_TIMEOUT_MS: "120000",
+				REPORT_TITLE: "Env title",
+				REPORT_COMMENT_STRATEGY: "recreate",
+				REVIEW_MIN_CONFIDENCE: "high",
+				REVIEW_IGNORE_PATHS: "env-only/**",
+				REVIEW_SKIP_BRANCH_PREFIXES: "env/",
+			},
+			repoConfigJson,
+		);
+
+		assert.deepEqual(config.copilot, {
+			model: "env-model",
+			reasoningEffort: "max",
+			timeoutMs: 120000,
+		});
+		assert.equal(config.report.title, "Env title");
+		assert.equal(config.report.commentStrategy, "recreate");
+		assert.equal(config.review.minConfidence, "high");
+		assert.deepEqual(config.review.ignorePaths, ["env-only/**"]);
+		assert.deepEqual(config.review.skipBranchPrefixes, ["env/"]);
+	});
+
+	it("lets a comma-only env list clear repo and default lists", () => {
+		const withRepo = resolveFromEnv(
+			{ REVIEW_IGNORE_PATHS: ",", REVIEW_SKIP_BRANCH_PREFIXES: " , " },
+			repoConfigJson,
+		);
+		const withoutRepo = resolveFromEnv({ REVIEW_SKIP_BRANCH_PREFIXES: "," });
+
+		assert.deepEqual(withRepo.review.ignorePaths, []);
+		assert.deepEqual(withRepo.review.skipBranchPrefixes, []);
+		assert.deepEqual(withoutRepo.review.skipBranchPrefixes, []);
+	});
+
+	it("treats a blank env list as unset so repo config and defaults still apply", () => {
+		const withRepo = resolveFromEnv(
+			{ REVIEW_SKIP_BRANCH_PREFIXES: "" },
+			repoConfigJson,
+		);
+		const withoutRepo = resolveFromEnv({ REVIEW_SKIP_BRANCH_PREFIXES: "" });
+
+		assert.deepEqual(withRepo.review.skipBranchPrefixes, ["deps/"]);
+		assert.deepEqual(withoutRepo.review.skipBranchPrefixes, ["renovate/"]);
+	});
+
+	it("lets repo config clear the default skip branch prefixes", () => {
+		const config = resolveFromEnv({}, '{"review":{"skipBranchPrefixes":[]}}');
+
+		assert.deepEqual(config.review.skipBranchPrefixes, []);
+	});
+
+	it("ignores the deprecated repo maxFiles field", () => {
+		const config = resolveFromEnv({}, '{"review":{"maxFiles":150}}');
+
+		assert.equal("maxFiles" in config.review, false);
+	});
+
+	it("keeps CLI-only and non-overridable settings out of repo control", () => {
+		const operatorConfig = loadConfig(
+			cliOptions({ dryRun: true, confirmRerun: true }),
+			{ BITBUCKET_TOKEN: "token", REPORT_KEY: "env-key" },
+		);
+		const config = resolveReviewerConfig(
+			operatorConfig,
+			parseRepoReviewConfig(repoConfigJson),
+		);
+
+		assert.equal(config.review.dryRun, true);
 		assert.equal(config.review.confirmRerun, true);
-	});
-
-	it("lets env values win over repo config overrides", () => {
-		const config = loadConfig(["review", pullRequestUrl], {
-			BITBUCKET_TOKEN: "token",
-			REVIEW_IGNORE_PATHS: "env-only/**",
-			REVIEW_SKIP_BRANCH_PREFIXES: "env/",
-			COPILOT_MODEL: "env-model",
-		});
-
-		const merged = mergeRepoReviewConfig(
-			config,
-			parseRepoReviewConfig(`{
-			  "review": {
-			    "ignorePaths": ["i18n/locales/**/*.json"],
-			    "skipBranchPrefixes": ["renovate/", "deps/"]
-			  },
-			  "copilot": {
-			    "model": "repo-model"
-			  }
-			}`),
-		);
-
-		assert.deepEqual(merged.review.ignorePaths, ["env-only/**"]);
-		assert.deepEqual(merged.review.skipBranchPrefixes, ["env/"]);
-		assert.equal(merged.copilot.model, "env-model");
-	});
-
-	it("lets env values clear repo-configured list overrides", () => {
-		const config = loadConfig(["review", pullRequestUrl], {
-			BITBUCKET_TOKEN: "token",
-			REVIEW_IGNORE_PATHS: " , ",
-			REVIEW_SKIP_BRANCH_PREFIXES: " , ",
-		});
-
-		const merged = mergeRepoReviewConfig(
-			config,
-			parseRepoReviewConfig(`{
-			  "review": {
-			    "ignorePaths": ["generated/**"],
-			    "skipBranchPrefixes": ["renovate/", "deps/"]
-			  }
-			}`),
-		);
-
-		assert.deepEqual(merged.review.ignorePaths, []);
-		assert.deepEqual(merged.review.skipBranchPrefixes, []);
-	});
-
-	it("requires Bitbucket authentication envs", () => {
-		assert.throws(
-			() => loadConfig(["review", pullRequestUrl], {}),
-			/Provide BITBUCKET_TOKEN or BITBUCKET_USERNAME and BITBUCKET_PASSWORD/,
-		);
+		assert.equal(config.report.key, "env-key");
+		assert.deepEqual(config.bitbucket, operatorConfig.bitbucket);
 	});
 });

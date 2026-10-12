@@ -47,7 +47,11 @@ Setting sources at a glance:
 | Bitbucket auth and TLS | - | yes | - |
 | Copilot model / reasoning / timeout | - | yes | yes |
 | report title / comment strategy | - | yes | yes |
-| review limits / ignore paths / skip prefixes | `--dry-run`, `--force-review`, `--confirm-rerun` | yes | yes |
+| min confidence / ignore paths / skip prefixes | `--dry-run`, `--force-review`, `--confirm-rerun` | yes | yes |
+
+For the comma-separated `REVIEW_IGNORE_PATHS` and `REVIEW_SKIP_BRANCH_PREFIXES` variables, an unset or blank value (`""`) leaves the setting to the trusted repo config or the built-in default, while a value with only commas (`","`) sets an explicitly empty list that the repo config cannot override.
+
+Size and range limits from the repo config schema (for example `copilot.timeoutMs` between 60000 and 7200000) apply only to the untrusted repo JSON. Environment variables only need to be well-formed, such as a positive integer for `COPILOT_TIMEOUT_MS`.
 
 <!-- GENERATED_CONFIG_REFERENCE:START -->
 ## Configuration Reference
@@ -146,7 +150,7 @@ The helper script reads credentials from your environment, inherits the applicat
 
 The review JSON output includes `metrics.toolTelemetry` so you can inspect which Copilot tools were requested, allowed, denied, and completed.
 
-Pull requests whose source branch starts with `renovate/` are skipped automatically by default. You can override the skipped branch prefixes with `REVIEW_SKIP_BRANCH_PREFIXES` or repo-level `review.skipBranchPrefixes`, including clearing the list entirely.
+Pull requests whose source branch starts with `renovate/` are skipped automatically by default. You can override the skipped branch prefixes with `REVIEW_SKIP_BRANCH_PREFIXES` or repo-level `review.skipBranchPrefixes`, including clearing the list entirely (`REVIEW_SKIP_BRANCH_PREFIXES=,` or `"skipBranchPrefixes": []`).
 
 If your Bitbucket Data Center uses an internal or self-signed certificate, prefer setting `BITBUCKET_CA_CERT_PATH` to a PEM file containing your CA bundle. When the CA is already installed on the machine, `NODE_USE_SYSTEM_CA=1` lets Node use the system trust store. Strict TLS verification is enabled by default.
 
@@ -154,7 +158,7 @@ For local helper-script runs, Node system CA loading is enabled by default with 
 
 The Copilot CLI's automatic custom-instruction loading is disabled. `review_changes` delivers applicable `AGENTS.md` files and the `.agents/skills/*/SKILL.md` catalog from the trusted base commit; the agent reads selected skills through `read_file`. Instruction or skill files added or changed by the pull request remain untrusted PR content.
 
-When the target repository contains a root-level `copilot-code-review.json`, the reviewer loads it from the trusted base commit and uses it for repo-scoped review configuration such as ignored paths, review limits, and selected Copilot or report overrides. Environment variables and CLI flags still take precedence. The JSON schema is published at `schemas/copilot-code-review.schema.json`.
+When the target repository contains a root-level `copilot-code-review.json`, the reviewer loads it from the trusted base commit and uses it for repo-scoped review configuration such as ignored paths, skipped branch prefixes, minimum confidence, and selected Copilot or report overrides. Environment variables and CLI flags still take precedence. The JSON schema is published at `schemas/copilot-code-review.schema.json`.
 
 The reviewer inspects all changed files that remain after filtering.
 

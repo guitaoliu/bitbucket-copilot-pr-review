@@ -1,56 +1,27 @@
 import { CliUserError } from "./errors.ts";
 import {
 	CLI_COMMAND_METADATA,
-	type CliCommandMetadata,
 	type CliOptionMetadata,
 	REVIEW_CLI_OPTION_METADATA,
 } from "./metadata.ts";
 
-interface CommonCliOptions {
-	dryRun: boolean;
-	forceReview: boolean;
-	help: boolean;
-}
-
-export interface ReviewCliOptions extends CommonCliOptions {
+export interface ReviewCliOptions {
 	command: "review";
 	pullRequestUrl: string;
+	dryRun: boolean;
+	forceReview: boolean;
 	confirmRerun: boolean;
 	repoRoot?: string;
 }
 
-type CliOptions = ReviewCliOptions;
-
 interface HelpCliResult {
-	help: true;
+	command: "help";
 	commandName?: keyof typeof CLI_COMMAND_METADATA;
 }
 
-export type ParsedCliArgs = CliOptions | HelpCliResult;
+type ParsedCliArgs = ReviewCliOptions | HelpCliResult;
 
-function parseFlagOnlyOption(arg: string, option: CliOptionMetadata): boolean {
-	return option.flags.includes(arg);
-}
-
-function parseValueOption(options: {
-	argv: string[];
-	index: number;
-	flag: string;
-}): { value: string; nextIndex: number } {
-	const next = options.argv[options.index + 1];
-	if (!next || next.startsWith("-")) {
-		throw new CliUserError(`${options.flag} requires a value.`);
-	}
-
-	return {
-		value: next,
-		nextIndex: options.index + 1,
-	};
-}
-
-function isHelpFlag(arg: string | undefined): boolean {
-	return REVIEW_CLI_OPTION_METADATA.help.flags.includes(arg ?? "");
-}
+const HELP_FLAGS = REVIEW_CLI_OPTION_METADATA.help.flags;
 
 function parseReviewCommandArgs(argv: string[]): ReviewCliOptions {
 	const options: ReviewCliOptions = {
@@ -59,7 +30,6 @@ function parseReviewCommandArgs(argv: string[]): ReviewCliOptions {
 		dryRun: false,
 		forceReview: false,
 		confirmRerun: false,
-		help: false,
 	};
 
 	for (let index = 0; index < argv.length; index += 1) {
@@ -68,29 +38,29 @@ function parseReviewCommandArgs(argv: string[]): ReviewCliOptions {
 			continue;
 		}
 
-		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.dryRun)) {
+		if (REVIEW_CLI_OPTION_METADATA.dryRun.flags.includes(arg)) {
 			options.dryRun = true;
 			continue;
 		}
 
-		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.forceReview)) {
+		if (REVIEW_CLI_OPTION_METADATA.forceReview.flags.includes(arg)) {
 			options.forceReview = true;
 			continue;
 		}
 
-		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.confirmRerun)) {
+		if (REVIEW_CLI_OPTION_METADATA.confirmRerun.flags.includes(arg)) {
 			options.confirmRerun = true;
 			continue;
 		}
 
-		if (parseFlagOnlyOption(arg, REVIEW_CLI_OPTION_METADATA.repoRoot)) {
-			const parsed = parseValueOption({
-				argv,
-				index,
-				flag: "--repo-root",
-			});
-			options.repoRoot = parsed.value;
-			index = parsed.nextIndex;
+		if (REVIEW_CLI_OPTION_METADATA.repoRoot.flags.includes(arg)) {
+			const value = argv[index + 1];
+			if (!value || value.startsWith("-")) {
+				throw new CliUserError(`${arg} requires a value.`);
+			}
+
+			options.repoRoot = value;
+			index += 1;
 			continue;
 		}
 
@@ -109,17 +79,13 @@ function parseReviewCommandArgs(argv: string[]): ReviewCliOptions {
 	return options;
 }
 
-function isTopLevelHelp(argv: string[]): boolean {
-	return argv.length === 1 && isHelpFlag(argv[0]);
-}
-
 function isCommandHelp(argv: string[]): boolean {
 	for (const arg of argv) {
 		if (arg === "--") {
 			return false;
 		}
 
-		if (isHelpFlag(arg)) {
+		if (HELP_FLAGS.includes(arg)) {
 			return true;
 		}
 	}
@@ -135,22 +101,12 @@ function buildOptionLines(options: readonly CliOptionMetadata[]): string[] {
 	});
 }
 
-function buildCommandSummaryLines(): string[] {
-	return Object.entries(CLI_COMMAND_METADATA).map(([_commandName, command]) => {
-		const commandUsage = command.usage;
-		return `  ${commandUsage.padEnd(34)} ${command.description}`;
-	});
-}
-
-function buildCommandHelp(options: {
-	commandName: keyof typeof CLI_COMMAND_METADATA;
-	optionMetadata: readonly CliOptionMetadata[];
-}): string[] {
-	const command = CLI_COMMAND_METADATA[
-		options.commandName
-	] as CliCommandMetadata;
+function buildCommandHelp(
+	commandName: keyof typeof CLI_COMMAND_METADATA,
+): string[] {
+	const command = CLI_COMMAND_METADATA[commandName];
 	return [
-		`${options.commandName.toUpperCase()}`,
+		commandName.toUpperCase(),
 		`  ${command.description}`,
 		`  Usage: bitbucket-copilot-pr-review ${command.usage}`,
 		...(command.argumentDescription
@@ -160,52 +116,43 @@ function buildCommandHelp(options: {
 				]
 			: []),
 		"  Options:",
-		...buildOptionLines(options.optionMetadata),
+		...buildOptionLines(Object.values(REVIEW_CLI_OPTION_METADATA)),
 	];
 }
 
 export function parseCliArgs(argv: string[]): ParsedCliArgs {
-	if (argv.length === 0 || isTopLevelHelp(argv)) {
-		return { help: true };
-	}
-
 	const [command, ...rest] = argv;
-	if (command === "review" && isCommandHelp(rest)) {
-		return { help: true, commandName: "review" };
+	if (
+		command === undefined ||
+		(argv.length === 1 && HELP_FLAGS.includes(command))
+	) {
+		return { command: "help" };
 	}
 
 	if (command === "review") {
-		return parseReviewCommandArgs(rest);
+		return isCommandHelp(rest)
+			? { command: "help", commandName: "review" }
+			: parseReviewCommandArgs(rest);
 	}
 
 	throw new CliUserError(`Unknown command: ${command}. Expected 'review'.`);
-}
-
-export function isReviewCliOptions(
-	options: ParsedCliArgs,
-): options is ReviewCliOptions {
-	return "command" in options && options.command === "review";
 }
 
 export function getHelpText(
 	commandName?: keyof typeof CLI_COMMAND_METADATA,
 ): string {
 	if (commandName) {
-		return buildCommandHelp({
-			commandName,
-			optionMetadata: Object.values(REVIEW_CLI_OPTION_METADATA),
-		}).join("\n");
+		return buildCommandHelp(commandName).join("\n");
 	}
 
 	return [
 		"Usage: bitbucket-copilot-pr-review <command> [options]",
 		"",
 		"Commands:",
-		...buildCommandSummaryLines(),
+		...Object.values(CLI_COMMAND_METADATA).map(
+			(command) => `  ${command.usage.padEnd(34)} ${command.description}`,
+		),
 		"",
-		...buildCommandHelp({
-			commandName: "review",
-			optionMetadata: Object.values(REVIEW_CLI_OPTION_METADATA),
-		}),
+		...buildCommandHelp("review"),
 	].join("\n");
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { getHelpText, isReviewCliOptions, parseCliArgs } from "./args.ts";
+import { getHelpText, parseCliArgs } from "./args.ts";
 
 describe("parseCliArgs", () => {
 	it("parses review command options", () => {
@@ -14,30 +14,27 @@ describe("parseCliArgs", () => {
 			"/tmp/repo",
 		]);
 
-		assert.equal(isReviewCliOptions(parsed), true);
-		if (!isReviewCliOptions(parsed)) {
-			throw new Error("Expected review options.");
-		}
-
-		assert.equal(parsed.dryRun, true);
-		assert.equal(parsed.forceReview, true);
-		assert.equal(
-			parsed.pullRequestUrl,
-			"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
-		);
-		assert.equal(parsed.repoRoot, "/tmp/repo");
+		assert.deepEqual(parsed, {
+			command: "review",
+			pullRequestUrl:
+				"https://bitbucket.example.com/projects/PROJ/repos/repo/pull-requests/123",
+			dryRun: true,
+			forceReview: true,
+			confirmRerun: false,
+			repoRoot: "/tmp/repo",
+		});
 	});
 
 	it("returns help for top-level help", () => {
 		const parsed = parseCliArgs(["--help"]);
 
-		assert.deepEqual(parsed, { help: true });
+		assert.deepEqual(parsed, { command: "help" });
 	});
 
 	it("returns help for command help", () => {
 		const parsed = parseCliArgs(["review", "--help"]);
 
-		assert.deepEqual(parsed, { help: true, commandName: "review" });
+		assert.deepEqual(parsed, { command: "help", commandName: "review" });
 	});
 
 	it("returns help for command help after the positional argument", () => {
@@ -47,7 +44,7 @@ describe("parseCliArgs", () => {
 			"--help",
 		]);
 
-		assert.deepEqual(parsed, { help: true, commandName: "review" });
+		assert.deepEqual(parsed, { command: "help", commandName: "review" });
 	});
 
 	it("rejects option values that are actually another flag", () => {
