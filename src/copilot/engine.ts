@@ -290,6 +290,7 @@ export async function runCopilotReview(
 		dependencies.resolveGitHubToken ?? resolveCopilotGitHubToken
 	)(config, logger);
 	const { assistantMessage, copilotUsage } = await withRuntimeDirectory(
+		config,
 		logger,
 		(runtimeDirectory) => {
 			const clientOptions = buildCopilotClientOptions(

@@ -91,6 +91,7 @@ Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pu
 | `COPILOT_MODEL` | `gpt-5.6-sol` | Copilot model override. |
 | `COPILOT_REASONING_EFFORT` | `medium` | Copilot reasoning effort. |
 | `COPILOT_TIMEOUT_MS` | `1800000` | Copilot timeout in milliseconds. |
+| `COPILOT_RUNTIME_LOG_DIR` | logs are deleted with the temporary runtime directory | Directory that keeps Copilot runtime logs after the run, for example as a CI artifact. Created when missing. |
 | `CI_SUMMARY_PATH` | - | Path to a CI summary file included in review context. |
 | `REPORT_KEY` | `copilot-pr-review` | Code Insights report key. |
 | `REPORT_TITLE` | `Copilot PR Review` | Code Insights report title. |
@@ -278,6 +279,7 @@ Useful reviewer env vars in CI:
 - `REPORTER_NAME=GitHub Copilot`
 - `COPILOT_TIMEOUT_MS=1800000`
 - `REVIEW_IGNORE_PATHS=i18n/locales/**/*.json`
+- `COPILOT_RUNTIME_LOG_DIR="$PWD/copilot-logs"`, archived as a job artifact, to keep Copilot runtime logs for diagnosing failed reviews
 
 For a safe first rollout, start with `--dry-run`, inspect the payload in your CI logs, then remove `--dry-run` once the Code Insights output looks right.
 

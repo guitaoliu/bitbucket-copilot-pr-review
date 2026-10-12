@@ -82,6 +82,10 @@ export function loadConfig(
 			model: settings.COPILOT_MODEL,
 			reasoningEffort: settings.COPILOT_REASONING_EFFORT,
 			timeoutMs: settings.COPILOT_TIMEOUT_MS,
+			runtimeLogDir:
+				settings.COPILOT_RUNTIME_LOG_DIR === undefined
+					? undefined
+					: path.resolve(settings.COPILOT_RUNTIME_LOG_DIR),
 		},
 		report: {
 			key: normalizeReportKey(
@@ -117,6 +121,7 @@ export function resolveReviewerConfig(
 	return {
 		...operator,
 		copilot: {
+			...copilot,
 			model:
 				copilot.model ??
 				repoConfig?.copilot?.model ??

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 import type {
 	CopilotClientOptions,
@@ -487,6 +489,34 @@ describe("runCopilotReview", () => {
 		);
 		assert.deepEqual(runtimeDirectoryEntries, []);
 		assert.equal(existsSync(runtimeDirectory), false);
+	});
+
+	it("keeps Copilot runtime logs in the configured directory after the run", async (t) => {
+		const root = mkdtempSync(path.join(tmpdir(), "copilot-runtime-logs-"));
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		const runtimeLogDir = path.join(root, "nested", "logs");
+		const logSpy = createLoggerSpy();
+		const copilot = createFakeCopilot([cleanReview]);
+
+		await runCopilotReview(
+			{ ...config, copilot: { ...config.copilot, runtimeLogDir } },
+			createReviewContext(),
+			createGitStub(),
+			logSpy.logger,
+			copilot.dependencies,
+		);
+
+		const connection = copilot.createdOptions[0]?.connection as
+			| { args?: string[] }
+			| undefined;
+		assert.ok(connection?.args?.includes(`--log-dir=${runtimeLogDir}`));
+		assert.equal(existsSync(runtimeLogDir), true);
+		assert.ok(
+			logSpy.infoEntries.some(
+				(entry) =>
+					entry.message === `Writing Copilot runtime logs to ${runtimeLogDir}`,
+			),
+		);
 	});
 
 	it("passes a resolved GitHub token into the created Copilot client", async () => {

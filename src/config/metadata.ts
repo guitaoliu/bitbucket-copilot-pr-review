@@ -119,6 +119,12 @@ export const ENV_VARIABLES = {
 		description: "Copilot timeout in milliseconds.",
 		default: 1_800_000,
 	},
+	COPILOT_RUNTIME_LOG_DIR: {
+		parser: STRING_PARSER,
+		description:
+			"Directory that keeps Copilot runtime logs after the run, for example as a CI artifact. Created when missing.",
+		docsDefault: "logs are deleted with the temporary runtime directory",
+	},
 	CI_SUMMARY_PATH: {
 		parser: STRING_PARSER,
 		description: "Path to a CI summary file included in review context.",

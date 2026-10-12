@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -59,7 +59,7 @@ export function buildCopilotClientOptions(
 				"--disable-builtin-mcps",
 				"--no-custom-instructions",
 				"--no-auto-update",
-				`--log-dir=${path.join(runtimeDirectory, "logs")}`,
+				`--log-dir=${config.copilot.runtimeLogDir ?? path.join(runtimeDirectory, "logs")}`,
 			],
 		}),
 		logLevel: config.logLevel === "debug" ? "debug" : "error",
@@ -107,9 +107,16 @@ export function wrapCopilotStageError(
  * an empty directory; repository content is reachable only through review tools.
  */
 export async function withRuntimeDirectory<T>(
+	config: ReviewerConfig,
 	logger: Logger,
 	run: (runtimeDirectory: string) => Promise<T>,
 ): Promise<T> {
+	const { runtimeLogDir } = config.copilot;
+	if (runtimeLogDir !== undefined) {
+		await mkdir(runtimeLogDir, { recursive: true });
+		logger.info(`Writing Copilot runtime logs to ${runtimeLogDir}`);
+	}
+
 	const runtimeDirectory = await mkdtemp(
 		path.join(tmpdir(), "bitbucket-copilot-pr-review-runtime-"),
 	);

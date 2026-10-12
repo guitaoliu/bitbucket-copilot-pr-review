@@ -51,6 +51,7 @@ export interface ReviewerConfig {
 		model: string;
 		reasoningEffort: ReasoningEffort;
 		timeoutMs: number;
+		runtimeLogDir?: string | undefined;
 	};
 	report: {
 		key: string;

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { describe, it } from "node:test";
 
 import type { ReviewCliOptions } from "./args.ts";
@@ -57,6 +58,7 @@ describe("loadConfig", () => {
 			model: "gpt-5.6-sol",
 			reasoningEffort: "medium",
 			timeoutMs: 1_800_000,
+			runtimeLogDir: undefined,
 		});
 		assert.equal(config.report.key, "copilot-pr-review");
 		assert.equal(config.report.title, "Copilot PR Review");
@@ -77,6 +79,7 @@ describe("loadConfig", () => {
 			model: undefined,
 			reasoningEffort: undefined,
 			timeoutMs: undefined,
+			runtimeLogDir: undefined,
 		});
 		assert.equal(operatorConfig.report.title, undefined);
 		assert.equal(operatorConfig.review.skipBranchPrefixes, undefined);
@@ -107,6 +110,21 @@ describe("loadConfig", () => {
 					BITBUCKET_CA_CERT_PATH: "/definitely/missing/ca.pem",
 				}),
 			/BITBUCKET_CA_CERT_PATH is not readable: \/definitely\/missing\/ca\.pem/,
+		);
+	});
+
+	it("resolves COPILOT_RUNTIME_LOG_DIR to an absolute path", () => {
+		const config = resolveFromEnv({
+			COPILOT_RUNTIME_LOG_DIR: "artifacts/copilot-logs",
+		});
+
+		assert.equal(
+			config.copilot.runtimeLogDir,
+			path.resolve("artifacts/copilot-logs"),
+		);
+		assert.throws(
+			() => parseRepoReviewConfig('{"copilot":{"runtimeLogDir":"logs"}}'),
+			/runtimeLogDir/,
 		);
 	});
 
@@ -192,6 +210,7 @@ describe("resolveReviewerConfig precedence", () => {
 			model: "repo-model",
 			reasoningEffort: "high",
 			timeoutMs: 600000,
+			runtimeLogDir: undefined,
 		});
 		assert.equal(config.report.title, "Repo title");
 		assert.equal(config.report.commentStrategy, "update");
@@ -219,6 +238,7 @@ describe("resolveReviewerConfig precedence", () => {
 			model: "env-model",
 			reasoningEffort: "max",
 			timeoutMs: 120000,
+			runtimeLogDir: undefined,
 		});
 		assert.equal(config.report.title, "Env title");
 		assert.equal(config.report.commentStrategy, "recreate");
