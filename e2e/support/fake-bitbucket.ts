@@ -24,6 +24,7 @@ export interface FakeBitbucket {
 	requests: string[];
 	comments: Map<number, FakeComment>;
 	reports: Map<string, Record<string, unknown>>;
+	addComment(text: string, anchor?: FakeComment["anchor"]): FakeComment;
 	close(): Promise<void>;
 }
 
@@ -34,15 +35,31 @@ function sendJson(response: ServerResponse, status: number, body?: unknown) {
 
 /**
  * In-memory Bitbucket Data Center covering the pull request, activity,
- * comment, and Code Insights endpoints the reviewer calls.
+ * comment, and Code Insights endpoints the reviewer calls. Activities are
+ * listed newest first and paged by at most `activityPageSize` entries.
  */
 export async function startFakeBitbucket(
 	pullRequest: FakePullRequest,
+	options: { activityPageSize?: number } = {},
 ): Promise<FakeBitbucket> {
 	const requests: string[] = [];
 	const comments = new Map<number, FakeComment>();
 	const reports = new Map<string, Record<string, unknown>>();
+	const activityPageSize = options.activityPageSize ?? 1000;
 	let nextCommentId = 1;
+	const addComment = (
+		text: string,
+		anchor?: FakeComment["anchor"],
+	): FakeComment => {
+		const comment: FakeComment = {
+			id: nextCommentId++,
+			version: 0,
+			text,
+			...(anchor ? { anchor: { path: anchor.path, line: anchor.line } } : {}),
+		};
+		comments.set(comment.id, comment);
+		return comment;
+	};
 	const pullRequestPath = `/rest/api/latest/projects/${pullRequest.projectKey}/repos/${pullRequest.repoSlug}/pull-requests/${pullRequest.id}`;
 	const reportPattern =
 		/^\/rest\/insights\/latest\/projects\/[^/]+\/repos\/[^/]+\/commits\/([^/]+)\/reports\/([^/]+)$/;
@@ -58,7 +75,7 @@ export async function startFakeBitbucket(
 		const method = request.method ?? "GET";
 		const rawBody = await readRequestBody(request);
 		const body = rawBody ? JSON.parse(rawBody) : undefined;
-		requests.push(`${method} ${url.pathname}`);
+		requests.push(`${method} ${url.pathname}${url.search}`);
 
 		if (method === "GET" && url.pathname === pullRequestPath) {
 			sendJson(response, 200, {
@@ -85,28 +102,31 @@ export async function startFakeBitbucket(
 		}
 
 		if (method === "GET" && url.pathname === `${pullRequestPath}/activities`) {
+			const start = Number(url.searchParams.get("start") ?? 0);
+			const limit = Math.min(
+				Number(url.searchParams.get("limit") ?? 25),
+				activityPageSize,
+			);
+			const activities = [...comments.values()].reverse();
+			const values = activities.slice(start, start + limit);
+			const isLastPage = start + values.length >= activities.length;
 			sendJson(response, 200, {
-				values: [...comments.values()].map((comment) => ({
+				start,
+				limit,
+				size: values.length,
+				values: values.map((comment) => ({
 					id: comment.id,
 					action: "COMMENTED",
 					comment,
 				})),
-				isLastPage: true,
+				isLastPage,
+				...(isLastPage ? {} : { nextPageStart: start + values.length }),
 			});
 			return;
 		}
 
 		if (method === "POST" && url.pathname === `${pullRequestPath}/comments`) {
-			const comment: FakeComment = {
-				id: nextCommentId++,
-				version: 0,
-				text: body.text,
-				...(body.anchor
-					? { anchor: { path: body.anchor.path, line: body.anchor.line } }
-					: {}),
-			};
-			comments.set(comment.id, comment);
-			sendJson(response, 201, comment);
+			sendJson(response, 201, addComment(body.text, body.anchor));
 			return;
 		}
 
@@ -158,6 +178,7 @@ export async function startFakeBitbucket(
 		requests,
 		comments,
 		reports,
+		addComment,
 		close: () => closeServer(server),
 	};
 }

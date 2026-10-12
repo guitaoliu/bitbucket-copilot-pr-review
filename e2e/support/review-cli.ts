@@ -27,12 +27,20 @@ export async function runReviewCli(options: {
 	repoRoot: string;
 	pullRequestUrl: string;
 	modelUrl: string;
+	args?: string[];
 }): Promise<ReviewCliRun> {
 	const home = mkdtempSync(path.join(tmpdir(), "bcpr-e2e-home-"));
 	try {
 		const child = spawn(
 			process.execPath,
-			["--import", fakeModelPreload, cliPath, "review", options.pullRequestUrl],
+			[
+				"--import",
+				fakeModelPreload,
+				cliPath,
+				"review",
+				options.pullRequestUrl,
+				...(options.args ?? []),
+			],
 			{
 				cwd: options.repoRoot,
 				env: {

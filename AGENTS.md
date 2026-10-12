@@ -123,7 +123,7 @@ This file is for agentic coding assistants working in this repository.
 - When changing runtime behavior, add or update tests in the same area rather than relying on end-to-end coverage only.
 - Use small fake clients/dependencies and injected functions for orchestration tests, following `src/review/runner.test.ts` patterns.
 - Keep tests deterministic; avoid network or real Bitbucket calls.
-- `e2e/` runs the built CLI against the real bundled Copilot runtime, a scripted OpenAI-compatible model injected as a BYOK provider by `e2e/support/use-fake-model.ts`, an in-memory Bitbucket server, and a temporary git repository. It needs no Copilot account or model access; extend `e2e/support/scripted-reviewer.ts` when a new end-to-end behavior needs coverage.
+- `e2e/` runs the built CLI against the real bundled Copilot runtime, a scripted OpenAI-compatible model injected as a BYOK provider by `e2e/support/use-fake-model.ts`, an in-memory Bitbucket server, and a temporary git repository. It needs no Copilot account or model access. Add each new end-to-end behavior as its own `e2e/*.e2e.test.ts` file that starts isolated servers through `startReviewScenario` in `e2e/support/scenario.ts`, scripting the model with the `createScriptedReviewer` options in `e2e/support/scripted-reviewer.ts`; files run in parallel.
 
 ## Repository-specific coding patterns
 

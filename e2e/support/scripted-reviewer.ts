@@ -1,13 +1,23 @@
 import type { ChatMessage, ModelStep } from "./fake-model.ts";
 
-interface ScriptedToolCall {
+export interface ScriptedToolCall {
 	name: string;
 	args: Record<string, unknown>;
+}
+
+interface ObservedToolCall extends ScriptedToolCall {
 	result?: string;
 }
 
-function collectToolCalls(messages: ChatMessage[]): ScriptedToolCall[] {
-	const calls = new Map<string, ScriptedToolCall>();
+export interface ScriptedReviewerOptions {
+	toolCalls?: ScriptedToolCall[];
+	skipReviewChanges?: true;
+}
+
+export type ScriptedReviewer = (messages: ChatMessage[]) => ModelStep;
+
+function collectToolCalls(messages: ChatMessage[]): ObservedToolCall[] {
+	const calls = new Map<string, ObservedToolCall>();
 	for (const message of messages) {
 		for (const call of message.tool_calls ?? []) {
 			calls.set(call.id, {
@@ -29,8 +39,19 @@ function collectToolCalls(messages: ChatMessage[]): ScriptedToolCall[] {
 	return [...calls.values()];
 }
 
-const PLANNED_TOOL_CALLS: ScriptedToolCall[] = [
-	{ name: "read_file", args: { revision: "head", path: "src/app.js" } },
+export const VALID_FINDING_ARGS = {
+	path: "src/app.js",
+	line: 2,
+	severity: "MEDIUM",
+	type: "BUG",
+	confidence: "high",
+	title: "Loose equality changes comparison semantics",
+	details:
+		'`a == b` coerces types, so `same(1, "1")` now returns true where it returned false before.',
+	category: "correctness",
+};
+
+export const SECRET_PROBE_CALLS: ScriptedToolCall[] = [
 	{ name: "read_file", args: { revision: "head", path: ".env" } },
 	{
 		name: "read_file",
@@ -45,20 +66,31 @@ const PLANNED_TOOL_CALLS: ScriptedToolCall[] = [
 		},
 	},
 	{ name: "find_files", args: { revision: "head", paths: [] } },
-	{
-		name: "emit_finding",
-		args: {
-			path: "src/app.js",
-			line: 2,
-			severity: "MEDIUM",
-			type: "BUG",
-			confidence: "high",
-			title: "Loose equality changes comparison semantics",
-			details:
-				'`a == b` coerces types, so `same(1, "1")` now returns true where it returned false before.',
-			category: "correctness",
-		},
-	},
+];
+
+export const READ_CHANGED_FILE_CALL: ScriptedToolCall = {
+	name: "read_file",
+	args: { revision: "head", path: "src/app.js" },
+};
+
+export const EMIT_VALID_FINDING_CALL: ScriptedToolCall = {
+	name: "emit_finding",
+	args: VALID_FINDING_ARGS,
+};
+
+export const RECORD_SUMMARY_CALL: ScriptedToolCall = {
+	name: "record_pr_summary",
+	args: { summary: "Switches `same` from strict to loose equality." },
+};
+
+/**
+ * Reads the changed file, probes secret-bearing paths, emits one valid and one
+ * out-of-scope finding, then records a summary.
+ */
+export const DEFAULT_TOOL_CALLS: ScriptedToolCall[] = [
+	READ_CHANGED_FILE_CALL,
+	...SECRET_PROBE_CALLS,
+	EMIT_VALID_FINDING_CALL,
 	{
 		name: "emit_finding",
 		args: {
@@ -71,33 +103,35 @@ const PLANNED_TOOL_CALLS: ScriptedToolCall[] = [
 			details: "The reviewer must reject this location.",
 		},
 	},
-	{
-		name: "record_pr_summary",
-		args: { summary: "Switches `same` from strict to loose equality." },
-	},
+	RECORD_SUMMARY_CALL,
 ];
 
 /**
- * Scripted reviewer: reads every review page, probes secret-bearing paths,
- * emits one valid and one out-of-scope finding, then records a summary.
+ * Scripted reviewer: reads every review_changes page unless told to skip the
+ * review stream, then issues the planned tool calls in order and finishes.
  */
-export function nextReviewerStep(messages: ChatMessage[]): ModelStep {
-	const calls = collectToolCalls(messages);
-	const reviewCalls = calls.filter((call) => call.name === "review_changes");
-	const nextPage = reviewCalls
-		.at(-1)
-		?.result?.match(/"nextPage":\s*(\d+)/)?.[1];
-	if (reviewCalls.length === 0 || nextPage) {
-		return {
-			toolCall: {
-				name: "review_changes",
-				args: { page: nextPage ? Number(nextPage) : 1 },
-			},
-		};
-	}
+export function createScriptedReviewer(
+	options: ScriptedReviewerOptions = {},
+): ScriptedReviewer {
+	const toolCalls = options.toolCalls ?? DEFAULT_TOOL_CALLS;
+	return (messages) => {
+		const calls = collectToolCalls(messages);
+		const reviewCalls = calls.filter((call) => call.name === "review_changes");
+		const nextPage = reviewCalls
+			.at(-1)
+			?.result?.match(/"nextPage":\s*(\d+)/)?.[1];
+		if (!options.skipReviewChanges && (reviewCalls.length === 0 || nextPage)) {
+			return {
+				toolCall: {
+					name: "review_changes",
+					args: { page: nextPage ? Number(nextPage) : 1 },
+				},
+			};
+		}
 
-	const planned = PLANNED_TOOL_CALLS[calls.length - reviewCalls.length];
-	return planned
-		? { toolCall: { name: planned.name, args: planned.args } }
-		: { reply: "Review complete." };
+		const planned = toolCalls[calls.length - reviewCalls.length];
+		return planned
+			? { toolCall: { name: planned.name, args: planned.args } }
+			: { reply: "Review complete." };
+	};
 }
