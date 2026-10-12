@@ -5,7 +5,7 @@ This guide collects the implementation and operator detail that is intentionally
 ## Runtime Requirements
 
 - Node.js 24.12+
-- pnpm 10+
+- pnpm 12 (exact version pinned by `packageManager` in `package.json`)
 - Git available on `PATH`; Copilot reads repository content only through the read-only `review_changes`, `read_file`, `search_repo`, and `find_files` tools
 - `@github/copilot` is installed with this package so the reviewer can resolve and launch the bundled Copilot CLI runtime from `node_modules`
 - a GitHub Copilot-enabled account
