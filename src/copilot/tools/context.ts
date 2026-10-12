@@ -1,13 +1,9 @@
 import type { GitRepository } from "../../git/repo.ts";
-import type { ChangedFile } from "../../git/types.ts";
+import type { ReviewableFile } from "../../git/types.ts";
 import {
 	createReviewedFileLookup,
 	type FindingRejectionReason,
 } from "../../policy/findings.ts";
-import {
-	type ChangedLineResolver,
-	createChangedLineResolver,
-} from "../../review/changed-lines.ts";
 import type {
 	FindingDraft,
 	ReviewContext,
@@ -48,8 +44,7 @@ export interface ReviewToolsOptions {
 }
 
 export interface ReviewToolContext extends ReviewToolsOptions {
-	reviewedFiles: ReadonlyMap<string, ChangedFile>;
-	resolveLineChanges: ChangedLineResolver;
+	reviewedFiles: ReadonlyMap<string, ReviewableFile>;
 }
 
 export function createReviewToolState(): ReviewToolState {
@@ -75,7 +70,6 @@ export function createReviewToolContext(
 	return {
 		...options,
 		reviewedFiles: createReviewedFileLookup(options.context.reviewableFiles),
-		resolveLineChanges: createChangedLineResolver(options.context, options.git),
 	};
 }
 

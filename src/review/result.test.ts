@@ -20,30 +20,18 @@ function createReviewContext(): ReviewContext {
 	const pr = createPullRequest();
 
 	return {
-		repoRoot: "/tmp/repo",
 		pr,
 		headCommit: pr.source.latestCommit,
 		baseCommit: pr.target.latestCommit,
 		mergeBaseCommit: pr.target.latestCommit,
 		reviewRevision: "review-rev-123",
-		rawDiff: "",
+		reviewDiff: "",
 		diffStats: { fileCount: 2, additions: 3, deletions: 1 },
 		reviewableFiles: [
 			{
 				path: "src/service.ts",
 				status: "modified",
-				patch: "diff --git a/src/service.ts b/src/service.ts",
 				changedLines: [42],
-				hunks: [
-					{
-						oldStart: 42,
-						oldLines: 1,
-						newStart: 42,
-						newLines: 1,
-						header: "",
-						changedLines: [42],
-					},
-				],
 				additions: 1,
 				deletions: 0,
 				isBinary: false,
@@ -51,18 +39,7 @@ function createReviewContext(): ReviewContext {
 			{
 				path: "src/other.ts",
 				status: "modified",
-				patch: "diff --git a/src/other.ts b/src/other.ts",
 				changedLines: [8],
-				hunks: [
-					{
-						oldStart: 8,
-						oldLines: 1,
-						newStart: 8,
-						newLines: 1,
-						header: "",
-						changedLines: [8],
-					},
-				],
 				additions: 1,
 				deletions: 0,
 				isBinary: false,
@@ -186,30 +163,22 @@ describe("buildReviewArtifacts", () => {
 	});
 
 	it("bounds large comment bodies under the Bitbucket limit", () => {
-		const context = createReviewContext();
-		context.reviewableFiles = Array.from({ length: 200 }, (_, index) => ({
+		const reviewableFiles = Array.from({ length: 200 }, (_, index) => ({
 			path: `src/file-${index}.ts`,
 			status: "modified" as const,
-			patch: `diff --git a/src/file-${index}.ts b/src/file-${index}.ts`,
 			changedLines: [index + 1],
-			hunks: [
-				{
-					oldStart: index + 1,
-					oldLines: 1,
-					newStart: index + 1,
-					newLines: 1,
-					header: "",
-					changedLines: [index + 1],
-				},
-			],
 			additions: 1,
 			deletions: 0,
 			isBinary: false,
 		}));
-		context.diffStats = {
-			fileCount: context.reviewableFiles.length,
-			additions: context.reviewableFiles.length,
-			deletions: 0,
+		const context: ReviewContext = {
+			...createReviewContext(),
+			reviewableFiles,
+			diffStats: {
+				fileCount: reviewableFiles.length,
+				additions: reviewableFiles.length,
+				deletions: 0,
+			},
 		};
 
 		const review: ReviewOutcome = {

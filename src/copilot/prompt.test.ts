@@ -39,7 +39,6 @@ const config: ReviewerConfig = {
 };
 
 const context: ReviewContext = {
-	repoRoot: "/tmp/repo",
 	pr: {
 		id: 123,
 		version: 1,
@@ -66,24 +65,13 @@ const context: ReviewContext = {
 	baseCommit: "base-123",
 	mergeBaseCommit: "base-123",
 	reviewRevision: "review-rev-123",
-	rawDiff: "",
+	reviewDiff: "",
 	diffStats: { fileCount: 1, additions: 2, deletions: 1 },
 	reviewableFiles: [
 		{
 			path: "src/example.ts",
 			status: "modified",
-			patch: "diff --git a/src/example.ts b/src/example.ts",
 			changedLines: [10],
-			hunks: [
-				{
-					oldStart: 10,
-					oldLines: 1,
-					newStart: 10,
-					newLines: 1,
-					header: "",
-					changedLines: [10],
-				},
-			],
 			additions: 1,
 			deletions: 1,
 			isBinary: false,
@@ -195,6 +183,7 @@ describe("buildPrompt", () => {
 					additions: 2,
 					deletions: 1,
 					isBinary: false,
+					changedLines: [1, 2],
 				},
 				{
 					path: "src/new name.ts",
@@ -203,6 +192,7 @@ describe("buildPrompt", () => {
 					additions: 4,
 					deletions: 3,
 					isBinary: false,
+					changedLines: [1, 2, 3, 4],
 				},
 			],
 		});
@@ -218,18 +208,7 @@ describe("buildPrompt", () => {
 			reviewableFiles: Array.from({ length: 40 }, (_, index) => ({
 				path: `src/example-${index}.ts`,
 				status: "modified" as const,
-				patch: `diff --git a/src/example-${index}.ts b/src/example-${index}.ts`,
 				changedLines: [index + 1],
-				hunks: [
-					{
-						oldStart: index + 1,
-						oldLines: 1,
-						newStart: index + 1,
-						newLines: 1,
-						header: "",
-						changedLines: [index + 1],
-					},
-				],
 				additions: 1,
 				deletions: 0,
 				isBinary: false,

@@ -11,7 +11,7 @@ import type {
 import packageJson from "../../package.json" with { type: "json" };
 import type { ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
-import type { ChangedFile } from "../git/types.ts";
+import type { ReviewableFile } from "../git/types.ts";
 import type { ReviewContext } from "../review/types.ts";
 import type { Logger } from "../shared/logger.ts";
 import {
@@ -82,21 +82,11 @@ function createLoggerSpy(): {
 	};
 }
 
-function createChangedFile(): ChangedFile {
+function createChangedFile(): ReviewableFile {
 	return {
 		path: "src/example.ts",
 		status: "modified",
 		changedLines: [1],
-		hunks: [
-			{
-				oldStart: 1,
-				oldLines: 1,
-				newStart: 1,
-				newLines: 1,
-				header: "",
-				changedLines: [1],
-			},
-		],
 		additions: 1,
 		deletions: 0,
 		isBinary: false,
@@ -105,7 +95,6 @@ function createChangedFile(): ChangedFile {
 
 function createReviewContext(): ReviewContext {
 	return {
-		repoRoot: "/tmp/repo",
 		pr: {
 			id: 123,
 			version: 1,
@@ -133,7 +122,8 @@ function createReviewContext(): ReviewContext {
 		baseCommit: "base-123",
 		mergeBaseCommit: "base-123",
 		reviewRevision: "review-rev-123",
-		rawDiff: "",
+		reviewDiff:
+			"diff --git a/src/example.ts b/src/example.ts\n+const changed = true;",
 		diffStats: { fileCount: 1, additions: 1, deletions: 0 },
 		reviewableFiles: [createChangedFile()],
 	};
@@ -141,8 +131,6 @@ function createReviewContext(): ReviewContext {
 
 function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 	return {
-		diffPaths: async () =>
-			"diff --git a/src/example.ts b/src/example.ts\n+const changed = true;",
 		listFilesAtCommit: async () => [],
 		readTextFileAtCommit: async () => ({ status: "not_found" as const }),
 		searchTextAtCommit: async () => [],

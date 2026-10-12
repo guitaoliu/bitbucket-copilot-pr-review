@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { OperatorConfig, ReviewerConfig } from "../config/types.ts";
-import { applyNumstatDiff } from "../git/diff.ts";
+import { REVIEW_PROMPT_VERSION } from "../copilot/prompt-version.ts";
+import { parseChangedLines, summarizeDiffStats } from "../git/diff.ts";
 import { GitRepository } from "../git/repo.ts";
 import { filterChangedFiles } from "../policy/files.ts";
 import type { Logger } from "../shared/logger.ts";
@@ -75,14 +76,21 @@ export async function buildReviewContext(
 	pr: PullRequestInfo,
 ): Promise<ReviewContext> {
 	const { config, git, mergeBaseCommit } = prepared;
-	const changedFiles = await git.diffNameStatus(
-		mergeBaseCommit,
-		pr.source.latestCommit,
-	);
-	const diffStats = applyNumstatDiff(
-		changedFiles,
-		await git.diffNumstat(mergeBaseCommit, pr.source.latestCommit),
-	);
+	const headCommit = pr.source.latestCommit;
+	const changedFiles = await git.diffChangedFiles(mergeBaseCommit, headCommit);
+	const scope = filterChangedFiles(changedFiles, config.review.ignorePaths);
+	const reviewDiff =
+		scope.length === 0
+			? ""
+			: await git.diffPaths(
+					mergeBaseCommit,
+					headCommit,
+					scope.flatMap((file) =>
+						file.oldPath ? [file.oldPath, file.path] : [file.path],
+					),
+					3,
+				);
+	const changedLinesByPath = parseChangedLines(reviewDiff);
 	const ciSummary = await loadCiSummary(config.ciSummaryPath, logger);
 	const reviewRevision = buildReviewRevision(
 		omitUndefined({
@@ -90,7 +98,7 @@ export async function buildReviewContext(
 			headCommit: pr.source.latestCommit,
 			mergeBaseCommit,
 			ciSummary,
-			promptVersion: "2026-09-search-evidence-1",
+			promptVersion: REVIEW_PROMPT_VERSION,
 			copilot: {
 				model: config.copilot.model,
 				reasoningEffort: config.copilot.reasoningEffort,
@@ -102,17 +110,18 @@ export async function buildReviewContext(
 			},
 		}),
 	);
-	const filtered = filterChangedFiles(changedFiles, config.review.ignorePaths);
 	return omitUndefined({
-		repoRoot: config.repoRoot,
 		pr,
-		headCommit: pr.source.latestCommit,
+		headCommit,
 		baseCommit: pr.target.latestCommit,
 		mergeBaseCommit,
 		reviewRevision,
-		rawDiff: "",
-		diffStats,
-		reviewableFiles: filtered,
+		diffStats: summarizeDiffStats(changedFiles),
+		reviewableFiles: scope.map((file) => ({
+			...file,
+			changedLines: changedLinesByPath.get(file.path) ?? [],
+		})),
+		reviewDiff,
 		ciSummary,
 	}) satisfies ReviewContext;
 }

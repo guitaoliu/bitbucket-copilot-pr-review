@@ -6,7 +6,6 @@ import type { ReviewContext, ReviewSummaryDrafts } from "./types.ts";
 
 function createContext(reviewedFileCount = 2): ReviewContext {
 	return {
-		repoRoot: "/tmp/repo",
 		pr: {
 			id: 123,
 			version: 1,
@@ -33,7 +32,7 @@ function createContext(reviewedFileCount = 2): ReviewContext {
 		baseCommit: "base-123",
 		mergeBaseCommit: "base-123",
 		reviewRevision: "review-rev-123",
-		rawDiff: "",
+		reviewDiff: "",
 		diffStats: {
 			fileCount: reviewedFileCount,
 			additions: reviewedFileCount,
@@ -42,18 +41,7 @@ function createContext(reviewedFileCount = 2): ReviewContext {
 		reviewableFiles: Array.from({ length: reviewedFileCount }, (_, index) => ({
 			path: `src/file-${index}.ts`,
 			status: "modified" as const,
-			patch: `diff --git a/src/file-${index}.ts b/src/file-${index}.ts`,
 			changedLines: [index + 1],
-			hunks: [
-				{
-					oldStart: index + 1,
-					oldLines: 1,
-					newStart: index + 1,
-					newLines: 1,
-					header: "",
-					changedLines: [index + 1],
-				},
-			],
 			additions: 1,
 			deletions: 0,
 			isBinary: false,

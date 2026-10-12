@@ -11,19 +11,6 @@ import {
 const reviewedFile: ChangedFile = {
 	path: "src/service.ts",
 	status: "modified",
-	patch:
-		"diff --git a/src/service.ts b/src/service.ts\n@@ -8,1 +10,2 @@\n-foo\n+bar\n+baz",
-	changedLines: [10, 11],
-	hunks: [
-		{
-			oldStart: 8,
-			oldLines: 1,
-			newStart: 10,
-			newLines: 2,
-			header: "",
-			changedLines: [10, 11],
-		},
-	],
 	additions: 2,
 	deletions: 1,
 	isBinary: false,
@@ -37,14 +24,12 @@ describe("filterChangedFiles", () => {
 				{
 					...reviewedFile,
 					path: "pnpm-lock.yaml",
-					changedLines: [1],
 					status: "modified",
 				},
 				{
 					...reviewedFile,
 					path: "src/removed.ts",
 					status: "deleted",
-					changedLines: [],
 				},
 			],
 			[],

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { z } from "zod";
-import type { ChangedFile, HunkSummary } from "../git/types.ts";
+import type { ReviewableFile } from "../git/types.ts";
 import { buildFindingThreadKey } from "../review/finding-identity.ts";
 import type {
 	Confidence,
@@ -29,11 +29,6 @@ const TYPE_RANK: Record<ReviewFinding["type"], number> = {
 	BUG: 2,
 	VULNERABILITY: 3,
 };
-
-export interface FileLineChanges {
-	changedLines: number[];
-	hunks: HunkSummary[];
-}
 
 export type FindingRejectionReason = "unknown_file" | "unchanged_line";
 
@@ -100,9 +95,9 @@ export const findingDraftSchema = z
 	);
 
 export function createReviewedFileLookup(
-	reviewableFiles: ChangedFile[],
-): ReadonlyMap<string, ChangedFile> {
-	const lookup = new Map<string, ChangedFile>();
+	reviewableFiles: readonly ReviewableFile[],
+): ReadonlyMap<string, ReviewableFile> {
+	const lookup = new Map<string, ReviewableFile>();
 	const renamedOldPathCounts = new Map<string, number>();
 	for (const file of reviewableFiles) {
 		lookup.set(file.path, file);
@@ -127,38 +122,10 @@ export function createReviewedFileLookup(
 	return lookup;
 }
 
-function findNearestChangedLineInContainingHunk(
-	line: number,
-	hunks: HunkSummary[],
-): number | undefined {
-	let nearestLine: number | undefined;
-	let nearestDistance = Number.POSITIVE_INFINITY;
-	for (const hunk of hunks) {
-		const hunkEnd = Math.max(
-			hunk.newStart,
-			hunk.newStart + Math.max(hunk.newLines, 1) - 1,
-		);
-		if (line < hunk.newStart || line > hunkEnd) {
-			continue;
-		}
-
-		for (const changedLine of hunk.changedLines) {
-			const distance = Math.abs(changedLine - line);
-			if (distance < nearestDistance) {
-				nearestDistance = distance;
-				nearestLine = changedLine;
-			}
-		}
-	}
-
-	return nearestLine;
-}
-
-export async function validateFindingLocation(
+export function validateFindingLocation(
 	draft: FindingDraft,
-	reviewedFiles: ReadonlyMap<string, ChangedFile>,
-	resolveLineChanges: (file: ChangedFile) => Promise<FileLineChanges>,
-): Promise<FindingLocationResult> {
+	reviewedFiles: ReadonlyMap<string, ReviewableFile>,
+): FindingLocationResult {
 	const file = reviewedFiles.get(draft.path);
 	if (!file) {
 		return {
@@ -168,31 +135,21 @@ export async function validateFindingLocation(
 		};
 	}
 
-	const notes =
-		draft.path === file.path
-			? []
-			: [`normalized path from ${draft.path} to ${file.path}`];
-	let line = draft.line;
-	if (line > 0) {
-		const { changedLines, hunks } = await resolveLineChanges(file);
-		if (!changedLines.includes(line)) {
-			const remappedLine = findNearestChangedLineInContainingHunk(line, hunks);
-			if (remappedLine === undefined) {
-				return {
-					ok: false,
-					reason: "unchanged_line",
-					message: `Line ${line} is not a changed line in ${file.path}. Valid changed line ranges: ${formatLineRanges(changedLines) || "none"}`,
-				};
-			}
-			notes.push(`normalized line from ${line} to ${remappedLine}`);
-			line = remappedLine;
-		}
+	if (draft.line > 0 && !file.changedLines.includes(draft.line)) {
+		return {
+			ok: false,
+			reason: "unchanged_line",
+			message: `Line ${draft.line} is not a changed line in ${file.path}. Valid changed line ranges: ${formatLineRanges(file.changedLines) || "none"}`,
+		};
 	}
 
 	return omitUndefined({
 		ok: true as const,
-		draft: { ...draft, path: file.path, line },
-		note: notes.length > 0 ? `${notes.join("; ")}.` : undefined,
+		draft: { ...draft, path: file.path },
+		note:
+			draft.path === file.path
+				? undefined
+				: `normalized path from ${draft.path} to ${file.path}.`,
 	});
 }
 

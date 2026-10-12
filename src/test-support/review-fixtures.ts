@@ -1,6 +1,6 @@
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
-import type { ChangedFile } from "../git/types.ts";
+import type { ReviewableFile } from "../git/types.ts";
 import type {
 	ReviewArtifacts,
 	ReviewBitbucketClient,
@@ -73,22 +73,13 @@ export function createPullRequest(commit = "head-123"): PullRequestInfo {
 	};
 }
 
-function createChangedFile(overrides: Partial<ChangedFile> = {}): ChangedFile {
+function createReviewableFile(
+	overrides: Partial<ReviewableFile> = {},
+): ReviewableFile {
 	return {
 		path: "src/example.ts",
 		status: "modified",
-		patch: "diff --git a/src/example.ts b/src/example.ts",
 		changedLines: [10],
-		hunks: [
-			{
-				oldStart: 10,
-				oldLines: 1,
-				newStart: 10,
-				newLines: 1,
-				header: "",
-				changedLines: [10],
-			},
-		],
 		additions: 1,
 		deletions: 0,
 		isBinary: false,
@@ -101,15 +92,14 @@ export function createReviewContext(
 	overrides: Partial<ReviewContext> = {},
 ): ReviewContext {
 	return {
-		repoRoot: "/tmp/repo",
 		pr,
 		headCommit: pr.source.latestCommit,
 		baseCommit: pr.target.latestCommit,
 		mergeBaseCommit: pr.target.latestCommit,
 		reviewRevision: "review-rev-123",
-		rawDiff: "",
 		diffStats: { fileCount: 1, additions: 1, deletions: 0 },
-		reviewableFiles: [createChangedFile()],
+		reviewableFiles: [createReviewableFile()],
+		reviewDiff: "diff --git a/src/example.ts b/src/example.ts",
 		...overrides,
 	};
 }

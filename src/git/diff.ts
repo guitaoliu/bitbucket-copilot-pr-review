@@ -1,38 +1,20 @@
-import { omitUndefined } from "../shared/object.ts";
-import type {
-	ChangedFile,
-	DiffStats,
-	FileStatus,
-	HunkSummary,
-} from "./types.ts";
+import type { ChangedFile, DiffStats, FileStatus } from "./types.ts";
 
-interface MutableHunk {
-	oldStart: number;
-	oldLines: number;
-	newStart: number;
-	newLines: number;
-	header: string;
-	changedLines: number[];
-	nextOldLine: number;
-	nextNewLine: number;
-}
-
-interface MutableFile {
-	path: string;
-	oldPath?: string;
-	status: FileStatus;
-	patchLines: string[];
-	changedLineSet: Set<number>;
-	hunks: HunkSummary[];
+interface LineStats {
 	additions: number;
 	deletions: number;
 	isBinary: boolean;
-	currentHunk?: MutableHunk;
 }
 
-function normalizePath(value: string): string {
-	return value.replace(/^"|"$/g, "").replace(/\\/g, "/");
-}
+const C_STYLE_ESCAPES: Record<string, string> = {
+	a: "\x07",
+	b: "\b",
+	t: "\t",
+	n: "\n",
+	v: "\v",
+	f: "\f",
+	r: "\r",
+};
 
 function splitNulRecords(value: string): string[] {
 	const records = value.split("\0");
@@ -42,7 +24,7 @@ function splitNulRecords(value: string): string[] {
 	return records;
 }
 
-function mapNameStatusCode(code: string): FileStatus | undefined {
+function mapStatusCode(code: string): FileStatus | undefined {
 	switch (code[0]) {
 		case "A":
 			return "added";
@@ -60,269 +42,194 @@ function mapNameStatusCode(code: string): FileStatus | undefined {
 	}
 }
 
-export function parseNameStatusDiff(diffText: string): ChangedFile[] {
-	const records = splitNulRecords(diffText);
-	const files: ChangedFile[] = [];
-	for (let index = 0; index < records.length; ) {
-		const statusCode = records[index++] ?? "";
-		const status = mapNameStatusCode(statusCode);
-		if (!status) {
-			continue;
-		}
+function parseNumstatRecord(
+	record: string,
+): (LineStats & { path: string }) | undefined {
+	const firstTab = record.indexOf("\t");
+	const secondTab = record.indexOf("\t", firstTab + 1);
+	if (firstTab < 0 || secondTab < 0) {
+		return undefined;
+	}
 
+	const rawAdditions = record.slice(0, firstTab);
+	const rawDeletions = record.slice(firstTab + 1, secondTab);
+	const isBinary = rawAdditions === "-" || rawDeletions === "-";
+	return {
+		path: record.slice(secondTab + 1),
+		additions: isBinary ? 0 : Number.parseInt(rawAdditions, 10),
+		deletions: isBinary ? 0 : Number.parseInt(rawDeletions, 10),
+		isBinary,
+	};
+}
+
+/**
+ * Parses `git diff --raw --numstat -z` output: every raw record comes first,
+ * then one numstat record per file pair, keyed here by the head-side path.
+ */
+export function parseChangedFiles(diffText: string): ChangedFile[] {
+	const records = splitNulRecords(diffText);
+	const pairs: Array<Pick<ChangedFile, "path" | "oldPath" | "status">> = [];
+	let index = 0;
+	while (records[index]?.startsWith(":")) {
+		const header = records[index++] ?? "";
+		const status = mapStatusCode(header.slice(header.lastIndexOf(" ") + 1));
 		if (status === "renamed" || status === "copied") {
 			const oldPath = records[index++];
-			const newPath = records[index++];
-			if (oldPath && newPath) {
-				files.push({
-					path: normalizePath(newPath),
-					oldPath: normalizePath(oldPath),
-					status,
-					additions: 0,
-					deletions: 0,
-					isBinary: false,
-				});
+			const path = records[index++];
+			if (oldPath && path) {
+				pairs.push({ path, oldPath, status });
 			}
 			continue;
 		}
 
-		const filePath = records[index++];
-		if (filePath) {
-			files.push({
-				path: normalizePath(filePath),
-				status,
-				additions: 0,
-				deletions: 0,
-				isBinary: false,
-			});
+		const path = records[index++];
+		if (status && path) {
+			pairs.push({ path, status });
 		}
 	}
-	return files;
+
+	const statsByPath = new Map<string, LineStats>();
+	while (index < records.length) {
+		const stats = parseNumstatRecord(records[index++] ?? "");
+		if (!stats) {
+			continue;
+		}
+		let { path } = stats;
+		if (path === "") {
+			index += 1;
+			path = records[index++] ?? "";
+		}
+		statsByPath.set(path, stats);
+	}
+
+	return pairs.map((pair) => {
+		const stats = statsByPath.get(pair.path);
+		return {
+			...pair,
+			additions: stats?.additions ?? 0,
+			deletions: stats?.deletions ?? 0,
+			isBinary: stats?.isBinary ?? false,
+		};
+	});
 }
 
-export function applyNumstatDiff(
-	files: ChangedFile[],
-	diffText: string,
-): DiffStats {
-	const records = splitNulRecords(diffText);
-	let recordIndex = 0;
-	let additions = 0;
-	let deletions = 0;
-
-	for (const file of files) {
-		const statRecord = records[recordIndex++] ?? "";
-		const [rawAdditions, rawDeletions, embeddedPath] = statRecord.split("\t");
-		const isBinary = rawAdditions === "-" || rawDeletions === "-";
-		file.isBinary = isBinary;
-		file.additions = isBinary ? 0 : Number.parseInt(rawAdditions ?? "0", 10);
-		file.deletions = isBinary ? 0 : Number.parseInt(rawDeletions ?? "0", 10);
-
-		if (
-			embeddedPath === "" &&
-			(file.status === "renamed" || file.status === "copied")
-		) {
-			recordIndex += 2;
-		}
-
-		additions += file.additions;
-		deletions += file.deletions;
-	}
-
+export function summarizeDiffStats(files: readonly ChangedFile[]): DiffStats {
 	return {
 		fileCount: files.length,
-		additions,
-		deletions,
+		additions: files.reduce((total, file) => total + file.additions, 0),
+		deletions: files.reduce((total, file) => total + file.deletions, 0),
 	};
 }
 
-function parseDiffHeader(
-	line: string,
-): { oldPath: string; newPath: string } | undefined {
-	const match = /^diff --git "?a\/(.+?)"? "?b\/(.+?)"?$/.exec(line);
-	if (!match) {
-		return undefined;
+function unquoteGitPath(value: string): string {
+	if (value.length < 2 || !value.startsWith('"') || !value.endsWith('"')) {
+		return value;
 	}
 
-	return {
-		oldPath: normalizePath(match[1] ?? ""),
-		newPath: normalizePath(match[2] ?? ""),
-	};
-}
-
-function finishHunk(file: MutableFile): void {
-	const { currentHunk } = file;
-	if (!currentHunk) {
-		return;
-	}
-
-	file.hunks.push({
-		oldStart: currentHunk.oldStart,
-		oldLines: currentHunk.oldLines,
-		newStart: currentHunk.newStart,
-		newLines: currentHunk.newLines,
-		header: currentHunk.header,
-		changedLines: [...new Set(currentHunk.changedLines)].sort(
-			(left, right) => left - right,
-		),
-	});
-
-	delete file.currentHunk;
-}
-
-function finishFile(file: MutableFile | undefined): ChangedFile | undefined {
-	if (!file) {
-		return undefined;
-	}
-
-	finishHunk(file);
-
-	return omitUndefined({
-		path: file.path,
-		oldPath: file.oldPath,
-		status: file.status,
-		patch: file.patchLines.join("\n").trimEnd(),
-		changedLines: [...file.changedLineSet].sort((left, right) => left - right),
-		hunks: file.hunks,
-		additions: file.additions,
-		deletions: file.deletions,
-		isBinary: file.isBinary,
-	}) satisfies ChangedFile;
-}
-
-export function parseUnifiedDiff(diffText: string): {
-	files: ChangedFile[];
-	stats: DiffStats;
-} {
-	const files: ChangedFile[] = [];
-	const lines = diffText.length > 0 ? diffText.split(/\r?\n/) : [];
-	let currentFile: MutableFile | undefined;
-
-	for (const line of lines) {
-		if (line.startsWith("diff --git ")) {
-			const parsed = finishFile(currentFile);
-			if (parsed) {
-				files.push(parsed);
-			}
-
-			const header = parseDiffHeader(line);
-			if (!header) {
-				currentFile = undefined;
-				continue;
-			}
-
-			currentFile = omitUndefined({
-				path: header.newPath,
-				oldPath: header.oldPath !== header.newPath ? header.oldPath : undefined,
-				status: "modified" as const,
-				patchLines: [line] as string[],
-				changedLineSet: new Set<number>(),
-				hunks: [] as HunkSummary[],
-				additions: 0,
-				deletions: 0,
-				isBinary: false,
-			}) satisfies MutableFile;
-			continue;
-		}
-
-		if (!currentFile) {
-			continue;
-		}
-
-		currentFile.patchLines.push(line);
-
-		if (line.startsWith("new file mode ")) {
-			currentFile.status = "added";
-			continue;
-		}
-
-		if (line.startsWith("deleted file mode ")) {
-			currentFile.status = "deleted";
-			continue;
-		}
-
-		if (line.startsWith("rename from ")) {
-			currentFile.status = "renamed";
-			currentFile.oldPath = normalizePath(line.slice("rename from ".length));
-			continue;
-		}
-
-		if (line.startsWith("rename to ")) {
-			currentFile.path = normalizePath(line.slice("rename to ".length));
-			continue;
-		}
-
-		if (line.startsWith("copy from ")) {
-			currentFile.status = "copied";
-			currentFile.oldPath = normalizePath(line.slice("copy from ".length));
-			continue;
-		}
-
-		if (line.startsWith("copy to ")) {
-			currentFile.path = normalizePath(line.slice("copy to ".length));
-			continue;
-		}
-
-		if (line.startsWith("Binary files ")) {
-			currentFile.isBinary = true;
-			continue;
-		}
-
-		const hunkMatch = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/.exec(
-			line,
+	return value
+		.slice(1, -1)
+		.replace(
+			/\\(?:([0-7]{3})|(.))/g,
+			(_match, octal?: string, char?: string) =>
+				octal !== undefined
+					? String.fromCharCode(Number.parseInt(octal, 8))
+					: (C_STYLE_ESCAPES[char ?? ""] ?? char ?? ""),
 		);
-		if (hunkMatch) {
-			finishHunk(currentFile);
-			currentFile.currentHunk = {
-				oldStart: Number.parseInt(hunkMatch[1] ?? "0", 10),
-				oldLines: Number.parseInt(hunkMatch[2] || "1", 10),
-				newStart: Number.parseInt(hunkMatch[3] ?? "0", 10),
-				newLines: Number.parseInt(hunkMatch[4] || "1", 10),
-				header: (hunkMatch[5] ?? "").trim(),
-				changedLines: [],
-				nextOldLine: Number.parseInt(hunkMatch[1] ?? "0", 10),
-				nextNewLine: Number.parseInt(hunkMatch[3] ?? "0", 10),
-			};
-			continue;
-		}
+}
 
-		const hunk = currentFile.currentHunk;
-		if (!hunk) {
-			continue;
-		}
-
-		if (line.startsWith("+") && !line.startsWith("+++")) {
-			currentFile.additions += 1;
-			currentFile.changedLineSet.add(hunk.nextNewLine);
-			hunk.changedLines.push(hunk.nextNewLine);
-			hunk.nextNewLine += 1;
-			continue;
-		}
-
-		if (line.startsWith("-") && !line.startsWith("---")) {
-			currentFile.deletions += 1;
-			hunk.nextOldLine += 1;
-			continue;
-		}
-
-		if (line.startsWith(" ")) {
-			hunk.nextOldLine += 1;
-			hunk.nextNewLine += 1;
+function readQuotedPrefix(value: string): string | undefined {
+	for (let index = 1; index < value.length; index += 1) {
+		if (value[index] === "\\") {
+			index += 1;
+		} else if (value[index] === '"') {
+			return value.slice(0, index + 1);
 		}
 	}
+	return undefined;
+}
 
-	const parsed = finishFile(currentFile);
-	if (parsed) {
-		files.push(parsed);
+/**
+ * Returns the head-side path of a `diff --git a/<old> b/<new>` header when it
+ * is unambiguous. Rename and copy headers are resolved from their own
+ * `rename to` / `copy to` lines instead.
+ */
+function parseDiffHeaderPath(line: string): string | undefined {
+	const sides = line.slice("diff --git ".length);
+	if (sides.startsWith('"')) {
+		const oldSide = readQuotedPrefix(sides);
+		const newSide =
+			oldSide === undefined ? undefined : sides.slice(oldSide.length + 1);
+		return newSide ? unquoteGitPath(newSide).replace(/^b\//, "") : undefined;
 	}
 
-	const stats = files.reduce<DiffStats>(
-		(result, file) => ({
-			fileCount: result.fileCount + 1,
-			additions: result.additions + file.additions,
-			deletions: result.deletions + file.deletions,
-		}),
-		{ fileCount: 0, additions: 0, deletions: 0 },
-	);
+	const pathLength = (sides.length - "a/ b/".length) / 2;
+	if (
+		Number.isInteger(pathLength) &&
+		sides.startsWith("a/") &&
+		sides.slice(2 + pathLength, 5 + pathLength) === " b/" &&
+		sides.slice(2, 2 + pathLength) === sides.slice(5 + pathLength)
+	) {
+		return sides.slice(2, 2 + pathLength);
+	}
+	return undefined;
+}
 
-	return { files, stats };
+/**
+ * Maps each head-side path in a unified diff to its added head lines, taken
+ * from `+` lines only so context lines never count as changed.
+ */
+export function parseChangedLines(
+	diffText: string,
+): ReadonlyMap<string, readonly number[]> {
+	const changedLinesByPath = new Map<string, readonly number[]>();
+	let path: string | undefined;
+	let changedLines: number[] = [];
+	let oldRemaining = 0;
+	let newRemaining = 0;
+	let nextNewLine = 0;
+
+	const finishFile = () => {
+		if (path !== undefined) {
+			changedLinesByPath.set(path, changedLines);
+		}
+	};
+
+	for (const line of diffText.split("\n")) {
+		if (oldRemaining > 0 || newRemaining > 0) {
+			if (line.startsWith("+")) {
+				changedLines.push(nextNewLine);
+				nextNewLine += 1;
+				newRemaining -= 1;
+			} else if (line.startsWith("-")) {
+				oldRemaining -= 1;
+			} else if (line.startsWith(" ")) {
+				nextNewLine += 1;
+				oldRemaining -= 1;
+				newRemaining -= 1;
+			}
+			continue;
+		}
+
+		if (line.startsWith("diff --git ")) {
+			finishFile();
+			path = parseDiffHeaderPath(line);
+			changedLines = [];
+			continue;
+		}
+
+		if (line.startsWith("rename to ") || line.startsWith("copy to ")) {
+			path = unquoteGitPath(line.slice(line.indexOf(" to ") + 4));
+			continue;
+		}
+
+		const hunk = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+		if (hunk) {
+			oldRemaining = Number.parseInt(hunk[1] ?? "1", 10);
+			nextNewLine = Number.parseInt(hunk[2] ?? "0", 10);
+			newRemaining = Number.parseInt(hunk[3] ?? "1", 10);
+		}
+	}
+	finishFile();
+
+	return changedLinesByPath;
 }

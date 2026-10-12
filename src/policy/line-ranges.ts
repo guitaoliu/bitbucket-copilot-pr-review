@@ -1,5 +1,5 @@
 function compressLineRanges(
-	lines: number[],
+	lines: readonly number[],
 ): Array<{ start: number; end: number }> {
 	if (lines.length === 0) {
 		return [];
@@ -30,7 +30,7 @@ function compressLineRanges(
 	return ranges;
 }
 
-export function formatLineRanges(lines: number[]): string {
+export function formatLineRanges(lines: readonly number[]): string {
 	return compressLineRanges(lines)
 		.map((range) =>
 			range.start === range.end

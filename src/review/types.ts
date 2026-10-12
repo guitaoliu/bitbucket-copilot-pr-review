@@ -1,6 +1,6 @@
 import type { CopilotSession } from "@github/copilot-sdk";
 import type { PullRequestInfo } from "../bitbucket/types.ts";
-import type { ChangedFile, DiffStats } from "../git/types.ts";
+import type { DiffStats, ReviewableFile } from "../git/types.ts";
 
 type CopilotModelMetrics = Awaited<
 	ReturnType<CopilotSession["rpc"]["usage"]["getMetrics"]>
@@ -79,15 +79,16 @@ export interface PublicationResult {
 }
 
 export interface ReviewContext {
-	repoRoot: string;
 	pr: PullRequestInfo;
 	headCommit: string;
 	baseCommit: string;
 	mergeBaseCommit: string;
 	reviewRevision: string;
-	rawDiff: string;
+	/** Every changed file in the pull request, including excluded files. */
 	diffStats: DiffStats;
-	reviewableFiles: ChangedFile[];
+	readonly reviewableFiles: readonly ReviewableFile[];
+	/** Unified diff with three context lines over the reviewable files only. */
+	readonly reviewDiff: string;
 	ciSummary?: string;
 }
 

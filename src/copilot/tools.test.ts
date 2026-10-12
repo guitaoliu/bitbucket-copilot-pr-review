@@ -16,7 +16,6 @@ import {
 import { createReviewTools, REVIEW_TOOL_NAMES } from "./tools/index.ts";
 
 const reviewContext: ReviewContext = {
-	repoRoot: "/tmp/repo",
 	pr: {
 		id: 123,
 		version: 1,
@@ -43,7 +42,7 @@ const reviewContext: ReviewContext = {
 	baseCommit: "base-123",
 	mergeBaseCommit: "base-123",
 	reviewRevision: "review-rev-123",
-	rawDiff: "",
+	reviewDiff: "",
 	diffStats: { fileCount: 1, additions: 2, deletions: 1 },
 	reviewableFiles: [
 		{
@@ -51,16 +50,6 @@ const reviewContext: ReviewContext = {
 			oldPath: "src/old-name.ts",
 			status: "renamed",
 			changedLines: [10, 11],
-			hunks: [
-				{
-					oldStart: 10,
-					oldLines: 1,
-					newStart: 10,
-					newLines: 2,
-					header: "",
-					changedLines: [10, 11],
-				},
-			],
 			additions: 2,
 			deletions: 1,
 			isBinary: false,
@@ -69,24 +58,6 @@ const reviewContext: ReviewContext = {
 			path: "src/multi-hunk.ts",
 			status: "modified",
 			changedLines: [1, 10],
-			hunks: [
-				{
-					oldStart: 1,
-					oldLines: 3,
-					newStart: 1,
-					newLines: 3,
-					header: "",
-					changedLines: [1],
-				},
-				{
-					oldStart: 10,
-					oldLines: 3,
-					newStart: 10,
-					newLines: 4,
-					header: "",
-					changedLines: [10],
-				},
-			],
 			additions: 2,
 			deletions: 1,
 			isBinary: false,
@@ -151,7 +122,6 @@ function createLoggerSpy(): {
 
 function createGitStub(overrides: Partial<GitRepository> = {}): GitRepository {
 	return {
-		diffPaths: async () => "",
 		listFilesAtCommit: async () => [],
 		readTextFileAtCommit: async () => ({ status: "not_found" as const }),
 		searchTextAtCommit: async () => [],
@@ -234,11 +204,13 @@ describe("Copilot tools", () => {
 					? "---\nname: review\ndescription: Use for reviewing risky changes.\n---\nBody"
 					: `instructions for ${filePath}`,
 			}),
-			diffPaths: async (_base, _head, paths) =>
-				`diff for ${paths.join(",")}\n${"x".repeat(45_000)}`,
 		});
-		const reviewBundle = new ReviewBundle(reviewContext, git);
-		const { invoke, state } = createTools({ git, reviewBundle });
+		const context = {
+			...reviewContext,
+			reviewDiff: `diff for src/old-name.ts,src/new-name.ts,src/multi-hunk.ts\n${"x".repeat(45_000)}`,
+		};
+		const reviewBundle = new ReviewBundle(context, git);
+		const { invoke, state } = createTools({ context, git, reviewBundle });
 
 		const first = await invoke("review_changes", { page: 1 });
 		const content = [first.content];
@@ -265,12 +237,13 @@ describe("Copilot tools", () => {
 	});
 
 	it("rejects the summary until every review page is delivered", async () => {
-		const git = createGitStub({
-			diffPaths: async (_base, _head, paths) =>
-				`${paths.at(-1)}\n${"x".repeat(70_000)}`,
-		});
-		const reviewBundle = new ReviewBundle(reviewContext, git);
-		const { invoke, state } = createTools({ git, reviewBundle });
+		const context = {
+			...reviewContext,
+			reviewDiff: `src/multi-hunk.ts\n${"x".repeat(70_000)}`,
+		};
+		const git = createGitStub();
+		const reviewBundle = new ReviewBundle(context, git);
+		const { invoke, state } = createTools({ context, git, reviewBundle });
 
 		const first = await invoke("review_changes", { page: 1 });
 		const rejected = await invoke("record_pr_summary", { summary: "Summary" });
@@ -585,116 +558,7 @@ describe("Copilot tools", () => {
 		assert.deepEqual(state.drafts, [finding]);
 	});
 
-	it("loads changed lines lazily for line-level findings", async () => {
-		let patchLoads = 0;
-		const { invoke } = createTools({
-			context: {
-				...reviewContext,
-				reviewableFiles: [
-					{
-						path: "src/service.ts",
-						status: "modified",
-						additions: 1,
-						deletions: 0,
-						isBinary: false,
-					},
-				],
-			},
-			git: createGitStub({
-				diffFilePatch: async () => {
-					patchLoads += 1;
-					return [
-						"diff --git a/src/service.ts b/src/service.ts",
-						"@@ -9,0 +10 @@",
-						"+const value = 1;",
-					].join("\n");
-				},
-			}),
-		});
-		const lineFinding = { ...finding, path: "src/service.ts" };
-
-		assert.equal(
-			await invoke("emit_finding", lineFinding),
-			"Recorded finding 1 for src/service.ts:10.",
-		);
-		assert.equal(
-			await invoke("emit_finding", { ...lineFinding, title: "Second" }),
-			"Recorded finding 2 for src/service.ts:10.",
-		);
-		assert.equal(patchLoads, 1);
-	});
-
-	it("loads renamed file changed lines with old and new pathspecs", async () => {
-		let patchPathspec: string | readonly string[] | undefined;
-		const { invoke, state } = createTools({
-			context: {
-				...reviewContext,
-				reviewableFiles: [
-					{
-						path: "src/new-name.ts",
-						oldPath: "src/old-name.ts",
-						status: "renamed",
-						additions: 1,
-						deletions: 1,
-						isBinary: false,
-					},
-				],
-			},
-			git: createGitStub({
-				diffFilePatch: async (_base, _head, filePath) => {
-					patchPathspec = filePath;
-					return [
-						"diff --git a/src/old-name.ts b/src/new-name.ts",
-						"similarity index 55%",
-						"rename from src/old-name.ts",
-						"rename to src/new-name.ts",
-						"--- a/src/old-name.ts",
-						"+++ b/src/new-name.ts",
-						"@@ -2 +2 @@ keep",
-						"-old",
-						"+new",
-					].join("\n");
-				},
-			}),
-		});
-
-		const result = await invoke("emit_finding", { ...finding, line: 1 });
-
-		assert.deepEqual(patchPathspec, ["src/old-name.ts", "src/new-name.ts"]);
-		assert.deepEqual(result, {
-			resultType: "failure",
-			textResultForLlm:
-				"Line 1 is not a changed line in src/new-name.ts. Valid changed line ranges: 2",
-		});
-		assert.deepEqual(state.drafts, []);
-	});
-
-	it("fails closed when the changed lines of a reviewed file cannot be resolved", async () => {
-		const { invoke, state } = createTools({
-			context: {
-				...reviewContext,
-				reviewableFiles: [
-					{
-						path: "src/service.ts",
-						status: "modified",
-						additions: 1,
-						deletions: 0,
-						isBinary: false,
-					},
-				],
-			},
-			git: createGitStub({ diffFilePatch: async () => "" }),
-		});
-
-		await assert.rejects(
-			invoke("emit_finding", { ...finding, path: "src/service.ts" }),
-			/Unable to resolve changed lines for src\/service\.ts/,
-		);
-		assert.deepEqual(state.drafts, []);
-	});
-
-	it("records file-level findings without loading changed lines", async () => {
-		let patchLoads = 0;
+	it("accepts only file-level findings for reviewed files without added lines", async () => {
 		const { invoke, state } = createTools({
 			context: {
 				...reviewContext,
@@ -702,18 +566,13 @@ describe("Copilot tools", () => {
 					{
 						path: "src/removed.ts",
 						status: "deleted",
+						changedLines: [],
 						additions: 0,
 						deletions: 10,
 						isBinary: false,
 					},
 				],
 			},
-			git: createGitStub({
-				diffFilePatch: async () => {
-					patchLoads += 1;
-					return "";
-				},
-			}),
 		});
 
 		assert.equal(
@@ -724,8 +583,18 @@ describe("Copilot tools", () => {
 			}),
 			"Recorded finding 1 for src/removed.ts:file.",
 		);
-		assert.equal(state.drafts[0]?.path, "src/removed.ts");
-		assert.equal(patchLoads, 0);
+		assert.deepEqual(
+			await invoke("emit_finding", { ...finding, path: "src/removed.ts" }),
+			{
+				resultType: "failure",
+				textResultForLlm:
+					"Line 10 is not a changed line in src/removed.ts. Valid changed line ranges: none",
+			},
+		);
+		assert.deepEqual(
+			state.drafts.map((draft) => `${draft.path}:${draft.line}`),
+			["src/removed.ts:0"],
+		);
 	});
 
 	it("rejects copied-file findings addressed by the source path", async () => {
@@ -738,7 +607,6 @@ describe("Copilot tools", () => {
 						oldPath: "src/original.ts",
 						status: "copied",
 						changedLines: [10],
-						hunks: [],
 						additions: 1,
 						deletions: 0,
 						isBinary: false,

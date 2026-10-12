@@ -1,44 +1,22 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { ChangedFile } from "../git/types.ts";
+import type { ReviewableFile } from "../git/types.ts";
 import type { FindingDraft } from "../review/types.ts";
 import {
 	createReviewedFileLookup,
-	type FileLineChanges,
 	finalizeFindings,
 	findingDraftSchema,
 	validateFindingLocation,
 } from "./findings.ts";
 
-const reviewedFile: ChangedFile = {
+const reviewedFile: ReviewableFile = {
 	path: "src/service.ts",
 	status: "modified",
+	changedLines: [10, 12, 20],
 	additions: 3,
 	deletions: 1,
 	isBinary: false,
-};
-
-const serviceLineChanges: FileLineChanges = {
-	changedLines: [10, 12, 20],
-	hunks: [
-		{
-			oldStart: 10,
-			oldLines: 3,
-			newStart: 10,
-			newLines: 4,
-			header: "",
-			changedLines: [10, 12],
-		},
-		{
-			oldStart: 19,
-			oldLines: 0,
-			newStart: 20,
-			newLines: 1,
-			header: "",
-			changedLines: [20],
-		},
-	],
 };
 
 function draft(overrides: Partial<FindingDraft> = {}): FindingDraft {
@@ -56,25 +34,25 @@ function draft(overrides: Partial<FindingDraft> = {}): FindingDraft {
 
 describe("createReviewedFileLookup", () => {
 	it("adds oldPath aliases only for uniquely renamed files", () => {
-		const renamed: ChangedFile = {
+		const renamed: ReviewableFile = {
 			...reviewedFile,
 			path: "src/new-name.ts",
 			oldPath: "src/old-name.ts",
 			status: "renamed",
 		};
-		const copied: ChangedFile = {
+		const copied: ReviewableFile = {
 			...reviewedFile,
 			path: "src/copied.ts",
 			oldPath: "src/original.ts",
 			status: "copied",
 		};
-		const ambiguousA: ChangedFile = {
+		const ambiguousA: ReviewableFile = {
 			...reviewedFile,
 			path: "src/a.ts",
 			oldPath: "src/shared.ts",
 			status: "renamed",
 		};
-		const ambiguousB: ChangedFile = { ...ambiguousA, path: "src/b.ts" };
+		const ambiguousB: ReviewableFile = { ...ambiguousA, path: "src/b.ts" };
 
 		const lookup = createReviewedFileLookup([
 			renamed,
@@ -94,15 +72,10 @@ describe("validateFindingLocation", () => {
 	const lookup = createReviewedFileLookup([
 		{ ...reviewedFile, oldPath: "src/old-service.ts", status: "renamed" },
 	]);
-	const resolveLineChanges = async () => serviceLineChanges;
 
-	it("rejects findings for files outside the reviewed scope", async () => {
+	it("rejects findings for files outside the reviewed scope", () => {
 		assert.deepEqual(
-			await validateFindingLocation(
-				draft({ path: "src/other.ts" }),
-				lookup,
-				resolveLineChanges,
-			),
+			validateFindingLocation(draft({ path: "src/other.ts" }), lookup),
 			{
 				ok: false,
 				reason: "unknown_file",
@@ -111,59 +84,39 @@ describe("validateFindingLocation", () => {
 		);
 	});
 
-	it("rejects unchanged lines outside every hunk and lists valid ranges", async () => {
-		assert.deepEqual(
-			await validateFindingLocation(
-				draft({ line: 15 }),
-				lookup,
-				resolveLineChanges,
-			),
-			{
-				ok: false,
-				reason: "unchanged_line",
-				message:
-					"Line 15 is not a changed line in src/service.ts. Valid changed line ranges: 10, 12, 20",
-			},
-		);
+	it("rejects unchanged lines next to a change instead of remapping them", () => {
+		assert.deepEqual(validateFindingLocation(draft({ line: 11 }), lookup), {
+			ok: false,
+			reason: "unchanged_line",
+			message:
+				"Line 11 is not a changed line in src/service.ts. Valid changed line ranges: 10, 12, 20",
+		});
 	});
 
-	it("remaps a line inside a changed hunk and the renamed path to the head location", async () => {
+	it("accepts a changed line and maps the renamed path to the head path", () => {
 		assert.deepEqual(
-			await validateFindingLocation(
-				draft({ path: "src/old-service.ts", line: 11 }),
+			validateFindingLocation(
+				draft({ path: "src/old-service.ts", line: 12 }),
 				lookup,
-				resolveLineChanges,
 			),
 			{
 				ok: true,
-				draft: draft({ line: 10 }),
-				note: "normalized path from src/old-service.ts to src/service.ts; normalized line from 11 to 10.",
+				draft: draft({ line: 12 }),
+				note: "normalized path from src/old-service.ts to src/service.ts.",
 			},
 		);
 	});
 
-	it("accepts file-level findings without resolving changed lines", async () => {
-		let resolved = false;
-		const result = await validateFindingLocation(
-			draft({ line: 0 }),
-			lookup,
-			async () => {
-				resolved = true;
-				return serviceLineChanges;
-			},
-		);
+	it("accepts file-level findings for reviewed files without changed lines", () => {
+		const deletedLookup = createReviewedFileLookup([
+			{ ...reviewedFile, status: "deleted", changedLines: [] },
+		]);
 
-		assert.deepEqual(result, { ok: true, draft: draft({ line: 0 }) });
-		assert.equal(resolved, false);
-	});
-
-	it("fails closed when changed lines cannot be resolved", async () => {
-		await assert.rejects(
-			validateFindingLocation(draft(), lookup, async () => {
-				throw new Error("diff unavailable");
-			}),
-			/diff unavailable/,
+		assert.deepEqual(
+			validateFindingLocation(draft({ line: 0 }), deletedLookup),
+			{ ok: true, draft: draft({ line: 0 }) },
 		);
+		assert.equal(validateFindingLocation(draft(), deletedLookup).ok, false);
 	});
 });
 

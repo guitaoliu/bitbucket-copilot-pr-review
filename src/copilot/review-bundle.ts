@@ -17,7 +17,10 @@ export interface ReviewCoverage {
 	complete: boolean;
 }
 
-function isApplicableGuide(guidePath: string, files: ChangedFile[]): boolean {
+function isApplicableGuide(
+	guidePath: string,
+	files: readonly ChangedFile[],
+): boolean {
 	if (guidePath === "AGENTS.md") {
 		return true;
 	}
@@ -118,22 +121,13 @@ export class ReviewBundle {
 				return frontmatter ? `--- ${skillPath} ---\n${frontmatter}` : skillPath;
 			}),
 		);
-		const diffPaths = this.context.reviewableFiles.flatMap((file) =>
-			file.oldPath ? [file.oldPath, file.path] : [file.path],
-		);
-		const diff = await this.git.diffPaths(
-			this.context.mergeBaseCommit,
-			this.context.headCommit,
-			diffPaths,
-			3,
-		);
 		return paginateContent(
 			[
 				...guides,
 				...(skills.length > 0
 					? [`=== trusted skill catalog ===\n${skills.join("\n")}`]
 					: []),
-				`=== review diff ===\n${diff || "[no textual diff]"}`,
+				`=== review diff ===\n${this.context.reviewDiff || "[no textual diff]"}`,
 			]
 				.filter(Boolean)
 				.join("\n\n"),
