@@ -88,8 +88,8 @@ Bitbucket pull request URL, for example https://host/projects/PROJ/repos/repo/pu
 | `BITBUCKET_AUTH_TYPE` | auto-detected from provided credentials | Bitbucket authentication strategy. |
 | `BITBUCKET_CA_CERT_PATH` | - | PEM CA bundle path for Bitbucket TLS. |
 | `BITBUCKET_INSECURE_TLS` | `false` | Disable TLS certificate verification for Bitbucket (not recommended). |
-| `COPILOT_MODEL` | `gpt-5.6-sol` | Copilot model override. |
-| `COPILOT_REASONING_EFFORT` | `medium` | Copilot reasoning effort. |
+| `COPILOT_MODEL` | `gpt-6.1-sol` | Copilot model override. |
+| `COPILOT_REASONING_EFFORT` | `high` | Copilot reasoning effort. |
 | `COPILOT_TIMEOUT_MS` | `1800000` | Copilot timeout in milliseconds. |
 | `COPILOT_RUNTIME_LOG_DIR` | logs are deleted with the temporary runtime directory | Directory that keeps Copilot runtime logs after the run, for example as a CI artifact. Created when missing. |
 | `CI_SUMMARY_PATH` | - | Path to a CI summary file included in review context. |
@@ -147,7 +147,7 @@ scripts/run-local-review.sh /path/to/local/my-repo \
   https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-requests/123
 ```
 
-The helper script reads credentials from your environment, inherits the application's `gpt-5.6-sol` with `medium` reasoning defaults unless you override them, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and accepts either `FORCE_REVIEW=1` or `REVIEW_FORCE=1` to bypass a published revision skip.
+The helper script reads credentials from your environment, inherits the application's `gpt-6.1-sol` with `high` reasoning defaults unless you override them, enables `NODE_USE_SYSTEM_CA=1` unless you override it, runs in dry-run mode unless you set `PUBLISH=1`, and accepts either `FORCE_REVIEW=1` or `REVIEW_FORCE=1` to bypass a published revision skip.
 
 The review JSON output includes `metrics.toolTelemetry` so you can inspect which Copilot tools were requested, allowed, denied, and completed. Counts come from the Copilot session's tool execution events, one entry per tool call: `requested` counts started or permission-checked calls, `denied` counts calls whose permission request was rejected, `allowed` is `requested - denied`, and `completed`, `resultCounts`, and `totalDurationMs` come from execution completion events and their timestamps. `errorCount` adds non-success tool results, session errors, and Copilot client cleanup errors. `completionFollowUps` counts the extra completion requests sent because Copilot ended its first turn without calling `record_pr_summary` (`0` when the summary arrived in the first turn); a recurring non-zero value means the model often needs a nudge to finish the review.
 

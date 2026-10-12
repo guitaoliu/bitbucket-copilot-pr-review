@@ -110,8 +110,8 @@ Expanded example:
 {
   "$schema": "./schemas/copilot-code-review.schema.json",
   "copilot": {
-    "model": "gpt-5.6-sol",
-    "reasoningEffort": "medium"
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high"
   },
   "report": {
     "title": "Copilot Review",

@@ -55,8 +55,8 @@ describe("loadConfig", () => {
 		assert.equal(config.gitRemoteName, "origin");
 		assert.equal(config.logLevel, "info");
 		assert.deepEqual(config.copilot, {
-			model: "gpt-5.6-sol",
-			reasoningEffort: "medium",
+			model: "gpt-6.1-sol",
+			reasoningEffort: "high",
 			timeoutMs: 1_800_000,
 			runtimeLogDir: undefined,
 		});

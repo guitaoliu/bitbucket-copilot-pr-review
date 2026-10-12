@@ -107,12 +107,12 @@ export const ENV_VARIABLES = {
 	COPILOT_MODEL: {
 		parser: STRING_PARSER,
 		description: "Copilot model override.",
-		default: "gpt-5.6-sol",
+		default: "gpt-6.1-sol",
 	},
 	COPILOT_REASONING_EFFORT: {
 		parser: { kind: "enum", values: REASONING_EFFORT_VALUES },
 		description: "Copilot reasoning effort.",
-		default: "medium",
+		default: "high",
 	},
 	COPILOT_TIMEOUT_MS: {
 		parser: { kind: "positiveInteger" },
