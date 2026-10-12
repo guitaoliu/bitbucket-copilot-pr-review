@@ -82,26 +82,24 @@ export interface InsightReportPayload {
 	data?: InsightReportDataField[];
 }
 
+export interface PullRequestCommentLocation {
+	path: string;
+	line: number;
+}
+
+interface PullRequestCommentReply {
+	authorName?: string;
+	text: string;
+}
+
 export interface PullRequestComment {
 	id: number;
-	text: string;
 	version: number;
-	createdDate?: number;
-	updatedDate?: number;
-}
-
-export interface PullRequestCommentDraft {
-	keys: string[];
 	text: string;
-	anchor?: {
-		path: string;
-		line: number;
-	};
-}
-
-export interface CommentRetirement {
-	supersededText: string;
-	label: string;
+	authorName?: string;
+	threadResolved: boolean;
+	replies: readonly PullRequestCommentReply[];
+	createdDate?: number;
 }
 
 export interface RawBitbucketCodeInsightsReport {
@@ -126,7 +124,9 @@ export interface RawBitbucketCommentActivity {
 		id: number;
 		text?: string | null;
 		version: number;
+		author?: { name?: string };
+		threadResolved?: boolean;
+		comments?: Array<{ text?: string | null; author?: { name?: string } }>;
 		createdDate?: number;
-		updatedDate?: number;
 	};
 }

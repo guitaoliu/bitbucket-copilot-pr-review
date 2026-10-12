@@ -14,6 +14,7 @@ const reviewedFile: ReviewableFile = {
 	path: "src/service.ts",
 	status: "modified",
 	changedLines: [10, 12, 20],
+	changedLineText: new Map(),
 	additions: 3,
 	deletions: 1,
 	isBinary: false,

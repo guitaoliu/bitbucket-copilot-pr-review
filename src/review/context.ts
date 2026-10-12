@@ -131,10 +131,15 @@ export async function loadReviewScope(
 	const changedLinesByPath = parseChangedLines(reviewDiff);
 	return {
 		...context,
-		reviewableFiles: context.reviewableFiles.map((file) => ({
-			...file,
-			changedLines: changedLinesByPath.get(file.path) ?? [],
-		})),
+		reviewableFiles: context.reviewableFiles.map((file) => {
+			const changedLineText =
+				changedLinesByPath.get(file.path) ?? new Map<number, string>();
+			return {
+				...file,
+				changedLines: [...changedLineText.keys()],
+				changedLineText,
+			};
+		}),
 		reviewDiff,
 	};
 }

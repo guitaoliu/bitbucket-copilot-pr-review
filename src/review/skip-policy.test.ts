@@ -9,6 +9,7 @@ import type { ReviewerConfig } from "../config/types.ts";
 import {
 	baseReviewerConfig,
 	createFakeBitbucketClient,
+	createPullRequestComment,
 	createReviewContext,
 } from "../test-support/review-fixtures.ts";
 import { formatCommentTagMarker, formatRevisionMarker } from "./markers.ts";
@@ -32,26 +33,26 @@ function createReport(
 
 function createSummaryComment(
 	revision = context.reviewRevision,
+	authorName?: string,
 ): PullRequestComment {
-	return {
+	return createPullRequestComment({
 		id: 1,
-		version: 0,
 		text: [
 			formatCommentTagMarker(tag),
 			formatRevisionMarker(tag, revision),
 		].join("\n"),
-	};
+		...(authorName ? { authorName } : {}),
+	});
 }
 
 function createClient(
 	report: RawBitbucketCodeInsightsReport | undefined,
 	comment: PullRequestComment | undefined,
 ): ReviewBitbucketClient {
-	const findingComment: PullRequestComment = {
+	const findingComment = createPullRequestComment({
 		id: 2,
-		version: 0,
 		text: `<!-- ${tag}:finding-thread:thread-1 -->`,
-	};
+	});
 	return createFakeBitbucketClient({
 		codeInsights: { getReport: async () => report },
 		comments: {
@@ -103,6 +104,19 @@ describe("review reuse", () => {
 
 	it("repairs a publication whose summary comment is missing", async () => {
 		const plan = await planFor(createReport(), undefined);
+
+		assert.equal(plan.action, "review");
+		assert.match(
+			plan.action === "review" ? (plan.repairWarning ?? "") : "",
+			/comment revision missing != review-rev-123/,
+		);
+	});
+
+	it("ignores a summary with the current revision that another user posted", async () => {
+		const plan = await planFor(
+			createReport(),
+			createSummaryComment(context.reviewRevision, "alice"),
+		);
 
 		assert.equal(plan.action, "review");
 		assert.match(

@@ -1,23 +1,30 @@
+import type { BitbucketClient } from "../bitbucket/client.ts";
 import type { CodeInsightsApi } from "../bitbucket/code-insights.ts";
 import type { PullRequestCommentsApi } from "../bitbucket/comments.ts";
 import type { PullRequestApi } from "../bitbucket/pull-request.ts";
 import type {
 	InsightReportPayload,
-	PullRequestCommentDraft,
 	PullRequestInfo,
 } from "../bitbucket/types.ts";
 import type { OperatorConfig, ReviewerConfig } from "../config/types.ts";
 import type { GitRepository } from "../git/repo.ts";
 import type { Logger } from "../shared/logger.ts";
+import type { FindingCommentDraft } from "./comment-sync.ts";
 import type { PreparedReviewContext } from "./context.ts";
 import type { ReviewContext, ReviewOutcome, ReviewScope } from "./types.ts";
 
-export interface ReviewBitbucketClient {
+export interface ReviewBitbucketClient
+	extends Pick<BitbucketClient, "getAuthenticatedUserName"> {
 	pullRequest: Pick<PullRequestApi, "getPullRequest">;
 	codeInsights: Pick<CodeInsightsApi, "getReport" | "putReport">;
 	comments: Pick<
 		PullRequestCommentsApi,
-		"listComments" | "reconcileKeyedComments" | "upsertComment"
+		| "listComments"
+		| "createComment"
+		| "updateComment"
+		| "deleteComment"
+		| "replyToComment"
+		| "resolveThread"
 	>;
 }
 
@@ -25,7 +32,9 @@ export interface ReviewArtifacts {
 	review: ReviewOutcome;
 	report: InsightReportPayload;
 	commentBody: string;
-	findingComments: PullRequestCommentDraft[];
+	findingComments: FindingCommentDraft[];
+	/** Code keys of every changed line in the reviewed scope, used to tell whether an unreported finding's code still exists. */
+	currentCodeKeys: ReadonlySet<string>;
 }
 
 export interface ReviewRunnerDependencies {

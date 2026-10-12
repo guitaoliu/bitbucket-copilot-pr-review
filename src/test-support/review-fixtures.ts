@@ -1,4 +1,7 @@
-import type { PullRequestInfo } from "../bitbucket/types.ts";
+import type {
+	PullRequestComment,
+	PullRequestInfo,
+} from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { ChangedFile } from "../git/types.ts";
 import type {
@@ -111,6 +114,7 @@ export function createReviewScope(
 		reviewableFiles: context.reviewableFiles.map((file) => ({
 			...file,
 			changedLines: [10],
+			changedLineText: new Map([[10, "const value = compute();"]]),
 		})),
 		reviewDiff: "diff --git a/src/example.ts b/src/example.ts",
 	};
@@ -140,18 +144,37 @@ export function createReviewArtifacts(
 		},
 		commentBody: "review comment",
 		findingComments: [],
+		currentCodeKeys: new Set(),
+		...overrides,
+	};
+}
+
+export const TEST_BOT_NAME = "review-bot";
+
+export function createPullRequestComment(
+	overrides: Partial<PullRequestComment> & Pick<PullRequestComment, "id">,
+): PullRequestComment {
+	return {
+		version: 0,
+		text: "",
+		authorName: TEST_BOT_NAME,
+		threadResolved: false,
+		replies: [],
 		...overrides,
 	};
 }
 
 export function createFakeBitbucketClient(
 	overrides: {
+		getAuthenticatedUserName?: ReviewBitbucketClient["getAuthenticatedUserName"];
 		pullRequest?: Partial<ReviewBitbucketClient["pullRequest"]>;
 		codeInsights?: Partial<ReviewBitbucketClient["codeInsights"]>;
 		comments?: Partial<ReviewBitbucketClient["comments"]>;
 	} = {},
 ): ReviewBitbucketClient {
 	return {
+		getAuthenticatedUserName:
+			overrides.getAuthenticatedUserName ?? (async () => TEST_BOT_NAME),
 		pullRequest: {
 			getPullRequest: async () => createPullRequest(),
 			...overrides.pullRequest,
@@ -163,8 +186,11 @@ export function createFakeBitbucketClient(
 		},
 		comments: {
 			listComments: async () => [],
-			reconcileKeyedComments: async () => {},
-			upsertComment: async () => {},
+			createComment: async () => {},
+			updateComment: async () => {},
+			deleteComment: async () => {},
+			replyToComment: async () => {},
+			resolveThread: async () => {},
 			...overrides.comments,
 		},
 	};

@@ -84,14 +84,13 @@ describe("review CLI end to end", { timeout: 180_000 }, () => {
 		);
 	});
 
-	it("re-reviews a moved head and updates the existing finding comment in place", async () => {
-		const { bitbucket, repository } = scenario;
+	it("re-reviews a moved head and leaves the unchanged finding comment untouched", async () => {
+		const { bitbucket } = scenario;
 		const findingComment = [...bitbucket.comments.values()].find(
 			(comment) => comment.anchor,
 		);
-		bitbucket.pullRequest.headCommit = repository.pushHeadCommit({
-			"README.md": "Usage notes.\n",
-		});
+		const requestsBefore = bitbucket.requests.length;
+		scenario.pushHeadCommit({ "README.md": "Usage notes.\n" });
 
 		const output = assertSucceeded(await scenario.review());
 
@@ -101,7 +100,14 @@ describe("review CLI end to end", { timeout: 180_000 }, () => {
 		);
 		assert.equal(anchored.length, 1);
 		assert.equal(anchored[0]?.id, findingComment?.id);
-		assert.equal(anchored[0]?.version, 1);
+		assert.equal(anchored[0]?.version, 0);
+		assert.equal(
+			countRequests(
+				bitbucket.requests.slice(requestsBefore),
+				new RegExp(`/comments/${findingComment?.id}\\b`),
+			),
+			0,
+		);
 		assert.equal(bitbucket.comments.size, 2);
 		assert.equal(bitbucket.reports.size, 2);
 	});

@@ -141,7 +141,7 @@ export async function runReview(
 		git,
 		logger,
 	);
-	const artifacts = buildReviewArtifacts(effectiveConfig, context, {
+	const artifacts = buildReviewArtifacts(effectiveConfig, scope, {
 		...review,
 		gitTelemetry: git.getTelemetrySnapshot(),
 	});

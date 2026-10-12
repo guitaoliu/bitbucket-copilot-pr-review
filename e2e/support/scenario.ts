@@ -15,6 +15,10 @@ export interface ReviewScenario {
 	model: FakeModel;
 	bitbucket: FakeBitbucket;
 	review(args?: string[]): Promise<ReviewCliRun>;
+	/** Replaces the model script for later review runs. */
+	scriptReviewer(options: ScriptedReviewerOptions): void;
+	/** Pushes a follow-up commit and points the pull request at it. */
+	pushHeadCommit(files: Record<string, string>): string;
 	close(): Promise<void>;
 }
 
@@ -28,9 +32,10 @@ export async function startReviewScenario(
 		activityPageSize?: number;
 	} = {},
 ): Promise<ReviewScenario> {
-	const { reviewer, ...bitbucketOptions } = options;
+	const { reviewer: reviewerOptions, ...bitbucketOptions } = options;
 	const repository = createTargetRepository();
-	const model = await startFakeModel(createScriptedReviewer(reviewer));
+	let reviewer = createScriptedReviewer(reviewerOptions);
+	const model = await startFakeModel((messages) => reviewer(messages));
 	const bitbucket = await startFakeBitbucket(
 		{
 			projectKey: "PROJ",
@@ -53,6 +58,13 @@ export async function startReviewScenario(
 				modelUrl: model.url,
 				...(args ? { args } : {}),
 			}),
+		scriptReviewer(nextOptions) {
+			reviewer = createScriptedReviewer(nextOptions);
+		},
+		pushHeadCommit(files) {
+			bitbucket.pullRequest.headCommit = repository.pushHeadCommit(files);
+			return bitbucket.pullRequest.headCommit;
+		},
 		async close() {
 			await model.close();
 			await bitbucket.close();

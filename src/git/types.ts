@@ -17,6 +17,8 @@ export interface ChangedFile {
 export interface ReviewableFile extends ChangedFile {
 	/** Sorted head-side lines added or modified by the change. */
 	readonly changedLines: readonly number[];
+	/** Head-side text of each changed line, keyed by line number. */
+	readonly changedLineText: ReadonlyMap<number, string>;
 }
 
 export interface DiffStats {

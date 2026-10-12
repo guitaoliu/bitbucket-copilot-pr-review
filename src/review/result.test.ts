@@ -6,6 +6,7 @@ import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
 import {
 	baseReviewerConfig as baseConfig,
 	createPullRequest,
+	createReviewScope,
 } from "../test-support/review-fixtures.ts";
 import { parseSummaryCommentRevision } from "./markers.ts";
 import {
@@ -107,7 +108,18 @@ describe("buildReviewArtifacts", () => {
 	it("builds the report and tagged pull request comment", () => {
 		const context = createReviewContext();
 		const review = createReviewOutcome();
-		const artifacts = buildReviewArtifacts(baseConfig, context, review);
+		const artifacts = buildReviewArtifacts(
+			baseConfig,
+			createReviewScope(context),
+			review,
+		);
+
+		assert.equal(artifacts.findingComments.length, 1);
+		assert.deepEqual(artifacts.findingComments[0]?.anchor, {
+			path: "src/service.ts",
+			line: 42,
+		});
+		assert.equal(artifacts.currentCodeKeys.size, 4);
 
 		assert.equal(artifacts.report.result, "FAIL");
 		assert.deepEqual(
@@ -201,7 +213,11 @@ describe("buildReviewArtifacts", () => {
 			})),
 		};
 
-		const artifacts = buildReviewArtifacts(baseConfig, context, review);
+		const artifacts = buildReviewArtifacts(
+			baseConfig,
+			createReviewScope(context),
+			review,
+		);
 
 		assert.ok(artifacts.commentBody.length <= BITBUCKET_PR_COMMENT_MAX_CHARS);
 		assert.match(artifacts.commentBody, /<!-- copilot-pr-review -->/);
@@ -260,6 +276,7 @@ describe("buildReviewRunOutput", () => {
 			},
 			commentBody: "comment body",
 			findingComments: [],
+			currentCodeKeys: new Set(),
 		};
 		const output = buildReviewRunOutput(context, artifacts, {
 			status: "published",
@@ -319,6 +336,7 @@ describe("buildReviewRunOutput", () => {
 			},
 			commentBody: "comment body",
 			findingComments: [],
+			currentCodeKeys: new Set(),
 		};
 		const stale = buildReviewRunOutput(context, artifacts, {
 			status: "stale",
@@ -387,7 +405,11 @@ describe("buildReviewRunOutput", () => {
 				},
 			],
 		};
-		const artifacts = buildReviewArtifacts(baseConfig, context, review);
+		const artifacts = buildReviewArtifacts(
+			baseConfig,
+			createReviewScope(context),
+			review,
+		);
 		const output = buildReviewRunOutput(context, artifacts, {
 			status: "dry_run",
 			completedStages: [],

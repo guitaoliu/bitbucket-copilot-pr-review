@@ -1,10 +1,11 @@
 import packageJson from "../../package.json" with { type: "json" };
 import type { PullRequestInfo } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
+import { collectCurrentCodeKeys } from "../policy/finding-identity.ts";
 import { omitUndefined } from "../shared/object.ts";
 import { sanitizeModelAuthoredText } from "../shared/text.ts";
 import type { ReviewPublication, ReviewRunOutput } from "./output-types.ts";
-import { buildFindingCommentDraft } from "./render/finding-comment.ts";
+import { buildFindingCommentDrafts } from "./render/finding-comment.ts";
 import { buildInsightReport } from "./render/report.ts";
 import { buildPullRequestComment } from "./render/summary-comment.ts";
 import type { ReviewArtifacts } from "./runner-types.ts";
@@ -12,6 +13,7 @@ import type {
 	PublicationResult,
 	ReviewContext,
 	ReviewOutcome,
+	ReviewScope,
 } from "./types.ts";
 
 export function buildSkippedReviewOutput({
@@ -81,17 +83,20 @@ function sanitizeReviewOutcome(review: ReviewOutcome): ReviewOutcome {
 
 export function buildReviewArtifacts(
 	config: ReviewerConfig,
-	context: ReviewContext,
+	scope: ReviewScope,
 	rawReview: ReviewOutcome,
 ): ReviewArtifacts {
 	const review = sanitizeReviewOutcome(rawReview);
 	return {
 		review,
-		report: buildInsightReport(config, context, review),
-		commentBody: buildPullRequestComment(config, context, review),
-		findingComments: review.findings.map((finding) =>
-			buildFindingCommentDraft(config.report.commentTag, finding),
+		report: buildInsightReport(config, scope, review),
+		commentBody: buildPullRequestComment(config, scope, review),
+		findingComments: buildFindingCommentDrafts(
+			config.report.commentTag,
+			review.findings,
+			scope.reviewableFiles,
 		),
+		currentCodeKeys: collectCurrentCodeKeys(scope.reviewableFiles),
 	};
 }
 

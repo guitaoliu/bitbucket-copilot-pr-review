@@ -7,6 +7,7 @@ import { createBitbucketRepoScope } from "./scope.ts";
 import { BitbucketTransport } from "./transport.ts";
 
 export interface BitbucketClient {
+	getAuthenticatedUserName(): Promise<string>;
 	pullRequest: PullRequestApi;
 	codeInsights: CodeInsightsApi;
 	comments: PullRequestCommentsApi;
@@ -16,12 +17,10 @@ export function createBitbucketClient(
 	config: ReviewerConfig["bitbucket"],
 	logger: Logger,
 ): BitbucketClient {
-	const scope = createBitbucketRepoScope(
-		config,
-		new BitbucketTransport(config),
-		logger,
-	);
+	const transport = new BitbucketTransport(config);
+	const scope = createBitbucketRepoScope(config, transport, logger);
 	return {
+		getAuthenticatedUserName: () => transport.getAuthenticatedUserName(),
 		pullRequest: new PullRequestApi(scope),
 		codeInsights: new CodeInsightsApi(scope),
 		comments: new PullRequestCommentsApi(scope),

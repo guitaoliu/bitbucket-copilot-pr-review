@@ -89,6 +89,7 @@ function createChangedFile(): ReviewableFile {
 		path: "src/example.ts",
 		status: "modified",
 		changedLines: [1],
+		changedLineText: new Map(),
 		additions: 1,
 		deletions: 0,
 		isBinary: false,

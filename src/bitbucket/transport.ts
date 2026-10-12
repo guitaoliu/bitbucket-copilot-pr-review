@@ -1,14 +1,17 @@
 import { readFile } from "node:fs/promises";
-import http from "node:http";
+import http, { type IncomingHttpHeaders } from "node:http";
 import https from "node:https";
 import type { ReviewerConfig } from "../config/types.ts";
 import { omitUndefined } from "../shared/object.ts";
 
 const REQUEST_TIMEOUT_MS = 30_000;
+const AUTHENTICATED_USER_PATH = "/rest/api/latest/application-properties";
+const AUTHENTICATED_USER_HEADER = "x-ausername";
 
 interface HttpResponseData {
 	statusCode: number;
 	statusMessage: string;
+	headers: IncomingHttpHeaders;
 	body: string;
 }
 
@@ -54,6 +57,7 @@ export class BitbucketApiError extends Error {
 
 export class BitbucketTransport {
 	private caCertPromise?: Promise<string | undefined>;
+	private authenticatedUserNamePromise: Promise<string> | undefined;
 	private readonly config: ReviewerConfig["bitbucket"];
 	private readonly sendRequestImpl: (
 		url: URL,
@@ -186,6 +190,7 @@ export class BitbucketTransport {
 					resolve({
 						statusCode: response.statusCode ?? 0,
 						statusMessage: response.statusMessage ?? "",
+						headers: response.headers,
 						body: Buffer.concat(chunks).toString("utf8"),
 					});
 				});
@@ -211,10 +216,10 @@ export class BitbucketTransport {
 		});
 	}
 
-	async request(
+	private async send(
 		pathname: string,
 		options: BitbucketRequest = {},
-	): Promise<string> {
+	): Promise<HttpResponseData> {
 		const url = new URL(pathname, `${this.config.baseUrl}/`);
 		const method = options.method ?? "GET";
 		const body =
@@ -225,7 +230,7 @@ export class BitbucketTransport {
 			const response = await this.sendRequestImpl(url, method, headers, body);
 
 			if (response.statusCode >= 200 && response.statusCode < 300) {
-				return response.body;
+				return response;
 			}
 
 			throw new BitbucketApiError(
@@ -246,10 +251,44 @@ export class BitbucketTransport {
 		}
 	}
 
+	async request(
+		pathname: string,
+		options: BitbucketRequest = {},
+	): Promise<string> {
+		return (await this.send(pathname, options)).body;
+	}
+
 	async requestJson<T>(
 		pathname: string,
 		options?: BitbucketRequest,
 	): Promise<T> {
 		return JSON.parse(await this.request(pathname, options)) as T;
+	}
+
+	/**
+	 * Returns the Bitbucket user name the credentials authenticate as, read
+	 * once from the `X-AUSERNAME` header Bitbucket sets on authenticated
+	 * responses.
+	 */
+	getAuthenticatedUserName(): Promise<string> {
+		this.authenticatedUserNamePromise ??=
+			this.fetchAuthenticatedUserName().catch((error: unknown) => {
+				this.authenticatedUserNamePromise = undefined;
+				throw error;
+			});
+		return this.authenticatedUserNamePromise;
+	}
+
+	private async fetchAuthenticatedUserName(): Promise<string> {
+		const response = await this.send(AUTHENTICATED_USER_PATH);
+		const header = response.headers[AUTHENTICATED_USER_HEADER];
+		const userName = (Array.isArray(header) ? header[0] : header)?.trim();
+		if (!userName) {
+			throw new Error(
+				`Bitbucket did not return an X-AUSERNAME header for GET ${new URL(AUTHENTICATED_USER_PATH, `${this.config.baseUrl}/`).toString()}, so the reviewer cannot tell which pull request comments it owns. Use credentials of a real Bitbucket user or bot account; anonymous access is not supported.`,
+			);
+		}
+
+		return userName;
 	}
 }

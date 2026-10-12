@@ -1,5 +1,6 @@
 import type { ReviewerConfig } from "../config/types.ts";
-import { findSummaryComments, parseSummaryCommentRevision } from "./markers.ts";
+import { selectOwnTaggedComments } from "./comment-sync.ts";
+import { parseSummaryCommentRevision } from "./markers.ts";
 import {
 	type PublishedReportState,
 	readPublishedReportState,
@@ -37,7 +38,11 @@ export async function getExistingPublicationStatus(
 	}
 
 	const report = readPublishedReportState(rawReport);
-	const [summaryComment] = findSummaryComments(tag, comments);
+	const [summaryComment] = selectOwnTaggedComments(
+		tag,
+		await bitbucket.getAuthenticatedUserName(),
+		comments,
+	).summaries;
 	const commentRevision = summaryComment
 		? parseSummaryCommentRevision(tag, summaryComment.text)
 		: undefined;

@@ -52,7 +52,12 @@ describe("BitbucketTransport", () => {
 		const transport = new BitbucketTransport(baseConfig, {
 			sendRequest: async (_url, method, headers, body) => {
 				recorded = { method, headers, ...(body ? { body } : {}) };
-				return { statusCode: 200, statusMessage: "OK", body: "{}" };
+				return {
+					statusCode: 200,
+					statusMessage: "OK",
+					headers: {},
+					body: "{}",
+				};
 			},
 		});
 
@@ -72,7 +77,12 @@ describe("BitbucketTransport", () => {
 		const transport = new BitbucketTransport(baseConfig, {
 			sendRequest: async (_url, _method, headers) => {
 				recordedHeaders = headers;
-				return { statusCode: 200, statusMessage: "OK", body: "{}" };
+				return {
+					statusCode: 200,
+					statusMessage: "OK",
+					headers: {},
+					body: "{}",
+				};
 			},
 		});
 
@@ -80,5 +90,47 @@ describe("BitbucketTransport", () => {
 
 		assert.equal(recordedHeaders?.["content-type"], undefined);
 		assert.equal(recordedHeaders?.accept, "application/json;charset=UTF-8");
+	});
+
+	it("reads the authenticated user name from the X-AUSERNAME header once", async () => {
+		const requested: string[] = [];
+		const transport = new BitbucketTransport(baseConfig, {
+			sendRequest: async (url, method) => {
+				requested.push(`${method} ${url.pathname}`);
+				return {
+					statusCode: 200,
+					statusMessage: "OK",
+					headers: { "x-ausername": "review-bot" },
+					body: "{}",
+				};
+			},
+		});
+
+		assert.equal(await transport.getAuthenticatedUserName(), "review-bot");
+		assert.equal(await transport.getAuthenticatedUserName(), "review-bot");
+		assert.deepEqual(requested, [
+			"GET /rest/api/latest/application-properties",
+		]);
+	});
+
+	it("fails closed and retries later when the X-AUSERNAME header is missing", async () => {
+		const userNames: Array<string | undefined> = [undefined, "review-bot"];
+		const transport = new BitbucketTransport(baseConfig, {
+			sendRequest: async () => {
+				const userName = userNames.shift();
+				return {
+					statusCode: 200,
+					statusMessage: "OK",
+					headers: userName ? { "x-ausername": userName } : {},
+					body: "{}",
+				};
+			},
+		});
+
+		await assert.rejects(
+			transport.getAuthenticatedUserName(),
+			/did not return an X-AUSERNAME header.*application-properties/,
+		);
+		assert.equal(await transport.getAuthenticatedUserName(), "review-bot");
 	});
 });

@@ -1,12 +1,9 @@
-import type { PullRequestCommentStrategy } from "../config/types.ts";
 import { omitUndefined } from "../shared/object.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../shared/text.ts";
 import type { BitbucketRepoScope } from "./scope.ts";
-import { BitbucketApiError } from "./transport.ts";
 import type {
-	CommentRetirement,
 	PullRequestComment,
-	PullRequestCommentDraft,
+	PullRequestCommentLocation,
 	RawBitbucketCommentActivity,
 	RawBitbucketPagedResponse,
 } from "./types.ts";
@@ -23,63 +20,27 @@ function validatePullRequestCommentText(text: string): void {
 	}
 }
 
-function getCommentSortTimestamp(
-	comment: Pick<PullRequestComment, "createdDate" | "updatedDate">,
-): number {
-	return comment.updatedDate ?? comment.createdDate ?? 0;
+function toPullRequestComment(
+	activity: RawBitbucketCommentActivity,
+	comment: NonNullable<RawBitbucketCommentActivity["comment"]>,
+): PullRequestComment {
+	return omitUndefined({
+		id: comment.id,
+		version: comment.version,
+		text: comment.text ?? "",
+		authorName: comment.author?.name,
+		threadResolved: comment.threadResolved === true,
+		replies: (comment.comments ?? []).map((reply) =>
+			omitUndefined({ authorName: reply.author?.name, text: reply.text ?? "" }),
+		),
+		createdDate: comment.createdDate ?? activity.createdDate,
+	}) satisfies PullRequestComment;
 }
 
-function compareNewestFirst(
-	left: PullRequestComment,
-	right: PullRequestComment,
-): number {
-	return (
-		getCommentSortTimestamp(right) - getCommentSortTimestamp(left) ||
-		right.version - left.version ||
-		right.id - left.id
-	);
-}
-
-function getErrorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
-
-function isBitbucketError(
-	error: unknown,
-	statusCode: number,
-	pattern: RegExp,
-): boolean {
-	return (
-		error instanceof BitbucketApiError &&
-		error.statusCode === statusCode &&
-		pattern.test(`${error.responseBody}\n${error.message}`)
-	);
-}
-
-function isDeletionBlockedByReplies(error: unknown): boolean {
-	return isBitbucketError(
-		error,
-		409,
-		/CommentDeletionException|replies which must be deleted first/i,
-	);
-}
-
-function isDeletionBlockedByResolvedThread(error: unknown): boolean {
-	return isBitbucketError(
-		error,
-		400,
-		/cannot be deleted from resolved thread/i,
-	);
-}
-
-function isUpdateBlockedByResolvedThread(error: unknown): boolean {
-	return isBitbucketError(
-		error,
-		400,
-		/changes cannot be made to resolved thread/i,
-	);
-}
-
+/**
+ * Bitbucket Data Center pull request comment primitives. Callers decide which
+ * comments to touch; this class only talks to the REST API.
+ */
 export class PullRequestCommentsApi {
 	private readonly scope: BitbucketRepoScope;
 
@@ -87,6 +48,11 @@ export class PullRequestCommentsApi {
 		this.scope = scope;
 	}
 
+	private commentPath(comment: Pick<PullRequestComment, "id">): string {
+		return `${this.scope.pullRequestPath}/comments/${comment.id}`;
+	}
+
+	/** Lists comments from the activity stream, one entry per comment at its newest version. */
 	async listComments(): Promise<PullRequestComment[]> {
 		const commentsById = new Map<number, PullRequestComment>();
 		let start = 0;
@@ -101,24 +67,9 @@ export class PullRequestCommentsApi {
 					continue;
 				}
 
-				const nextComment = omitUndefined({
-					id: activity.comment.id,
-					text: activity.comment.text ?? "",
-					version: activity.comment.version,
-					createdDate: activity.comment.createdDate ?? activity.createdDate,
-					updatedDate:
-						activity.comment.updatedDate ??
-						activity.comment.createdDate ??
-						activity.createdDate,
-				}) satisfies PullRequestComment;
+				const nextComment = toPullRequestComment(activity, activity.comment);
 				const existing = commentsById.get(nextComment.id);
-				if (
-					!existing ||
-					existing.version < nextComment.version ||
-					(existing.version === nextComment.version &&
-						getCommentSortTimestamp(existing) <
-							getCommentSortTimestamp(nextComment))
-				) {
+				if (!existing || existing.version < nextComment.version) {
 					commentsById.set(nextComment.id, nextComment);
 				}
 			}
@@ -130,12 +81,12 @@ export class PullRequestCommentsApi {
 			start = payload.nextPageStart;
 		}
 
-		return [...commentsById.values()].sort(compareNewestFirst);
+		return [...commentsById.values()];
 	}
 
-	private async createComment(
+	async createComment(
 		text: string,
-		anchor?: PullRequestCommentDraft["anchor"],
+		anchor?: PullRequestCommentLocation,
 	): Promise<void> {
 		validatePullRequestCommentText(text);
 		await this.scope.transport.request(
@@ -158,142 +109,48 @@ export class PullRequestCommentsApi {
 		);
 	}
 
-	private async updateComment(
-		comment: PullRequestComment,
+	async updateComment(
+		comment: Pick<PullRequestComment, "id" | "version">,
+		text: string,
+	): Promise<void> {
+		validatePullRequestCommentText(text);
+		await this.scope.transport.request(this.commentPath(comment), {
+			method: "PUT",
+			json: { version: comment.version, text },
+		});
+	}
+
+	async deleteComment(
+		comment: Pick<PullRequestComment, "id" | "version">,
+	): Promise<void> {
+		await this.scope.transport.request(
+			`${this.commentPath(comment)}?version=${encodeURIComponent(String(comment.version))}`,
+			{ method: "DELETE" },
+		);
+	}
+
+	async replyToComment(
+		comment: Pick<PullRequestComment, "id">,
 		text: string,
 	): Promise<void> {
 		validatePullRequestCommentText(text);
 		await this.scope.transport.request(
-			`${this.scope.pullRequestPath}/comments/${comment.id}`,
-			{ method: "PUT", json: { version: comment.version, text } },
+			`${this.scope.pullRequestPath}/comments`,
+			{ method: "POST", json: { text, parent: { id: comment.id } } },
 		);
 	}
 
-	private async retireComment(
-		comment: PullRequestComment,
-		retirement: CommentRetirement,
-	): Promise<void> {
-		const { logger } = this.scope;
-		const label = `${retirement.label} ${comment.id}`;
-		try {
-			logger.info(`Deleting ${label}`);
-			await this.scope.transport.request(
-				`${this.scope.pullRequestPath}/comments/${comment.id}?version=${encodeURIComponent(String(comment.version))}`,
-				{ method: "DELETE" },
-			);
-		} catch (error) {
-			if (isDeletionBlockedByResolvedThread(error)) {
-				logger.debug(
-					`${label} is in a resolved thread and cannot be deleted or archived; leaving it in place.`,
-				);
-				return;
-			}
-
-			if (!isDeletionBlockedByReplies(error)) {
-				logger.warn(`Failed to delete ${label}: ${getErrorMessage(error)}`);
-				return;
-			}
-
-			try {
-				logger.info(`${label} has replies; archiving it instead of deleting`);
-				await this.updateComment(comment, retirement.supersededText);
-			} catch (archiveError) {
-				logger.warn(
-					`Failed to archive ${label} after delete was blocked by replies: ${getErrorMessage(archiveError)}`,
-				);
-			}
-		}
-	}
-
-	async upsertComment(
-		existing: PullRequestComment[],
-		text: string,
-		options: {
-			strategy: PullRequestCommentStrategy;
-			retirement: CommentRetirement;
-		},
-	): Promise<void> {
-		const [latest] = existing;
-		if (latest && options.strategy === "update") {
-			this.scope.logger.info(
-				`Updating ${options.retirement.label} ${latest.id}`,
-			);
-			await this.updateComment(latest, text);
-			return;
-		}
-
-		this.scope.logger.info(`Creating ${options.retirement.label}`);
-		await this.createComment(text);
-		for (const comment of existing) {
-			await this.retireComment(comment, options.retirement);
-		}
-	}
-
-	async reconcileKeyedComments(
-		existing: PullRequestComment[],
-		drafts: PullRequestCommentDraft[],
-		options: {
-			keyOf: (text: string) => string | undefined;
-			retirement: CommentRetirement;
-		},
-	): Promise<void> {
-		const commentsByKey = new Map<string, PullRequestComment>();
-		const duplicates: PullRequestComment[] = [];
-		for (const comment of existing) {
-			const key = options.keyOf(comment.text);
-			if (key === undefined) {
-				continue;
-			}
-
-			if (commentsByKey.has(key)) {
-				duplicates.push(comment);
-			} else {
-				commentsByKey.set(key, comment);
-			}
-		}
-
-		for (const draft of drafts) {
-			const matchedKey = draft.keys.find((key) => commentsByKey.has(key));
-			const matched =
-				matchedKey === undefined ? undefined : commentsByKey.get(matchedKey);
-			if (matchedKey !== undefined) {
-				commentsByKey.delete(matchedKey);
-			}
-
-			if (
-				!matched ||
-				!(await this.updateUnlessResolved(
-					matched,
-					draft.text,
-					options.retirement,
-				))
-			) {
-				await this.createComment(draft.text, draft.anchor);
-			}
-		}
-
-		for (const comment of [...duplicates, ...commentsByKey.values()]) {
-			await this.retireComment(comment, options.retirement);
-		}
-	}
-
-	private async updateUnlessResolved(
-		comment: PullRequestComment,
-		text: string,
-		retirement: CommentRetirement,
-	): Promise<boolean> {
-		try {
-			await this.updateComment(comment, text);
-			return true;
-		} catch (error) {
-			if (!isUpdateBlockedByResolvedThread(error)) {
-				throw error;
-			}
-
-			this.scope.logger.debug(
-				`${retirement.label} ${comment.id} is in a resolved thread and cannot be updated; creating a replacement comment.`,
-			);
-			return false;
-		}
+	/**
+	 * Resolves the comment's thread at its current version, since replies
+	 * posted just before may have advanced the version the caller listed.
+	 */
+	async resolveThread(comment: Pick<PullRequestComment, "id">): Promise<void> {
+		const { version } = await this.scope.transport.requestJson<{
+			version: number;
+		}>(this.commentPath(comment));
+		await this.scope.transport.request(this.commentPath(comment), {
+			method: "PUT",
+			json: { version, threadResolved: true },
+		});
 	}
 }

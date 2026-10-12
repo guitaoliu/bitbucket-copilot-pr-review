@@ -123,8 +123,14 @@ describe("parseChangedFiles", () => {
 	});
 });
 
+function changedLineEntries(diff: string) {
+	return Object.fromEntries(
+		[...parseChangedLines(diff)].map(([path, lines]) => [path, [...lines]]),
+	);
+}
+
 describe("parseChangedLines", () => {
-	it("collects added head lines and ignores context and removed lines", () => {
+	it("collects added head lines with their text and ignores context and removed lines", () => {
 		const diff = [
 			"diff --git a/src/example.ts b/src/example.ts",
 			"index 1111111..2222222 100644",
@@ -158,9 +164,15 @@ describe("parseChangedLines", () => {
 			"",
 		].join("\n");
 
-		assert.deepEqual(Object.fromEntries(parseChangedLines(diff)), {
-			"src/example.ts": [2, 3],
-			"src/new file.ts": [1, 2],
+		assert.deepEqual(changedLineEntries(diff), {
+			"src/example.ts": [
+				[2, "const b = 3;"],
+				[3, "+const c = 4;"],
+			],
+			"src/new file.ts": [
+				[1, "line 1"],
+				[2, "line 2"],
+			],
 			"src/removed.ts": [],
 		});
 	});
@@ -189,11 +201,11 @@ describe("parseChangedLines", () => {
 			"+added",
 		].join("\n");
 
-		assert.deepEqual(Object.fromEntries(parseChangedLines(diff)), {
-			"src/new-name.ts": [1],
+		assert.deepEqual(changedLineEntries(diff), {
+			"src/new-name.ts": [[1, "new"]],
 			"src/a b\t.ts": [],
 			"assets/logo.png": [],
-			"src/tab\there.ts": [4],
+			"src/tab\there.ts": [[4, "added"]],
 		});
 	});
 

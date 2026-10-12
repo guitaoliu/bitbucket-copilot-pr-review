@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ReviewerConfig } from "../../config/types.ts";
-import { buildFindingThreadKey } from "../../policy/finding-identity.ts";
+import type { ReviewableFile } from "../../git/types.ts";
+import {
+	buildFindingThreadKey,
+	collectCurrentCodeKeys,
+} from "../../policy/finding-identity.ts";
+import type { ReviewFinding } from "../../policy/types.ts";
 import { BITBUCKET_PR_COMMENT_MAX_CHARS } from "../../shared/text.ts";
-import { parseFindingCommentKey } from "../markers.ts";
+import { parseFindingCommentIdentity } from "../markers.ts";
 import type { ReviewContext, ReviewOutcome } from "../types.ts";
-import { buildFindingCommentDraft } from "./finding-comment.ts";
+import { buildFindingCommentDrafts } from "./finding-comment.ts";
 import { buildInsightReport } from "./report.ts";
 import { buildPullRequestComment } from "./summary-comment.ts";
 
@@ -417,18 +422,35 @@ describe("buildPullRequestComment", () => {
 	});
 });
 
-describe("buildFindingCommentDraft", () => {
-	const finding = createOutcome().findings[0];
+function reviewedFile(lines: Record<number, string>): ReviewableFile {
+	const changedLineText = new Map(
+		Object.entries(lines).map(([line, text]) => [Number(line), text]),
+	);
+	return {
+		path: "src/service.ts",
+		status: "modified",
+		additions: changedLineText.size,
+		deletions: 0,
+		isBinary: false,
+		changedLines: [...changedLineText.keys()],
+		changedLineText,
+	};
+}
 
-	it("renders a finding comment whose thread marker parses back to its primary key", () => {
-		assert.ok(finding);
-		const draft = buildFindingCommentDraft("copilot-pr-review", finding);
+describe("buildFindingCommentDrafts", () => {
+	const tag = "copilot-pr-review";
+	const [finding] = createOutcome().findings as [ReviewFinding];
+	const files = [reviewedFile({ 42: "\treturn  user.name;" })];
 
-		assert.equal(
-			parseFindingCommentKey("copilot-pr-review", draft.text),
-			draft.keys[0],
-		);
-		assert.deepEqual(draft.keys, [
+	it("renders key and code markers that parse back to the draft's primary key", () => {
+		const [draft] = buildFindingCommentDrafts(tag, [finding], files);
+		assert.ok(draft);
+		const identity = parseFindingCommentIdentity(tag, draft.text);
+
+		assert.equal(identity?.key, draft.keys[0]);
+		assert.ok(identity?.codeKey);
+		assert.ok(collectCurrentCodeKeys(files).has(identity.codeKey));
+		assert.deepEqual(draft.keys.slice(1), [
 			`thread:${finding.threadKey}`,
 			`legacy:${finding.externalId}`,
 		]);
@@ -437,27 +459,94 @@ describe("buildFindingCommentDraft", () => {
 			draft.text,
 			/\*\*Type: BUG \| Severity: HIGH \| Confidence: high\*\*\n\n\*\*Null handling is broken\*\*\n\nLocation: `src\/service\.ts:42`/,
 		);
-		assert.doesNotMatch(draft.text, /finding-revision|finding-reviewed-commit/);
+		assert.doesNotMatch(draft.text, /finding-thread:|finding-revision/);
 	});
 
-	it("posts file-level findings as top-level comments", () => {
-		assert.ok(finding);
-		const draft = buildFindingCommentDraft("copilot-pr-review", {
-			...finding,
-			line: 0,
-		});
+	it("keeps the finding key when only the line number or whitespace changes", () => {
+		const [original] = buildFindingCommentDrafts(tag, [finding], files);
+		const [shifted] = buildFindingCommentDrafts(
+			tag,
+			[{ ...finding, line: 50 }],
+			[reviewedFile({ 50: "return user.name;  " })],
+		);
+
+		assert.equal(shifted?.keys[0], original?.keys[0]);
+		assert.notEqual(shifted?.text, original?.text);
+	});
+
+	it("changes the finding key when the flagged code or finding type changes", () => {
+		const [original] = buildFindingCommentDrafts(tag, [finding], files);
+		const [edited] = buildFindingCommentDrafts(
+			tag,
+			[finding],
+			[reviewedFile({ 42: "return user?.name;" })],
+		);
+		const [retyped] = buildFindingCommentDrafts(
+			tag,
+			[{ ...finding, type: "VULNERABILITY" }],
+			files,
+		);
+
+		assert.notEqual(edited?.keys[0], original?.keys[0]);
+		assert.notEqual(retyped?.keys[0], original?.keys[0]);
+	});
+
+	it("gives repeated findings on identical code distinct keys in a stable order", () => {
+		const repeated = [finding, { ...finding, line: 43, title: "Second issue" }];
+		const twoLines = [
+			reviewedFile({ 42: "return user.name;", 43: "return user.name;" }),
+		];
+		const first = buildFindingCommentDrafts(tag, repeated, twoLines);
+		const second = buildFindingCommentDrafts(tag, repeated, twoLines);
+
+		assert.notEqual(first[0]?.keys[0], first[1]?.keys[0]);
+		assert.deepEqual(
+			first.map((draft) => draft.keys[0]),
+			second.map((draft) => draft.keys[0]),
+		);
+	});
+
+	it("posts file-level findings as top-level comments keyed to the file", () => {
+		const [draft] = buildFindingCommentDrafts(
+			tag,
+			[{ ...finding, line: 0 }],
+			files,
+		);
+		assert.ok(draft);
+		const codeKey = parseFindingCommentIdentity(tag, draft.text)?.codeKey;
 
 		assert.equal(draft.anchor, undefined);
 		assert.match(draft.text, /Location: `src\/service\.ts`/);
+		assert.ok(codeKey && collectCurrentCodeKeys(files).has(codeKey));
+		assert.equal(codeKey && collectCurrentCodeKeys([]).has(codeKey), false);
 	});
+});
 
-	it("matches comments written by older versions through the legacy finding marker", () => {
-		assert.equal(
-			parseFindingCommentKey(
+describe("parseFindingCommentIdentity", () => {
+	it("matches comments written by older versions through their legacy markers", () => {
+		assert.deepEqual(
+			parseFindingCommentIdentity(
+				"copilot-pr-review",
+				"<!-- copilot-pr-review:finding-thread:thread-1 -->\nbody",
+			),
+			{ key: "thread:thread-1" },
+		);
+		assert.deepEqual(
+			parseFindingCommentIdentity(
 				"copilot-pr-review",
 				"<!-- copilot-pr-review:finding:old-id -->\nbody",
 			),
-			"legacy:old-id",
+			{ key: "legacy:old-id" },
+		);
+	});
+
+	it("ignores comments without a finding marker for the tag", () => {
+		assert.equal(
+			parseFindingCommentIdentity(
+				"copilot-pr-review",
+				"<!-- other-tag:finding-key:abc -->\n<!-- copilot-pr-review -->",
+			),
+			undefined,
 		);
 	});
 });

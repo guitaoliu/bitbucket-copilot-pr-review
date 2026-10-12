@@ -1,9 +1,12 @@
-import type { PullRequestComment } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import type { Logger } from "../shared/logger.ts";
-import { findSummaryComments, parseFindingCommentKey } from "./markers.ts";
-import { FINDING_COMMENT_RETIREMENT } from "./render/finding-comment.ts";
-import { SUMMARY_COMMENT_RETIREMENT } from "./render/summary-comment.ts";
+import {
+	applyCommentActions,
+	type OwnTaggedComments,
+	planFindingCommentSync,
+	planSummaryCommentSync,
+	selectOwnTaggedComments,
+} from "./comment-sync.ts";
 import type { ReviewArtifacts, ReviewBitbucketClient } from "./runner-types.ts";
 import type {
 	PublicationResult,
@@ -30,33 +33,51 @@ function getStalePublishReason(
 	return undefined;
 }
 
+async function listOwnTaggedComments(
+	bitbucket: ReviewBitbucketClient,
+	tag: string,
+	logger: Logger,
+): Promise<OwnTaggedComments> {
+	const botName = await bitbucket.getAuthenticatedUserName();
+	const own = selectOwnTaggedComments(
+		tag,
+		botName,
+		await bitbucket.comments.listComments(),
+	);
+	if (own.foreignCount > 0) {
+		logger.debug(
+			`Ignoring ${own.foreignCount} pull request comments that carry ${tag} markers but were not written by ${botName}.`,
+		);
+	}
+	return own;
+}
+
 async function publishSummaryComment(
 	bitbucket: ReviewBitbucketClient,
 	config: ReviewerConfig,
 	commentBody: string,
-	comments: PullRequestComment[],
+	own: OwnTaggedComments,
 	logger: Logger,
 ): Promise<void> {
-	const tag = config.report.commentTag;
-	const options = {
-		strategy: config.report.commentStrategy,
-		retirement: SUMMARY_COMMENT_RETIREMENT,
-	};
-	try {
-		await bitbucket.comments.upsertComment(
-			findSummaryComments(tag, comments),
-			commentBody,
-			options,
+	const syncSummary = (current: OwnTaggedComments) =>
+		applyCommentActions(
+			bitbucket.comments,
+			planSummaryCommentSync({
+				own: current,
+				body: commentBody,
+				strategy: config.report.commentStrategy,
+			}),
+			{ label: "pull request summary comment", logger },
 		);
+	try {
+		await syncSummary(own);
 	} catch (firstError) {
 		logger.warn(
 			"Pull request comment update failed once; re-reading comments and retrying before marking publication partial.",
 			firstError,
 		);
-		await bitbucket.comments.upsertComment(
-			findSummaryComments(tag, await bitbucket.comments.listComments()),
-			commentBody,
-			options,
+		await syncSummary(
+			await listOwnTaggedComments(bitbucket, config.report.commentTag, logger),
 		);
 	}
 }
@@ -95,7 +116,7 @@ export async function publishReview(
 	}
 
 	const tag = config.report.commentTag;
-	let comments: PullRequestComment[] = [];
+	let own: OwnTaggedComments | undefined;
 	const stages: Array<[PublicationStage, () => Promise<void>]> = [
 		[
 			"code_insights",
@@ -109,25 +130,28 @@ export async function publishReview(
 		[
 			"finding_comments",
 			async () => {
-				comments = await bitbucket.comments.listComments();
-				await bitbucket.comments.reconcileKeyedComments(
-					comments,
-					artifacts.findingComments,
-					{
-						keyOf: (text) => parseFindingCommentKey(tag, text),
-						retirement: FINDING_COMMENT_RETIREMENT,
-					},
+				own = await listOwnTaggedComments(bitbucket, tag, logger);
+				await applyCommentActions(
+					bitbucket.comments,
+					planFindingCommentSync({
+						tag,
+						own,
+						drafts: artifacts.findingComments,
+						currentCodeKeys: artifacts.currentCodeKeys,
+						headCommit: context.headCommit,
+					}),
+					{ label: "pull request finding comment", logger },
 				);
 			},
 		],
 		[
 			"pull_request_comment",
-			() =>
+			async () =>
 				publishSummaryComment(
 					bitbucket,
 					config,
 					artifacts.commentBody,
-					comments,
+					own ?? (await listOwnTaggedComments(bitbucket, tag, logger)),
 					logger,
 				),
 		],

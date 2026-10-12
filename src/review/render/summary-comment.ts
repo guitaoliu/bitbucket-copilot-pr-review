@@ -1,4 +1,3 @@
-import type { CommentRetirement } from "../../bitbucket/types.ts";
 import type { ReviewerConfig } from "../../config/types.ts";
 import { filterFilesByPathPattern } from "../../policy/path-access.ts";
 import type { ReviewFinding } from "../../policy/types.ts";
@@ -23,12 +22,6 @@ import {
 } from "./markdown.ts";
 
 const COMMENT_SECTION_SEPARATOR = "\n\n";
-
-export const SUMMARY_COMMENT_RETIREMENT: CommentRetirement = {
-	label: "pull request summary comment",
-	supersededText:
-		"_Superseded by a newer automated PR review summary. This thread is preserved because Bitbucket will not delete it._",
-};
 
 function buildFindingHeaderLines(findings: ReviewFinding[]): string[] {
 	if (findings.length === 0) {

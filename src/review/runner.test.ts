@@ -12,6 +12,7 @@ import {
 	baseReviewerConfig as baseConfig,
 	createFakeBitbucketClient,
 	createPullRequest,
+	createPullRequestComment,
 	createReviewContext,
 	createReviewOutcome,
 	createReviewScope,
@@ -50,7 +51,7 @@ function readOnlyClient(pr: PullRequestInfo): ReviewBitbucketClient {
 	return createFakeBitbucketClient({
 		pullRequest: { getPullRequest: async () => pr },
 		codeInsights: { putReport: failIfCalled("putReport") },
-		comments: { upsertComment: failIfCalled("upsertComment") },
+		comments: { createComment: failIfCalled("createComment") },
 	});
 }
 
@@ -83,13 +84,12 @@ function publishedClient(
 		},
 		comments: {
 			listComments: async () => [
-				{
+				createPullRequestComment({
 					id: 1,
-					version: 0,
 					text: `<!-- copilot-pr-review -->\n<!-- copilot-pr-review:revision:${reviewRevision} -->`,
-				},
+				}),
 			],
-			upsertComment: failIfCalled("upsertComment"),
+			createComment: failIfCalled("createComment"),
 		},
 	});
 }
@@ -304,7 +304,7 @@ describe("runReview", () => {
 				},
 			},
 			codeInsights: { putReport: failIfCalled("putReport") },
-			comments: { upsertComment: failIfCalled("upsertComment") },
+			comments: { createComment: failIfCalled("createComment") },
 		});
 
 		const result = await runReview(
@@ -323,7 +323,7 @@ describe("runReview", () => {
 		let commentAttempts = 0;
 		const client = createFakeBitbucketClient({
 			comments: {
-				upsertComment: async () => {
+				createComment: async () => {
 					commentAttempts += 1;
 					throw new Error(`comment failure ${commentAttempts}`);
 				},
@@ -459,7 +459,7 @@ describe("runReview", () => {
 				}),
 				putReport: failIfCalled("putReport"),
 			},
-			comments: { upsertComment: failIfCalled("upsertComment") },
+			comments: { createComment: failIfCalled("createComment") },
 		});
 
 		const result = await runReview(
@@ -505,11 +505,10 @@ describe("runReview", () => {
 			},
 			comments: {
 				listComments: async () => [
-					{
+					createPullRequestComment({
 						id: 1,
-						version: 0,
 						text: "<!-- copilot-pr-review -->\n<!-- copilot-pr-review:revision:older-revision -->",
-					},
+					}),
 				],
 			},
 		});

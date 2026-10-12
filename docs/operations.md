@@ -204,7 +204,7 @@ Example with common repo-specific customizations:
 }
 ```
 
-By default, the reviewer skips only when the current source head and revision already have a complete Code Insights report and tagged summary comment for the same `REPORT_KEY`. A source-head or revision change runs Copilot again. An incomplete publication also reruns Copilot, then reconciles existing finding threads by their stable thread keys. Use `--force-review` or `REVIEW_FORCE=1` to force a rerun on the same revision.
+By default, the reviewer skips only when the current source head and revision already have a complete Code Insights report and tagged summary comment for the same `REPORT_KEY`. A source-head or revision change runs Copilot again. An incomplete publication also reruns Copilot, then reconciles existing finding comments as described in [Pull request comments](#pull-request-comments). Use `--force-review` or `REVIEW_FORCE=1` to force a rerun on the same revision.
 
 Recommended local test flow:
 
@@ -247,7 +247,7 @@ pnpm review -- https://bitbucket.example.com/projects/PROJ/repos/my-repo/pull-re
 What to expect:
 
 - `--dry-run` prints the review result, Code Insights report payload, and summary comment body as JSON to stdout and does not modify Bitbucket
-- without `--dry-run`, the script publishes a Code Insights report to the PR's latest source commit, reconciles one inline comment per finding, and updates the tagged summary comment
+- without `--dry-run`, the script publishes a Code Insights report to the PR's latest source commit, reconciles one inline comment per finding, and refreshes the tagged summary comment (see [Pull request comments](#pull-request-comments))
 - if the PR head changed while you were testing, the script skips publish to avoid posting stale results
 
 Common local test issues:
@@ -283,6 +283,21 @@ Useful reviewer env vars in CI:
 
 For a safe first rollout, start with `--dry-run`, inspect the payload in your CI logs, then remove `--dry-run` once the Code Insights output looks right.
 
+## Pull request comments
+
+Each publish writes inline finding comments and one tagged summary comment. The reviewer manages only comments it wrote itself:
+
+- **Ownership.** Before reading or touching its comments, the reviewer asks Bitbucket which user its credentials authenticate as, using the `X-AUSERNAME` response header. A comment is managed only when that user authored it and it carries the reviewer's hidden `REPORT_COMMENT_TAG` markers. Comments by anyone else are never edited, deleted, resolved, or replied to, even when they quote the markers. If Bitbucket does not return the header, the reviewer stops before touching any comment instead of guessing. Use a dedicated bot account so the reviewer's comments are easy to tell apart.
+- **Finding identity.** A finding comment is keyed by its file, finding type, and the whitespace-normalized text of the flagged line (or the whole file for file-level findings), not by its line number. Edits that only move the flagged line keep the same comment and its discussion; the comment text is updated with the new location. Findings on several identical lines of the same file are numbered in line order; if one of those lines is fixed, the remaining findings shift to the lower numbers and may take over each other's comments.
+- **Unchanged findings.** A re-reported finding whose comment text is unchanged causes no write at all; otherwise the open comment is edited in place.
+- **Resolved means dismissed.** When a developer resolves a finding thread, the reviewer never edits, reopens, or re-posts that finding while its flagged code stays the same.
+- **Findings that are no longer reported.** If the flagged code still exists in the change, the comment is left alone, because the model may simply not repeat a finding. If the code changed or was removed, the reviewer replies `This finding no longer applies as of commit <head>.` and resolves the thread. Finding comments are never deleted or overwritten once the finding goes away, so replies keep their context.
+- **Duplicates.** When several managed comments share a key, the newest one is kept. An open duplicate without replies is deleted; an open duplicate with replies gets a short reply and is resolved; a resolved duplicate is left alone.
+- **Summary comment.** If the newest managed summary already has the exact new body, nothing is written, so a forced rerun with the same result sends no notification. Otherwise `REPORT_COMMENT_STRATEGY=recreate` (the default) posts a new summary and retires every previous one, while `update` edits the newest open summary in place and retires the rest. Retiring a summary deletes it when it has no replies and is open, replies `Superseded by a newer review summary.` and resolves it when it has replies, and leaves it alone when it is already resolved.
+- **Errors.** Failing to create or edit a comment fails that publication stage (the summary write is retried once after re-reading comments). Failing to delete, reply to, or resolve an outdated comment is logged as a warning and does not fail publication. A thread whose explanatory reply could not be posted is left open, and a later run that finds the reviewer's earlier reply only resolves the thread instead of replying again.
+
+Comments published by earlier versions carry the older `finding-thread` or `finding` markers and no code fingerprint. When a finding is re-reported at the same line, its older open comment is matched and rewritten with the new markers on the next publish. A resolved older comment is never matched, because its line-based key would otherwise suppress unrelated findings on that line forever; that finding is posted once under the new marker format. An older open finding comment that no longer matches a reported finding receives the "no longer applies" reply and is resolved, because without a fingerprint the reviewer cannot tell whether its code still exists. Older summary comments are matched by the unchanged summary marker.
+
 ## Release and Publishing
 
 Run `pnpm release:check` before publishing or cutting a release. It runs formatting or lint checks, typecheck, tests, a production build, built CLI help smoke tests, and `npm pack --dry-run`, then verifies that the packed tarball includes `dist/cli.js`, `README.md`, and `schemas/copilot-code-review.schema.json`.
@@ -302,5 +317,5 @@ After that, bump `package.json`, create a matching tag like `v0.1.1`, and push t
 
 - the reviewer intentionally blocks Copilot from using general shell or edit tools during automated review runs
 - only findings that land on changed lines of reviewable files are published, as inline PR comments; no Code Insights annotations are created
-- the reviewer also upserts one tagged pull-request summary comment by default
+- the reviewer also maintains one tagged pull-request summary comment by default
 - for reruns, the script replaces the prior report for the same report key and commit with a single `PUT`, so a failed publish never leaves the commit without its previous report

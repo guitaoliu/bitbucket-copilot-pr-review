@@ -123,7 +123,7 @@ describe("buildReviewContext", () => {
 });
 
 describe("loadReviewScope", () => {
-	it("diffs only reviewable paths once and attaches their changed lines", async () => {
+	it("diffs only reviewable paths once and attaches their changed lines and text", async () => {
 		const diffPathCalls: Array<{ paths: readonly string[]; context: number }> =
 			[];
 		const context = createReviewContext(createPullRequest(), {
@@ -153,8 +153,12 @@ describe("loadReviewScope", () => {
 			{ paths: ["src/old.ts", "src/new.ts"], context: 3 },
 		]);
 		assert.deepEqual(
-			scope.reviewableFiles.map((file) => [file.path, file.changedLines]),
-			[["src/new.ts", [1]]],
+			scope.reviewableFiles.map((file) => [
+				file.path,
+				file.changedLines,
+				[...file.changedLineText],
+			]),
+			[["src/new.ts", [1], [[1, "new"]]]],
 		);
 		assert.match(scope.reviewDiff, /^diff --git a\/src\/old\.ts/);
 		assert.equal(scope.reviewRevision, context.reviewRevision);

@@ -39,30 +39,44 @@ describe("review CLI with paginated pull request activities", {
 				"**LOW · CODE_SMELL**",
 				"**Finding from an earlier revision**",
 			].join("\n\n"),
-			{ path: "src/app.js", line: 3 },
+			{ anchor: { path: "src/app.js", line: 3 } },
 		);
 		humanComments = [
-			bitbucket.addComment("Could you add a test for this?"),
-			bitbucket.addComment("Looks reasonable to me."),
-		].map((comment) => ({ ...comment }));
+			bitbucket.addComment("Could you add a test for this?", {
+				author: "alice",
+			}),
+			bitbucket.addComment("Looks reasonable to me.", { author: "bob" }),
+		].map((comment) => structuredClone(comment));
 	});
 
 	after(async () => {
 		await scenario?.close();
 	});
 
-	it("finds earlier review comments on later activity pages and replaces them", async () => {
+	it("finds earlier review comments on later activity pages and retires them", async () => {
 		const { bitbucket, model } = scenario;
+		const staleText = staleFinding.text;
 
 		const output = assertSucceeded(await scenario.review());
 
 		assert.equal(output.publicationStatus, "published");
 		assertNoSecretsSentToModel(model);
-		const [firstHuman, secondHuman, finding, summary, ...extra] = [
-			...bitbucket.comments.values(),
-		];
+		const [
+			retiredFinding,
+			firstHuman,
+			secondHuman,
+			finding,
+			summary,
+			...extra
+		] = [...bitbucket.comments.values()];
 		assert.equal(bitbucket.comments.has(previousSummary.id), false);
-		assert.equal(bitbucket.comments.has(staleFinding.id), false);
+		assert.equal(retiredFinding?.id, staleFinding.id);
+		assert.equal(retiredFinding?.text, staleText);
+		assert.equal(retiredFinding?.threadResolved, true);
+		assert.match(
+			retiredFinding?.comments[0]?.text ?? "",
+			/^This finding no longer applies as of commit `[0-9a-f]{11}`\.$/,
+		);
 		assert.deepEqual([firstHuman, secondHuman], humanComments);
 		assert.deepEqual(finding?.anchor, { path: "src/app.js", line: 2 });
 		assert.ok(summary?.text.includes(SUMMARY_MARKER));

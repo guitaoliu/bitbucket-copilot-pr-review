@@ -175,15 +175,15 @@ function parseDiffHeaderPath(line: string): string | undefined {
 }
 
 /**
- * Maps each head-side path in a unified diff to its added head lines, taken
- * from `+` lines only so context lines never count as changed.
+ * Maps each head-side path in a unified diff to its added head lines and their
+ * text, taken from `+` lines only so context lines never count as changed.
  */
 export function parseChangedLines(
 	diffText: string,
-): ReadonlyMap<string, readonly number[]> {
-	const changedLinesByPath = new Map<string, readonly number[]>();
+): ReadonlyMap<string, ReadonlyMap<number, string>> {
+	const changedLinesByPath = new Map<string, ReadonlyMap<number, string>>();
 	let path: string | undefined;
-	let changedLines: number[] = [];
+	let changedLines = new Map<number, string>();
 	let oldRemaining = 0;
 	let newRemaining = 0;
 	let nextNewLine = 0;
@@ -197,7 +197,7 @@ export function parseChangedLines(
 	for (const line of diffText.split("\n")) {
 		if (oldRemaining > 0 || newRemaining > 0) {
 			if (line.startsWith("+")) {
-				changedLines.push(nextNewLine);
+				changedLines.set(nextNewLine, line.slice(1));
 				nextNewLine += 1;
 				newRemaining -= 1;
 			} else if (line.startsWith("-")) {
@@ -213,7 +213,7 @@ export function parseChangedLines(
 		if (line.startsWith("diff --git ")) {
 			finishFile();
 			path = parseDiffHeaderPath(line);
-			changedLines = [];
+			changedLines = new Map();
 			continue;
 		}
 

@@ -1,55 +1,82 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type {
-	PullRequestComment,
-	PullRequestCommentDraft,
-} from "../bitbucket/types.ts";
+import type { PullRequestComment } from "../bitbucket/types.ts";
 import type { ReviewerConfig } from "../config/types.ts";
 import {
 	baseReviewerConfig,
 	createFakeBitbucketClient,
 	createLoggerSpy,
 	createPullRequest,
+	createPullRequestComment,
 	createReviewArtifacts,
 	createReviewContext,
 	createReviewOutcome,
 } from "../test-support/review-fixtures.ts";
+import type { FindingCommentDraft } from "./comment-sync.ts";
 import { publishReview } from "./publish.ts";
+import type { ReviewBitbucketClient } from "./runner-types.ts";
 
-const summaryComment: PullRequestComment = {
+const summaryComment = createPullRequestComment({
 	id: 1,
 	version: 3,
 	text: "<!-- copilot-pr-review -->\nold summary",
-};
-const findingComment: PullRequestComment = {
+	createdDate: 100,
+});
+const findingComment = createPullRequestComment({
 	id: 2,
 	version: 1,
 	text: "<!-- copilot-pr-review:finding-thread:thread-1 -->\nold finding",
-};
-const findingDraft: PullRequestCommentDraft = {
-	keys: ["thread:thread-1"],
-	text: "finding text",
+	createdDate: 50,
+});
+const findingDraft: FindingCommentDraft = {
+	keys: ["key:finding-1", "thread:thread-1"],
+	text: "<!-- copilot-pr-review:finding-key:finding-1 -->\nfinding text",
 	anchor: { path: "src/example.ts", line: 10 },
 };
 
+function createRecordingComments(
+	calls: string[],
+	overrides: Partial<ReviewBitbucketClient["comments"]> = {},
+): Partial<ReviewBitbucketClient["comments"]> {
+	return {
+		createComment: async (text) => {
+			calls.push(`create ${text.split("\n")[0]}`);
+		},
+		updateComment: async (comment) => {
+			calls.push(`update ${comment.id}`);
+		},
+		deleteComment: async (comment) => {
+			calls.push(`delete ${comment.id}`);
+		},
+		replyToComment: async (comment) => {
+			calls.push(`reply ${comment.id}`);
+		},
+		resolveThread: async (comment) => {
+			calls.push(`resolve ${comment.id}`);
+		},
+		...overrides,
+	};
+}
+
 describe("publishReview", () => {
 	it("blocks publication for an incomplete review without calling Bitbucket", async () => {
-		let bitbucketCalls = 0;
-		const count = async () => {
-			bitbucketCalls += 1;
-		};
+		const calls: string[] = [];
 		const { logger, warnMessages } = createLoggerSpy();
 		const result = await publishReview(
 			createFakeBitbucketClient({
 				pullRequest: {
 					getPullRequest: async () => {
-						bitbucketCalls += 1;
+						calls.push("getPullRequest");
 						return createPullRequest();
 					},
 				},
-				codeInsights: { putReport: count },
-				comments: { upsertComment: count, reconcileKeyedComments: count },
+				codeInsights: {
+					putReport: async () => {
+						calls.push("putReport");
+					},
+				},
+				comments: createRecordingComments(calls),
 			}),
 			baseReviewerConfig,
 			createReviewContext(),
@@ -64,7 +91,7 @@ describe("publishReview", () => {
 			logger,
 		);
 
-		assert.equal(bitbucketCalls, 0);
+		assert.deepEqual(calls, []);
 		assert.deepEqual(result, {
 			status: "failed",
 			completedStages: [],
@@ -122,42 +149,53 @@ describe("publishReview", () => {
 		],
 	] as const) {
 		it(`marks the publication stale without writing when ${label}`, async () => {
-			let writes = 0;
-			const write = async () => {
-				writes += 1;
-			};
+			const calls: string[] = [];
 			const { logger, warnMessages } = createLoggerSpy();
 			const result = await publishReview(
 				createFakeBitbucketClient({
 					pullRequest: { getPullRequest: async () => latest },
-					codeInsights: { putReport: write },
-					comments: { upsertComment: write, reconcileKeyedComments: write },
+					codeInsights: {
+						putReport: async () => {
+							calls.push("putReport");
+						},
+					},
+					comments: createRecordingComments(calls),
 				}),
 				baseReviewerConfig,
 				createReviewContext(),
-				createReviewArtifacts(),
+				createReviewArtifacts(baseReviewerConfig, {
+					findingComments: [findingDraft],
+				}),
 				logger,
 			);
 
 			assert.deepEqual(result, { status: "stale", completedStages: [] });
-			assert.equal(writes, 0);
+			assert.deepEqual(calls, []);
 			assert.match(warnMessages[0] ?? "", expectedWarning);
 		});
 	}
 
-	it("publishes all stages from a single comment listing", async () => {
+	it("publishes all stages from a single listing and touches only the bot's own comments", async () => {
 		const context = createReviewContext();
 		const artifacts = createReviewArtifacts(baseReviewerConfig, {
 			findingComments: [findingDraft],
 		});
 		const calls: string[] = [];
-		let reconciled:
-			| { existing: PullRequestComment[]; drafts: PullRequestCommentDraft[] }
-			| undefined;
-		let reconcileKeys: Array<string | undefined> = [];
-		let upserted: { existing: PullRequestComment[]; text: string } | undefined;
+		const foreignSummary = createPullRequestComment({
+			id: 3,
+			authorName: "alice",
+			text: `Quoting the bot:\n${summaryComment.text}`,
+			createdDate: 200,
+		});
+		const foreignFinding = createPullRequestComment({
+			id: 4,
+			authorName: "alice",
+			text: "<!-- copilot-pr-review:finding-key:finding-1 -->\nquoted",
+			createdDate: 200,
+		});
 		const result = await publishReview(
 			createFakeBitbucketClient({
+				getAuthenticatedUserName: async () => "Review-Bot",
 				codeInsights: {
 					putReport: async (commitId, reportKey, report) => {
 						calls.push("putReport");
@@ -166,27 +204,17 @@ describe("publishReview", () => {
 						assert.equal(report, artifacts.report);
 					},
 				},
-				comments: {
+				comments: createRecordingComments(calls, {
 					listComments: async () => {
 						calls.push("listComments");
-						return [summaryComment, findingComment];
+						return [
+							summaryComment,
+							findingComment,
+							foreignSummary,
+							foreignFinding,
+						];
 					},
-					reconcileKeyedComments: async (existing, drafts, options) => {
-						calls.push("reconcile");
-						reconciled = { existing, drafts };
-						reconcileKeys = existing.map((comment) =>
-							options.keyOf(comment.text),
-						);
-					},
-					upsertComment: async (existing, text, options) => {
-						calls.push("upsert");
-						assert.equal(
-							options.strategy,
-							baseReviewerConfig.report.commentStrategy,
-						);
-						upserted = { existing, text };
-					},
-				},
+				}),
 			}),
 			baseReviewerConfig,
 			context,
@@ -205,22 +233,44 @@ describe("publishReview", () => {
 		assert.deepEqual(calls, [
 			"putReport",
 			"listComments",
-			"reconcile",
-			"upsert",
+			"update 2",
+			"create review comment",
+			"delete 1",
 		]);
-		assert.deepEqual(reconciled, {
-			existing: [summaryComment, findingComment],
-			drafts: [findingDraft],
-		});
-		assert.deepEqual(reconcileKeys, [undefined, "thread:thread-1"]);
-		assert.deepEqual(upserted, {
-			existing: [summaryComment],
-			text: artifacts.commentBody,
+	});
+
+	it("fails closed without touching comments when the bot account cannot be identified", async () => {
+		const calls: string[] = [];
+		const result = await publishReview(
+			createFakeBitbucketClient({
+				getAuthenticatedUserName: async () => {
+					throw new Error("no X-AUSERNAME header");
+				},
+				comments: createRecordingComments(calls, {
+					listComments: async () => {
+						calls.push("listComments");
+						return [summaryComment, findingComment];
+					},
+				}),
+			}),
+			baseReviewerConfig,
+			createReviewContext(),
+			createReviewArtifacts(baseReviewerConfig, {
+				findingComments: [findingDraft],
+			}),
+			createLoggerSpy().logger,
+		);
+
+		assert.deepEqual(calls, []);
+		assert.deepEqual(result, {
+			status: "partial",
+			completedStages: ["code_insights"],
+			error: { stage: "finding_comments", message: "no X-AUSERNAME header" },
 		});
 	});
 
 	it("fails without later stages when the Code Insights publish fails", async () => {
-		let commentCalls = 0;
+		const calls: string[] = [];
 		const { logger, errorMessages } = createLoggerSpy();
 		const result = await publishReview(
 			createFakeBitbucketClient({
@@ -229,12 +279,12 @@ describe("publishReview", () => {
 						throw new Error("report unavailable");
 					},
 				},
-				comments: {
+				comments: createRecordingComments(calls, {
 					listComments: async () => {
-						commentCalls += 1;
+						calls.push("listComments");
 						return [];
 					},
-				},
+				}),
 			}),
 			baseReviewerConfig,
 			createReviewContext(),
@@ -247,30 +297,32 @@ describe("publishReview", () => {
 			completedStages: [],
 			error: { stage: "code_insights", message: "report unavailable" },
 		});
-		assert.equal(commentCalls, 0);
+		assert.deepEqual(calls, []);
 		assert.match(errorMessages[0] ?? "", /failed at stage code_insights/);
 	});
 
-	it("is partial and skips the summary comment when finding comments fail", async () => {
-		let summaryCommentCalled = false;
+	it("is partial and skips the summary comment when creating a finding comment fails", async () => {
+		const calls: string[] = [];
 		const result = await publishReview(
 			createFakeBitbucketClient({
-				comments: {
-					reconcileKeyedComments: async () => {
+				comments: createRecordingComments(calls, {
+					createComment: async (text) => {
+						calls.push(`create ${text.split("\n")[0]}`);
 						throw new Error("finding comment failure");
 					},
-					upsertComment: async () => {
-						summaryCommentCalled = true;
-					},
-				},
+				}),
 			}),
 			baseReviewerConfig,
 			createReviewContext(),
-			createReviewArtifacts(),
+			createReviewArtifacts(baseReviewerConfig, {
+				findingComments: [findingDraft],
+			}),
 			createLoggerSpy().logger,
 		);
 
-		assert.equal(summaryCommentCalled, false);
+		assert.deepEqual(calls, [
+			"create <!-- copilot-pr-review:finding-key:finding-1 -->",
+		]);
 		assert.deepEqual(result, {
 			status: "partial",
 			completedStages: ["code_insights"],
@@ -278,24 +330,18 @@ describe("publishReview", () => {
 		});
 	});
 
-	it("re-reads comments before retrying a failed summary comment update", async () => {
-		const createdSummary: PullRequestComment = {
-			id: 9,
-			version: 0,
-			text: "<!-- copilot-pr-review -->\nnew summary",
-		};
-		const listings = [[summaryComment], [createdSummary, summaryComment]];
-		const upsertExisting: PullRequestComment[][] = [];
+	it("logs failed retirements without failing publication", async () => {
+		const calls: string[] = [];
 		const { logger, warnMessages } = createLoggerSpy();
 		const result = await publishReview(
 			createFakeBitbucketClient({
-				comments: {
-					listComments: async () => listings.shift() ?? [],
-					upsertComment: async (existing) => {
-						upsertExisting.push(existing);
-						throw new Error(`comment failure ${upsertExisting.length}`);
+				comments: createRecordingComments(calls, {
+					listComments: async () => [summaryComment],
+					deleteComment: async (comment) => {
+						calls.push(`delete ${comment.id}`);
+						throw new Error("forbidden");
 					},
-				},
+				}),
 			}),
 			baseReviewerConfig,
 			createReviewContext(),
@@ -303,9 +349,54 @@ describe("publishReview", () => {
 			logger,
 		);
 
-		assert.deepEqual(upsertExisting, [
+		assert.equal(result.status, "published");
+		assert.deepEqual(calls, ["create review comment", "delete 1"]);
+		assert.match(
+			warnMessages.join("\n"),
+			/Failed to delete pull request summary comment 1: forbidden/,
+		);
+	});
+
+	it("re-reads comments before retrying a failed summary comment write", async () => {
+		const listings: PullRequestComment[][] = [
 			[summaryComment],
-			[createdSummary, summaryComment],
+			[
+				createPullRequestComment({
+					id: 9,
+					text: "<!-- copilot-pr-review -->\nconcurrent summary",
+					createdDate: 300,
+				}),
+				summaryComment,
+			],
+		];
+		const calls: string[] = [];
+		const { logger, warnMessages } = createLoggerSpy();
+		const result = await publishReview(
+			createFakeBitbucketClient({
+				comments: createRecordingComments(calls, {
+					listComments: async () => {
+						calls.push("listComments");
+						return listings.shift() ?? [];
+					},
+					createComment: async () => {
+						calls.push("create");
+						throw new Error(
+							`comment failure ${calls.filter((call) => call === "create").length}`,
+						);
+					},
+				}),
+			}),
+			baseReviewerConfig,
+			createReviewContext(),
+			createReviewArtifacts(),
+			logger,
+		);
+
+		assert.deepEqual(calls, [
+			"listComments",
+			"create",
+			"listComments",
+			"create",
 		]);
 		assert.deepEqual(result, {
 			status: "partial",
@@ -313,5 +404,39 @@ describe("publishReview", () => {
 			error: { stage: "pull_request_comment", message: "comment failure 2" },
 		});
 		assert.match(warnMessages[0] ?? "", /re-reading comments and retrying/);
+	});
+
+	it("does not create a second summary when the retry finds the first attempt already landed", async () => {
+		const artifacts = createReviewArtifacts(baseReviewerConfig, {
+			commentBody: "<!-- copilot-pr-review -->\nnew summary",
+		});
+		const landed = createPullRequestComment({
+			id: 9,
+			text: artifacts.commentBody,
+			createdDate: 300,
+		});
+		const listings: PullRequestComment[][] = [
+			[summaryComment],
+			[landed, summaryComment],
+		];
+		const calls: string[] = [];
+		const result = await publishReview(
+			createFakeBitbucketClient({
+				comments: createRecordingComments(calls, {
+					listComments: async () => listings.shift() ?? [],
+					createComment: async () => {
+						calls.push("create");
+						throw new Error("socket hang up");
+					},
+				}),
+			}),
+			baseReviewerConfig,
+			createReviewContext(),
+			artifacts,
+			createLoggerSpy().logger,
+		);
+
+		assert.equal(result.status, "published");
+		assert.deepEqual(calls, ["create", "delete 1"]);
 	});
 });
