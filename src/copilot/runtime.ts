@@ -57,7 +57,6 @@ export function buildCopilotClientOptions(
 				"--no-remote",
 				"--no-remote-export",
 				"--disable-builtin-mcps",
-				"--no-custom-instructions",
 				"--no-auto-update",
 				`--log-dir=${config.copilot.runtimeLogDir ?? path.join(runtimeDirectory, "logs")}`,
 			],

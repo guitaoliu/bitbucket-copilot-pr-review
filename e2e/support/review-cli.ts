@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { type EventEmitter, once } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,8 @@ const fakeModelPreload = fileURLToPath(
 	new URL("./use-fake-model.ts", import.meta.url),
 );
 
+export const USER_INSTRUCTION_MARKER = "user-instructions-marker";
+
 export interface ReviewCliRun {
 	exitCode: number | null;
 	stdout: string;
@@ -20,8 +22,8 @@ export interface ReviewCliRun {
 
 /**
  * Runs the built CLI with a hermetic environment: no inherited Bitbucket,
- * Copilot, or GitHub settings and an empty HOME, so nothing on the developer
- * machine or CI runner influences the review.
+ * Copilot, or GitHub settings, and a fresh HOME whose only content is a
+ * personal Copilot instruction file that must never reach the model.
  */
 export async function runReviewCli(options: {
 	repoRoot: string;
@@ -30,6 +32,11 @@ export async function runReviewCli(options: {
 	args?: string[];
 }): Promise<ReviewCliRun> {
 	const home = mkdtempSync(path.join(tmpdir(), "bcpr-e2e-home-"));
+	mkdirSync(path.join(home, ".copilot"));
+	writeFileSync(
+		path.join(home, ".copilot/copilot-instructions.md"),
+		`${USER_INSTRUCTION_MARKER}\n`,
+	);
 	try {
 		const child = spawn(
 			process.execPath,

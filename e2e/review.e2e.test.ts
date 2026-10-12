@@ -9,6 +9,7 @@ import {
 	findingLocations,
 	serializeMessages,
 } from "./support/assertions.ts";
+import { USER_INSTRUCTION_MARKER } from "./support/review-cli.ts";
 import {
 	type ReviewScenario,
 	startReviewScenario,
@@ -57,7 +58,10 @@ describe("review CLI end to end", { timeout: 180_000 }, () => {
 
 		assert.equal(systemMessages.includes(BASE_GUIDANCE_MARKER), false);
 		assert.ok(toolMessages.includes(BASE_GUIDANCE_MARKER));
-		for (const marker of RUNTIME_INSTRUCTION_MARKERS) {
+		for (const marker of [
+			...RUNTIME_INSTRUCTION_MARKERS,
+			USER_INSTRUCTION_MARKER,
+		]) {
 			assert.equal(allMessages.includes(marker), false, marker);
 		}
 	});

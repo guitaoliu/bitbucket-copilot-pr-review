@@ -141,6 +141,7 @@ function buildSessionConfig(
 			},
 		},
 		workingDirectory: runtimeDirectory,
+		skipCustomInstructions: true,
 		includeSubAgentStreamingEvents: true,
 		infiniteSessions: { enabled: false },
 	};

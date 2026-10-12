@@ -381,7 +381,6 @@ describe("runCopilotReview", () => {
 			require.resolve("@github/copilot/npm-loader.js"),
 		);
 		assert.equal(connection?.args?.includes("--sandbox"), false);
-		assert.ok(connection?.args?.includes("--no-custom-instructions"));
 		assert.equal(clientOptions?.mode, "copilot-cli");
 		assert.equal(outcome.findings.length, 0);
 		assert.equal(
