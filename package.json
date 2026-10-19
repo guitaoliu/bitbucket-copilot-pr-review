@@ -8,7 +8,7 @@
 	},
 	"license": "Apache-2.0",
 	"type": "module",
-	"packageManager": "pnpm@12.11.2",
+	"packageManager": "pnpm@12.14.0",
 	"bin": {
 		"bitbucket-copilot-pr-review": "dist/cli.js"
 	},
@@ -39,17 +39,17 @@
 		"test:e2e": "pnpm build && node --test \"e2e/**/*.e2e.test.ts\""
 	},
 	"dependencies": {
-		"@github/copilot": "1.0.95",
-		"@github/copilot-sdk": "1.0.19",
+		"@github/copilot": "1.0.98",
+		"@github/copilot-sdk": "1.0.22",
 		"pino": "10.4.0",
 		"pino-pretty": "13.2.0",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.15",
-		"@types/node": "24.19.1",
+		"@types/node": "24.19.2",
 		"knip": "6.41.0",
-		"tsdown": "0.23.0",
+		"tsdown": "0.23.1",
 		"typescript": "7.0.2"
 	}
 }
